@@ -99,53 +99,62 @@ class CaseManager:
             notes=f"Uploaded document '{clean_name}' (SHA256: {digest[:8]}...)",
         )
 
-        # Parse document
-        parser = get_parser(src_type)
-        parse_result = parser.parse(content, clean_name)
+        try:
+            # Parse document
+            parser = get_parser(src_type)
+            parse_result = parser.parse(content, clean_name)
 
-        # Match lines against catalog
-        lines: List[RFQLineItem] = []
-        for draft in parse_result.lines:
-            line_id = f"line-{uuid.uuid4().hex[:8]}"
-            match_res = self.matcher.match_line(draft.requested_mpn, draft.requested_manufacturer)
+            # Match lines against catalog
+            lines: List[RFQLineItem] = []
+            for draft in parse_result.lines:
+                line_id = f"line-{uuid.uuid4().hex[:8]}"
+                match_res = self.matcher.match_line(draft.requested_mpn, draft.requested_manufacturer)
 
-            extract_status = (
-                ExtractionStatus.NEEDS_CORRECTION
-                if draft.extraction_warnings or draft.quantity is None
-                else ExtractionStatus.EXTRACTED
-            )
+                extract_status = (
+                    ExtractionStatus.NEEDS_CORRECTION
+                    if draft.extraction_warnings or draft.quantity is None
+                    else ExtractionStatus.EXTRACTED
+                )
 
-            line_item = RFQLineItem(
-                line_id=line_id,
+                line_item = RFQLineItem(
+                    line_id=line_id,
+                    case_id=case_id,
+                    line_number=draft.line_number,
+                    raw_text=draft.raw_text,
+                    source_locator=draft.source_locator,
+                    requested_manufacturer=draft.requested_manufacturer,
+                    requested_mpn=draft.requested_mpn,
+                    description=draft.description,
+                    quantity=draft.quantity,
+                    unit=draft.unit,
+                    notes=draft.notes,
+                    extraction_status=extract_status,
+                    extraction_warnings=draft.extraction_warnings,
+                    match_status=match_res.match_status,
+                    selected_catalog_sku=match_res.selected_sku,
+                    candidates=match_res.candidates,
+                    review_decision=ReviewDecision.PENDING,
+                )
+                lines.append(line_item)
+
+            self._lines_by_case[case_id] = lines
+            self._record_audit(
                 case_id=case_id,
-                line_number=draft.line_number,
-                raw_text=draft.raw_text,
-                source_locator=draft.source_locator,
-                requested_manufacturer=draft.requested_manufacturer,
-                requested_mpn=draft.requested_mpn,
-                description=draft.description,
-                quantity=draft.quantity,
-                unit=draft.unit,
-                notes=draft.notes,
-                extraction_status=extract_status,
-                extraction_warnings=draft.extraction_warnings,
-                match_status=match_res.match_status,
-                selected_catalog_sku=match_res.selected_sku,
-                candidates=match_res.candidates,
-                review_decision=ReviewDecision.PENDING,
+                actor=actor,
+                action=AuditAction.PARSED,
+                notes=f"Extracted {len(lines)} line items with {len(parse_result.warnings)} document-level warnings.",
             )
-            lines.append(line_item)
 
-        self._lines_by_case[case_id] = lines
-        self._record_audit(
-            case_id=case_id,
-            actor=actor,
-            action=AuditAction.PARSED,
-            notes=f"Extracted {len(lines)} line items with {len(parse_result.warnings)} document-level warnings.",
-        )
+            self._refresh_case_metrics(case_id)
+            return self._cases[case_id]
+        except Exception:
+            # Rollback: Clean up stored files and remove partial case record
+            self.storage.delete_case(case_id)
+            self._cases.pop(case_id, None)
+            self._lines_by_case.pop(case_id, None)
+            self._audit_events.pop(case_id, None)
+            raise
 
-        self._refresh_case_metrics(case_id)
-        return self._cases[case_id]
 
     def create_case_from_text(
         self,

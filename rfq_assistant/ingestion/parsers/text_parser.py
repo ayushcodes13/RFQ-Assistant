@@ -41,23 +41,35 @@ class TextParser(BaseDocumentParser):
             if not clean or len(clean) < 4:
                 continue
 
-            # Ignore conversational email headers/salutations/closings
-            if re.match(
-                r"^(?:from:|to:|subject:|date:|hi|hello|dear|thanks|best regards|sincerely|please|urgent|confidential|synthetic notice)",
+            # Strip common email inquiry prefixes like 'Please quote:' or 'Urgent:'
+            stripped = re.sub(
+                r"^(?:please\s+(?:quote|quote\s+for|provide\s+pricing\s+for|quote\s+us\s+on)?\s*:?|urgent\s*[:-]?\s*)",
+                "",
                 clean,
-                re.IGNORECASE,
-            ):
-                continue
+                flags=re.IGNORECASE,
+            ).strip()
+            if stripped:
+                clean = stripped
 
-            # Check if this line is a bullet/numbered item or contains part/quantity clues
-            is_item = bool(
+            # Check if this line contains component, quantity, or item clues
+            has_item_indicator = bool(
                 re.match(r"^(?:\d+[\.\)]|\-|\*|\•)\s*", clean)
                 or re.search(r"\b(?:\d+\s*(?:pcs|units?|ea|x)\b)", clean, re.IGNORECASE)
                 or any(oem.lower() in clean.lower() for oem in KNOWN_OEMS)
+                or re.search(r"\b[A-Z0-9]{3,}[-_][A-Z0-9]+\b", clean)
+                or re.search(r"sensor from last time|same as previous|the one from last|custom bracket", clean, re.IGNORECASE)
             )
 
-            if not is_item:
+            if not has_item_indicator:
+                # Discard conversational email headers/salutations/closings without items
+                if re.match(
+                    r"^(?:from:|to:|subject:|date:|hi\b|hello\b|dear\b|thanks\b|best regards\b|sincerely\b|confidential\b|synthetic notice\b|please\b|urgent\b)",
+                    clean,
+                    re.IGNORECASE,
+                ):
+                    continue
                 continue
+
 
             # Check for vague item reference (Scenario 2: "the sensor from last time")
             if re.search(r"sensor from last time|same as previous|the one from last|custom bracket", clean, re.IGNORECASE):

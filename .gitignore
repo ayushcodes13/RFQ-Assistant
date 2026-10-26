@@ -12,6 +12,7 @@
 /exports/
 /prospects/
 /storage/
+/quarantine/
 *.sqlite
 *.db
 
