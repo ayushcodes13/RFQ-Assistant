@@ -37,8 +37,9 @@ RFQ processing systems process untrusted documents sent over public email channe
 ### 2.5 In-Flight Modification & Stale Approvals
 - **Threat:** An operator approves quote revision v1, but subsequent line item or price modifications result in sending unapproved revision v2.
 - **Mitigation:**
-  - **Version-Bound Hash Binding:** Approvals are cryptographically tied to `draft_hash = SHA256(lines, prices, quantities, currency)`.
-  - Mutating any field immediately invalidates prior approval; `send` is blocked until re-approved.
+  - **Version-Bound Hash Binding:** The draft digest includes the current RFQ/catalog source fingerprint and commercial fields. API approval and simulated send recheck the live RFQ and catalog against the saved snapshot.
+  - Any change to RFQ lines, reviewer decisions, or the prototype-wide catalog after drafting blocks approval/send with a conflict until re-drafting; registering a replacement draft also clears the previous approval.
+  - These checks are local, in-memory prototype safeguards, **not** a persistent atomic transaction or multi-tenant authorization system. Catalog-wide invalidation may require unnecessary reapproval and should eventually become per-workspace/version scoped.
 
 ### 2.6 Privacy (UK GDPR) & Export Controls (ITAR / EAR)
 - **Data Minimisation:** Full historical email threads are not stored permanently; only commercial lines and provenance snippets are retained.
