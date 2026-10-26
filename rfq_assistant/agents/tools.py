@@ -39,6 +39,13 @@ class QuotationCommercialService:
         """Registers a draft and computes its version hash."""
         draft.draft_hash = draft.compute_draft_hash()
         draft.validation_errors = validate_proposed_quote(draft)
+        # Re-drafting must never carry an approval or simulated transmission
+        # from an earlier quote revision with the same identifier.
+        draft.is_approved = False
+        draft.approved_by = None
+        draft.approved_at = None
+        self._approvals.pop(draft.quote_id, None)
+        self._sent_quotes.pop(draft.quote_id, None)
         self._drafts[draft.quote_id] = draft
         return draft
 
