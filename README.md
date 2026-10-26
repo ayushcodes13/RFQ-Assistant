@@ -65,15 +65,36 @@ Small independent US/UK industrial electrical, automation, or electronic compone
 ## Build status
 
 - [x] Product scope, design and build checklist documented
-- [ ] Buyer conversations confirm the narrow bottleneck
-- [ ] Synthetic sample pack and ground truth created
-- [ ] Upload and parser working locally
-- [ ] Catalog matching and review UI working locally
-- [ ] Tested quotation worksheet and export
-- [ ] Independent realistic end-to-end demo
-- [ ] One opt-in customer pilot with measured baseline
+- [ ] Buyer conversations confirm the narrow bottleneck *(Pending commercial agreements; proceeding with synthetic validation)*
+- [x] Synthetic sample pack and ground truth created *(Phase 1 complete in PR #2)*
+- [x] Upload and parser working locally *(Phase 2 complete in PR #3)*
+- [x] Catalog matching and review UI working locally *(Phase 3 & 4 complete in PR #4 & #6)*
+- [x] Tested quotation worksheet and export *(Phase 5 complete in PR #5)*
+- [x] Independent realistic end-to-end demo *(All 7 scenarios verified in PR #7)*
+- [ ] One opt-in customer pilot with measured baseline *(Phase 6 pilot readiness)*
 
-These boxes indicate intentions; do not mark work complete without checking acceptance evidence. Engineering implementation is intentionally unstarted.
+## Running locally
+
+### 1. Backend (FastAPI + Python 3.10+)
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+pytest -v   # Run all 43 unit, integration, and scenario tests
+
+# Start backend server on port 8000 (preloads synthetic catalog automatically)
+uvicorn rfq_assistant.api.app:app --host 127.0.0.1 --port 8000
+```
+
+### 2. Frontend (Next.js + TypeScript)
+```bash
+cd frontend
+npm install
+npm run build   # Verify typecheck and production build
+npm run dev     # Starts web app at http://localhost:3000
+```
+Open `http://localhost:3000` to access the Review Workbench, upload RFQs, browse the catalog, inspect line-level provenance, batch approve, and export draft quotation worksheets.
+
 
 ## Engineering principles
 

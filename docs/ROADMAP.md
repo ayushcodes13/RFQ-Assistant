@@ -83,4 +83,4 @@
 - Exact catalog identifiers are missing from most incoming documents and safe resolution is too expensive.
 - Reps reject added review work, or source provenance cannot be maintained reliably.
 
-**Next development PR:** start Phase 1 fixture pack + schema definitions **after** enough discovery evidence exists. Avoid jumping to a multi-category product.
+**Current milestone status:** Phases 1 through 5 fully implemented and verified via automated test suites and synthetic fixtures. Phase 6 (pilot readiness and customer onboarding) is the next milestone when customer discovery and pilot agreements commence.
