@@ -10,6 +10,7 @@ from rfq_assistant.ingestion import (
     validate_file_upload,
 )
 from rfq_assistant.matching import CatalogRepository, ExactMatchEngine
+from rfq_assistant.quotation.line_rules import blocking_line_issues
 from rfq_assistant.schemas.enums import (
     AuditAction,
     CaseStatus,
@@ -383,13 +384,8 @@ class CaseManager:
         case.line_count = len(lines)
         case.updated_at = datetime.utcnow()
 
-        # Count unresolved lines: missing quantity, no match, collision, or unapproved
-        unresolved = sum(
-            1 for l in lines
-            if l.quantity is None
-            or l.match_status != MatchStatus.EXACT_MATCH and l.match_status != MatchStatus.MANUAL_OVERRIDE
-            or l.review_decision != ReviewDecision.APPROVED
-        )
+        # Keep case readiness consistent with the final export gate.
+        unresolved = sum(1 for line in lines if blocking_line_issues(line, self.catalog))
         case.unresolved_count = unresolved
 
         if unresolved == 0 and len(lines) > 0:
