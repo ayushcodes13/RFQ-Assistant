@@ -21,9 +21,55 @@ from rfq_assistant.schemas.enums import ReviewDecision
 from rfq_assistant.schemas.models import ExportRequest, RFQLineItemUpdate
 
 
+@pytest.fixture(autouse=True)
+def configure_synthetic_test_credentials(monkeypatch):
+    """Tests must explicitly supply credentials; production has no built-in keys."""
+    monkeypatch.setenv(
+        "PILOT_API_KEYS",
+        "test-admin-secret-000000001:admin:Authorized Administrator,"
+        "test-reviewer-secret-00000001:reviewer:Authorized Reviewer,"
+        "test-viewer-secret-000000001:viewer:Read-Only Auditor",
+    )
+
+
 @pytest.fixture
 def client():
     return TestClient(app)
+
+
+
+def test_authenticated_mode_without_credentials_fails_closed(client, monkeypatch):
+    """A bare REQUIRE_AUTH=true deployment must never accept predictable test credentials."""
+    monkeypatch.setenv("REQUIRE_AUTH", "true")
+    monkeypatch.delenv("PILOT_API_KEYS", raising=False)
+
+    for headers in ({}, {"X-API-Key": "pilot-admin-key"}, {"X-API-Key": "pilot-reviewer-key"}):
+        result = client.get("/api/rfqs", headers=headers)
+        assert result.status_code == 503
+        assert "not configured" in result.json()["detail"]
+
+
+@pytest.mark.parametrize("bad_config", [
+    "short:admin:Administrator",
+    "long-test-secret-00001:owner:Administrator",
+    "long-test-secret-00001:admin:",
+    "broken-entry",
+    "long-test-secret-00001:admin:Admin,long-test-secret-00001:viewer:Viewer",
+])
+def test_invalid_credential_configuration_is_rejected(client, monkeypatch, bad_config):
+    """Malformed or weak credentials never cause a known-key fallback or partial acceptance."""
+    monkeypatch.setenv("REQUIRE_AUTH", "true")
+    monkeypatch.setenv("PILOT_API_KEYS", bad_config)
+    result = client.get("/api/rfqs")
+    assert result.status_code == 503
+    assert "configuration is invalid" in result.json()["detail"]
+
+
+def test_development_without_auth_retains_anonymous_local_mode(client, monkeypatch):
+    """Synthetic local mode works with no credentials, but only when auth is disabled."""
+    monkeypatch.delenv("REQUIRE_AUTH", raising=False)
+    monkeypatch.delenv("PILOT_API_KEYS", raising=False)
+    assert client.get("/api/rfqs").status_code == 200
 
 
 def test_auth_enforced_blocks_unauthenticated_requests(client, monkeypatch):
@@ -46,11 +92,11 @@ def test_role_based_access_control(client, monkeypatch):
     monkeypatch.setenv("REQUIRE_AUTH", "true")
 
     # Viewer role key
-    viewer_headers = {"X-API-Key": "pilot-viewer-key"}
+    viewer_headers = {"X-API-Key": "test-viewer-secret-000000001"}
     # Reviewer role key
-    reviewer_headers = {"X-API-Key": "pilot-reviewer-key"}
+    reviewer_headers = {"X-API-Key": "test-reviewer-secret-00000001"}
     # Admin role key
-    admin_headers = {"X-API-Key": "pilot-admin-key"}
+    admin_headers = {"X-API-Key": "test-admin-secret-000000001"}
 
     # Create a test case as admin
     case = case_manager.create_case_from_text(
@@ -84,7 +130,7 @@ def test_role_based_access_control(client, monkeypatch):
 def test_authenticated_actor_cannot_be_spoofed(client, monkeypatch):
     """Client-supplied actor string is ignored in favor of authenticated principal."""
     monkeypatch.setenv("REQUIRE_AUTH", "true")
-    headers = {"X-API-Key": "pilot-reviewer-key"}  # Authorized Reviewer
+    headers = {"X-API-Key": "test-reviewer-secret-00000001"}  # Authorized Reviewer
 
     case = case_manager.create_case_from_text(
         raw_text="5 pcs 6ES7214-1AG40-0XB0 Siemens",
