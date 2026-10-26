@@ -56,14 +56,14 @@
 
 ## Phase 5 — Exports and local end-to-end
 
-- [ ] Generate deterministic CSV/XLSX quote-preparation export with known schema.
-- [ ] Clearly distinguish draft from approved output.
-- [ ] Draft email with unresolved questions, but no send action.
-- [ ] Confirm malformed/unresolved rows are blocked or explicitly excluded.
-- [ ] Run end-to-end tests upload -> inspect -> edit -> approve -> export.
-- [ ] Run adversarial PDF/CSV/injection tests and document limitations.
+- [x] Generate deterministic CSV/XLSX quote-preparation export with known schema. *(Implemented in rfq_assistant/exports/generator.py)*
+- [x] Clearly distinguish draft from approved output. *(Prominent DRAFT banner in worksheets and emails)*
+- [x] Draft email with unresolved questions, but no send action. *(Implemented in rfq_assistant/exports/email_draft.py)*
+- [x] Confirm malformed/unresolved rows are blocked or explicitly excluded. *(ExportValidationError stops unapproved exports unless allow_partial is set)*
+- [x] Run end-to-end tests upload -> inspect -> edit -> approve -> export. *(Tested in tests/test_exports.py)*
+- [x] Run adversarial PDF/CSV/injection tests and document limitations. *(Tested corrupt PDF, macro rejection, prompt injection)*
 
-**Exit:** Full workflow operates on synthetic sample RFQs without unsafe claims.
+**Exit:** Full workflow operates on synthetic sample RFQs without unsafe claims. (Verified via pytest suite in tests/test_exports.py)
 
 ## Phase 6 — Pilot readiness (not required for initial demo)
 
