@@ -24,7 +24,7 @@ Maintain a synthetic annotated corpus covering:
 2. System never fabricates a catalog SKU/price/stock/lead time.
 3. Cross-manufacturer IDs never auto-approve because of a matching part number alone.
 4. Changes made by a human persist through reprocessing.
-5. Unresolved required attributes are visible and block a final-ready export unless explicitly excluded.
+5. Unresolved required attributes, nonpositive/nonfinite quantities, unknown selected SKUs and high-severity extraction contradictions block a full validated export, **even if the line is marked approved**. Such rows may appear only in prominently labeled partial drafts.
 6. Broken files or model errors cannot produce a silent "all clear".
 7. No outbound email or order submission exists in v0.
 8. No sensitive data appears in test fixtures, telemetry or CI logs.

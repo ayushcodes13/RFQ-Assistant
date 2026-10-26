@@ -71,7 +71,7 @@ class TestExportEngine:
         assert "DRAFT QUOTATION WORKSHEET" in csv_text
         assert "line_number,review_status,requested_oem" in csv_text
 
-    def test_approved_full_export(self, test_case_and_lines):
+    def test_manual_override_with_oem_contradiction_remains_blocked(self, test_case_and_lines):
         case, lines = test_case_and_lines
 
         # Fix line 18 quantity, assign manual SKU for unmatched line 19, and approve all 20 lines
@@ -90,10 +90,14 @@ class TestExportEngine:
 
         updated_lines = case_manager.get_lines(case.case_id)
         req = ExportRequest(case_id=case.case_id, allow_partial=False, format="xlsx")
-        manifest = export_generator.generate_export(case, updated_lines, req)
+        with pytest.raises(ExportValidationError, match="CONTRADICTION"):
+            export_generator.generate_export(case, updated_lines, req)
 
+        partial = ExportRequest(case_id=case.case_id, allow_partial=True, format="xlsx")
+        manifest = export_generator.generate_export(case, updated_lines, partial)
         assert manifest.approved_lines == 20
-        assert manifest.unresolved_lines_omitted == 0
+        assert manifest.unresolved_lines_omitted >= 1
+        assert manifest.is_draft
 
     def test_unsent_email_draft_clarifications(self, test_case_and_lines):
         case, lines = test_case_and_lines
