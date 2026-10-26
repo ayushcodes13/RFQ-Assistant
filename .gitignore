@@ -6,13 +6,15 @@
 *.key
 
 # User/customer data; fixtures must be synthetic and reviewed
-private/
-data/
-uploads/
-exports/
-prospects/
+/private/
+/data/
+/uploads/
+/exports/
+/prospects/
+/storage/
 *.sqlite
 *.db
+
 
 # Python
 __pycache__/
