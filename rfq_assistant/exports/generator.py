@@ -12,6 +12,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from rfq_assistant.exports.email_draft import generate_unsent_email_draft
 from rfq_assistant.matching.catalog import CatalogRepository
+from rfq_assistant.quotation.line_rules import blocking_line_issues
 from rfq_assistant.schemas.enums import MatchStatus, ReviewDecision
 from rfq_assistant.schemas.models import (
     ExportManifest,
@@ -41,26 +42,14 @@ class ExportGenerator:
         Validates case lines and outputs a deterministic quotation worksheet.
         Blocks final export if unresolved items exist unless allow_partial is True.
         """
-        unresolved_lines = [
-            l for l in lines
-            if l.quantity is None
-            or l.match_status != MatchStatus.EXACT_MATCH and l.match_status != MatchStatus.MANUAL_OVERRIDE
-            or l.review_decision != ReviewDecision.APPROVED
-        ]
+        line_problems = [(line, blocking_line_issues(line, self.catalog)) for line in lines]
+        unresolved_lines = [line for line, problems in line_problems if problems]
 
         if unresolved_lines and not request.allow_partial:
-            reasons = []
-            for l in unresolved_lines:
-                issue = []
-                if l.quantity is None:
-                    issue.append("missing quantity")
-                if l.match_status == MatchStatus.COLLISION:
-                    issue.append("brand collision")
-                elif l.match_status == MatchStatus.NO_MATCH:
-                    issue.append("unmatched part")
-                if l.review_decision != ReviewDecision.APPROVED:
-                    issue.append(f"decision is {l.review_decision.value}")
-                reasons.append(f"Line {l.line_number} ({', '.join(issue)})")
+            reasons = [
+                f"Line {line.line_number} ({', '.join(problems)})"
+                for line, problems in line_problems if problems
+            ]
 
             raise ExportValidationError(
                 f"Export blocked: {len(unresolved_lines)} line(s) require review before final export: "
