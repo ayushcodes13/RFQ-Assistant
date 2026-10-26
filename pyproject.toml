@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rfq-assistant"
+version = "0.1.0"
+description = "Human-reviewed RFQ intake and quotation preparation assistant for industrial component distributors"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "pydantic>=2.8.0",
+    "openpyxl>=3.1.5",
+    "pypdf>=5.0.0",
+    "python-multipart>=0.0.12",
+    "httpx>=0.27.0",
+    "fpdf2>=2.8.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rfq_assistant*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"

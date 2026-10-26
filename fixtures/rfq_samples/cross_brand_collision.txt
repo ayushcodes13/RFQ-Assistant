@@ -1,0 +1,10 @@
+SYNTHETIC TEST FIXTURE — BRAND COLLISION
+Customer: Apex Maintenance Services
+RFQ Ref: AMS-2026-9041
+
+Please provide unit price and stock for:
+- 10 EA part number XG-42 (Manufacturer not specified)
+- 4 EA part number ABC-12 from Acme Industrial
+- 2 EA part number ABC-12-R2 from Acme Industrial
+
+SYNTHETIC NOTICE: XG-42 exists under both Apex Automation and Delta Electronics in catalog.

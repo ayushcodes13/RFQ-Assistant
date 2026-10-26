@@ -41,3 +41,15 @@ Do not silently revise architecture or customer claims. Add dated entries when r
 ## Change management
 
 New major scope decisions require a short ADR-like section: date, observation/source, options, chosen trade-off, test, rollback/pivot criterion. Keep opposing evidence visible rather than deleting it.
+
+## 2026-10-27 — ADR 001: Component Category & Synthetic Benchmark Selection
+
+**Observation:** Direct customer discovery interviews are blocked pending live distributor access. Live prospect outreach cannot be conducted without external commercial agreements.
+
+**Decision:**
+1. Document the customer discovery blocker.
+2. Select **Industrial Automation & Control** (Schneider Electric, Siemens, Omron, Eaton, Phoenix Contact) as the initial benchmark component family.
+3. Establish a standard quotation-preparation CSV/XLSX export format with clear draft markings and blank pricing unless supplied.
+4. Proceed through engineering checkpoints using a comprehensive, strictly labeled synthetic fixture suite and ground-truth annotations covering 20-line BOMs, multi-sheet workbooks, messy email text, cross-brand collisions, and security/adversarial edge cases.
+
+**Rollback/Pivot Criteria:** If eventual customer interviews reveal that another component vertical (e.g. pneumatic fittings or fasteners) dominates manual RFQ volume, substitute the catalog and fixture pack without modifying the core deterministic extraction and matching engine.

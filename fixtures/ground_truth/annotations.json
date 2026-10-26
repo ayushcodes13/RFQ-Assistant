@@ -1,0 +1,233 @@
+{
+  "description": "Ground truth annotations for synthetic RFQ Assistant test fixtures. Marked SYNTHETIC.",
+  "fixtures": {
+    "industrial_control_bom_20lines.xlsx": {
+      "file_type": "XLSX",
+      "expected_line_count": 20,
+      "lines": [
+        {
+          "line_number": 1,
+          "oem": "Schneider Electric",
+          "mpn": "LC1D09BD",
+          "qty": 10,
+          "uom": "EA",
+          "matched_sku": "SKU-SCH-001",
+          "expected_match_status": "EXACT_MATCH"
+        },
+        {
+          "line_number": 2,
+          "oem": "Schneider Electric",
+          "mpn": "LC1D25BD",
+          "qty": 4,
+          "uom": "EA",
+          "matched_sku": "SKU-SCH-002",
+          "expected_match_status": "EXACT_MATCH"
+        },
+        {
+          "line_number": 3,
+          "oem": "Schneider Electric",
+          "mpn": "XB4BA31",
+          "qty": 25,
+          "uom": "EA",
+          "matched_sku": "SKU-SCH-003",
+          "expected_match_status": "EXACT_MATCH"
+        },
+        {
+          "line_number": 4,
+          "oem": "Schneider Electric",
+          "mpn": "XB4BV63",
+          "qty": 15,
+          "uom": "EA",
+          "matched_sku": "SKU-SCH-004",
+          "expected_match_status": "EXACT_MATCH"
+        },
+        {
+          "line_number": 5,
+          "oem": "Schneider Electric",
+          "mpn": "GV2ME10",
+          "qty": 6,
+          "uom": "EA",
+          "matched_sku": "SKU-SCH-005",
+          "expected_match_status": "EXACT_MATCH"
+        },
+        {
+          "line_number": 6,
+          "oem": "Siemens",
+          "mpn": "6ES7214-1AG40-0XB0",
+          "qty": 2,
+          "uom": "EA",
+          "matched_sku": "SKU-SIE-001",
+          "expected_match_status": "EXACT_MATCH"
+        },
+        {
+          "line_number": 7,
+          "oem": "Siemens",
+          "mpn": "6ES7223-1BL32-0XB0",
+          "qty": 4,
+          "uom": "EA",
+          "matched_sku": "SKU-SIE-002",
+          "expected_match_status": "EXACT_MATCH"
+        },
+        {
+          "line_number": 8,
+          "oem": "Siemens",
+          "mpn": "3RT2015-1BB41",
+          "qty": 12,
+          "uom": "EA",
+          "matched_sku": "SKU-SIE-003",
+          "expected_match_status": "EXACT_MATCH"
+        },
+        {
+          "line_number": 9,
+          "oem": "Siemens",
+          "mpn": "3RV2011-1AA10",
+          "qty": 8,
+          "uom": "EA",
+          "matched_sku": "SKU-SIE-004",
+          "expected_match_status": "EXACT_MATCH"
+        },
+        {
+          "line_number": 10,
+          "oem": "Omron",
+          "mpn": "E2E-X7D1-N",
+          "qty": 20,
+          "uom": "EA",
+          "matched_sku": "SKU-OMR-001",
+          "expected_match_status": "EXACT_MATCH"
+        },
+        {
+          "line_number": 11,
+          "oem": "Omron",
+          "mpn": "MY4N-D2-DC24",
+          "qty": 50,
+          "uom": "EA",
+          "matched_sku": "SKU-OMR-002",
+          "expected_match_status": "EXACT_MATCH"
+        },
+        {
+          "line_number": 12,
+          "oem": "Omron",
+          "mpn": "H3CR-A8",
+          "qty": 5,
+          "uom": "EA",
+          "matched_sku": "SKU-OMR-003",
+          "expected_match_status": "EXACT_MATCH"
+        },
+        {
+          "line_number": 13,
+          "oem": "Omron",
+          "mpn": "S8VK-G24024",
+          "qty": 3,
+          "uom": "EA",
+          "matched_sku": "SKU-OMR-004",
+          "expected_match_status": "EXACT_MATCH"
+        },
+        {
+          "line_number": 14,
+          "oem": "Eaton",
+          "mpn": "FAZ-C10/1",
+          "qty": 30,
+          "uom": "EA",
+          "matched_sku": "SKU-EAT-001",
+          "expected_match_status": "EXACT_MATCH"
+        },
+        {
+          "line_number": 15,
+          "oem": "Eaton",
+          "mpn": "FAZ-C16/2",
+          "qty": 15,
+          "uom": "EA",
+          "matched_sku": "SKU-EAT-002",
+          "expected_match_status": "EXACT_MATCH"
+        },
+        {
+          "line_number": 16,
+          "oem": "Eaton",
+          "mpn": "DILM9-10(24VDC)",
+          "qty": 6,
+          "uom": "EA",
+          "matched_sku": "SKU-EAT-003",
+          "expected_match_status": "EXACT_MATCH"
+        },
+        {
+          "line_number": 17,
+          "oem": "Phoenix Contact",
+          "mpn": "2900364",
+          "qty": 40,
+          "uom": "EA",
+          "matched_sku": "SKU-PHX-001",
+          "expected_match_status": "EXACT_MATCH"
+        },
+        {
+          "line_number": 18,
+          "oem": "Phoenix Contact",
+          "mpn": "UT 2.5",
+          "qty": null,
+          "uom": "EA",
+          "matched_sku": "SKU-PHX-003",
+          "expected_match_status": "EXACT_MATCH",
+          "expected_warning": "MISSING_QUANTITY"
+        },
+        {
+          "line_number": 19,
+          "oem": "Unknown Mfr",
+          "mpn": "NONEXISTENT-PART-999",
+          "qty": 2,
+          "uom": "EA",
+          "matched_sku": null,
+          "expected_match_status": "NO_MATCH"
+        },
+        {
+          "line_number": 20,
+          "oem": "Acme Industrial",
+          "mpn": "ABC-12A",
+          "qty": 5,
+          "uom": "EA",
+          "matched_sku": "SKU-SUF-002",
+          "expected_match_status": "EXACT_MATCH"
+        }
+      ]
+    },
+    "cross_brand_collision.txt": {
+      "file_type": "TEXT",
+      "notes": "Tests detection of MPN XG-42 which is supplied by both Apex Automation and Delta Electronics",
+      "expected_collision_mpns": [
+        "XG-42"
+      ]
+    },
+    "messy_email_quote_request.txt": {
+      "file_type": "TEXT",
+      "expected_items": [
+        {
+          "mpn": "LC1D09BD",
+          "oem": "Schneider Electric",
+          "qty": 10
+        },
+        {
+          "mpn": "6ES7223-1BL32-0XB0",
+          "oem": "Siemens",
+          "qty": 4
+        },
+        {
+          "mpn": "XB4BA31",
+          "oem": "Schneider",
+          "qty": 25
+        },
+        {
+          "mpn": "MY4N-D2-DC24",
+          "oem": "Omron",
+          "qty": 5
+        },
+        {
+          "raw_desc": "sensor from last time",
+          "expected_warning": "UNKNOWN_PART_REFERENCE"
+        },
+        {
+          "mpn": "FAZ-C10/1",
+          "oem": "Eaton",
+          "qty": 12
+        }
+      ]
+    }
+  }
+}
