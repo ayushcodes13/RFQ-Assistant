@@ -71,12 +71,21 @@ class TestAllProductScenarios:
                 )
 
         updated_case = case_manager.get_case(case.case_id)
-        assert updated_case.status == CaseStatus.READY_TO_EXPORT
+        # Unknown Mfr's non-catalog bracket was manually assigned a Schneider SKU.
+        # Approval alone must not suppress that unresolved manufacturer contradiction.
+        assert updated_case.status == CaseStatus.NEEDS_REVIEW
+        assert any(w.code == "CONTRADICTION" for w in line19.extraction_warnings)
 
-        # Export completed worksheet
+        # Full validated export remains blocked even after the row was approved.
         req = ExportRequest(case_id=case.case_id, allow_partial=False, format="xlsx")
-        manifest = export_generator.generate_export(updated_case, case_manager.get_lines(case.case_id), req)
+        with pytest.raises(ExportValidationError, match="CONTRADICTION"):
+            export_generator.generate_export(updated_case, case_manager.get_lines(case.case_id), req)
+
+        # A prominently labeled partial draft remains available for review.
+        partial = ExportRequest(case_id=case.case_id, allow_partial=True, format="xlsx")
+        manifest = export_generator.generate_export(updated_case, case_manager.get_lines(case.case_id), partial)
         assert manifest.approved_lines == 20
+        assert manifest.unresolved_lines_omitted >= 1
         assert manifest.is_draft is True
 
     def test_scenario_2_messy_email_with_vague_item(self):
