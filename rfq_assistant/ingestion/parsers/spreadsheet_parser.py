@@ -84,6 +84,9 @@ class SpreadsheetParser(BaseDocumentParser):
         reader = csv.reader(io.StringIO(text))
         rows = list(reader)
 
+        if len(rows) > 5000:
+            raise DocumentParserError(f"CSV row count ({len(rows)}) exceeds maximum permitted limit (5000 rows).")
+
         if not rows:
             return ParsedDocumentResult(lines=[], warnings=[
                 ExtractionWarning(code="EMPTY_CSV", message="CSV file contains no rows.")
@@ -163,12 +166,20 @@ class SpreadsheetParser(BaseDocumentParser):
 
     def _parse_xlsx(self, content: bytes, filename: str) -> ParsedDocumentResult:
         wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+        if len(wb.sheetnames) > 20:
+            raise DocumentParserError(f"Spreadsheet sheet count ({len(wb.sheetnames)}) exceeds maximum permitted limit (20 sheets).")
+
         lines: List[ParsedLineDraft] = []
         warnings: List[ExtractionWarning] = []
         line_counter = 1
 
         for sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
+            if ws.max_row and ws.max_row > 5000:
+                raise DocumentParserError(f"Spreadsheet sheet '{sheet_name}' row count ({ws.max_row}) exceeds limit (5000 rows).")
+            if ws.max_column and ws.max_column > 100:
+                raise DocumentParserError(f"Spreadsheet sheet '{sheet_name}' column count ({ws.max_column}) exceeds limit (100 columns).")
+
             all_rows = list(ws.iter_rows(values_only=True))
             if not all_rows:
                 continue

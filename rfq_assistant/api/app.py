@@ -10,6 +10,7 @@ from rfq_assistant.cases.manager import CaseManager
 from rfq_assistant.exports import ExportGenerator, ExportValidationError
 from rfq_assistant.ingestion.excel import ExcelBOMInspector
 from rfq_assistant.ingestion.malware import ClamAVScanner
+from rfq_assistant.ingestion.parsers.base import DocumentParserError
 from rfq_assistant.ingestion.validator import UploadValidationError
 from rfq_assistant.matching.catalog import CatalogImportError, CatalogRepository
 from rfq_assistant.matching.fuzzy import RapidFuzzCandidateEngine
@@ -104,7 +105,7 @@ async def create_rfq(
     customer_label: Optional[str] = Form(None),
     actor: str = Form("Inside Sales"),
 ):
-    """Creates draft case from an uploaded file or pasted email text."""
+    """Creates draft case from an uploaded file or pasted email text with malware defense."""
     if not file and not pasted_text:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -114,8 +115,17 @@ async def create_rfq(
     try:
         if file:
             content = await file.read()
+            filename = file.filename or "upload.xlsx"
+            # 1. Attachment security scan
+            scan = clamav_scanner.scan_bytes(content, filename=filename)
+            if not scan.is_clean:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Security alert: Malicious attachment quarantined ({scan.threat_name}). Processing blocked.",
+                )
+
             case = case_manager.create_case_from_upload(
-                filename=file.filename or "upload.xlsx",
+                filename=filename,
                 content=content,
                 title=title,
                 customer_label=customer_label,
@@ -123,15 +133,25 @@ async def create_rfq(
             )
             return case
         else:
+            raw_text = pasted_text or ""
+            scan = clamav_scanner.scan_bytes(raw_text.encode("utf-8"), filename="pasted_text.txt")
+            if not scan.is_clean:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Security alert: Malicious content quarantined ({scan.threat_name}).",
+                )
+
             case = case_manager.create_case_from_text(
-                raw_text=pasted_text or "",
+                raw_text=raw_text,
                 title=title,
                 customer_label=customer_label,
                 actor=actor,
             )
             return case
-    except UploadValidationError as e:
+    except (UploadValidationError, DocumentParserError) as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
 

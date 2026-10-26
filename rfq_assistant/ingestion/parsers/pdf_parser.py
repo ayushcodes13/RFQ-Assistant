@@ -44,6 +44,8 @@ class PDFParser(BaseDocumentParser):
         total_pages = len(reader.pages)
         if total_pages == 0:
             raise DocumentParserError("PDF contains 0 pages.")
+        if total_pages > 50:
+            raise DocumentParserError(f"PDF page count ({total_pages}) exceeds maximum permitted limit (50 pages).")
 
         all_text = ""
         page_texts: List[Tuple[int, str]] = []
