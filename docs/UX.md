@@ -1,0 +1,108 @@
+# UX and visual design blueprint
+
+**Direction:** Quiet industrial-grade SaaS workbench: fast, legible, keyboard-first and audit-friendly. Not a chat playground, animated agent dashboard or neon AI demo.
+
+## Design personality
+
+- Bright neutral background, warm off-white panels, near-black primary text.
+- Restrained slate borders and one subdued blue accent for actionable focus.
+- Status uses label + icon + color, never color alone.
+- Dense but readable tables with sticky headers, clear typography and column alignment.
+- Optimized for desktop sales desks (1440px viewport); usable at 1024px, responsive stacking below.
+- No charts, scores or decorative AI imagery on the critical quote-review screen.
+
+## Information architecture
+
+**Navigation:** RFQs | Catalog | Exports | Settings
+
+**Top bar:** Product name, workspace/demo notice, current user, keyboard shortcuts/help.
+
+### Screen 1 — RFQ inbox
+
+- Empty state: "Start with a sample RFQ. Upload PDF, Excel or CSV, or paste email text."
+- Each card/row: customer label (if provided), source type, upload time, line count, status, unresolved count and last reviewer.
+- Status: New, Processing, Needs review, Ready to export, Exported, Failed.
+- Primary CTA: "New RFQ"; never "Send quote" on this screen.
+
+### Screen 2 — Create RFQ
+
+    +-------------------------------------------------------+
+    | New RFQ                                               |
+    |                                                       |
+    | [ Drop PDF / XLSX / CSV here ]  or [ Paste email ]      |
+    | Max size / file-type rules and processing notice      |
+    |                                                       |
+    | [Optional case title]  [Select sample catalog]        |
+    |                                                       |
+    |                    [Cancel] [Extract line items]       |
+    +-------------------------------------------------------+
+
+Before upload, provide sample dataset/demo mode and clear notice about how third-party AI processors would handle data (if any).
+
+### Screen 3 — Review workbench (core product)
+
+    +---------------------------------------------------------------------+
+    | RFQ #DEMO-007  Needs review  |  34 lines / 8 unresolved | Export [X]  |
+    +---------------------------+-----------------------------------------+
+    | ORIGINAL SOURCE           | QUOTATION PREPARATION                   |
+    | PDF p2 / Sheet Items 18   | Filters: All Exact Ambiguous Missing    |
+    |                           +-----------------------------------------+
+    | Highlighted row / text    |  #  Qty  OEM   MPN     Match     Status |
+    | source preview            |  1  10   ACME  A-123   SKU-501   Exact  |
+    |                           |  2   ?   ...   B-244   --        Fix    |
+    |                           |  3   4   --    XG-42   2 options Review |
+    |                           +-----------------------------------------+
+    | Source document pages     | Selected line: editable attributes      |
+    |                           | Candidate catalog match + evidence      |
+    |                           | [Approve] [Mark needs clarification]     |
+    +---------------------------+-----------------------------------------+
+    | Warnings  Audit history  Keyboard shortcuts  Last saved             |
+    +---------------------------------------------------------------------+
+
+**Review behavior:** Clicking a grid row scrolls source to its exact page/sheet/line; clicking source locators focuses the row. Edits are staged and audited. Bulk approve may be offered only for deterministic exact matches after the reviewer explicitly checks the visible set. Missing quantity/manufacturer and all substitution candidates must not be silently bulk approved.
+
+### Screen 4 — Export preview
+
+- Show all approved rows, unresolved rows count, columns, draft notice, and last review time.
+- If unresolved required fields remain, block final-ready export; allow explicit **partial/draft-only** export with omissions visible and traceable.
+- Two actions: "Download quote worksheet" and "Copy unsent reply draft".
+- No SMTP or email-send button in v0.
+
+### Screen 5 — Catalog import
+
+- Mapping step for uploaded CSV: Internal SKU, Manufacturer, Manufacturer Part Number, Description, optional price/availability timestamp.
+- Show validation counts: valid, duplicates, collision, invalid, missing manufacturer.
+- Never automatically treat descriptions as equivalent when parts differ.
+
+## UI states to implement carefully
+
+| State | Visible behavior |
+| --- | --- |
+| Uploading | Determinate progress where available; clear cancel |
+| Processing | Steps shown as plain language, no fake progress countdown |
+| Extraction partial | "We may have missed lines"; explicit page/sheet warnings |
+| Exact match | Manufacturer + normalized MPN + catalog row source |
+| Multiple exact candidates | "Needs review" with all ambiguous rows |
+| No match | No invented SKU; suggest manually adding/catalog lookup |
+| Empty/unreadable PDF | Specific failure and try-another-file route |
+| Source unavailable | Block unverified claim and surface original file issue |
+| Export success | Download link, included/excluded line summary |
+| Server failure | Error visible; user-entered edits preserved where feasible |
+
+## Interaction details
+
+- Keyboard: Tab navigation through cells; Enter commits edit; Escape cancels; Ctrl/Cmd+F searches extracted rows; shortcuts documented, no conflicts with screen readers.
+- Source document must be readable, zoomable and selectable; if highlight coordinates unavailable, display page number and extracted text without pretending bounding boxes exist.
+- Save state without destroying manual corrections when OCR reruns.
+- Text accessible to assistive technology, AA contrast target, semantic labels and predictable focus management.
+- Confirm destructive actions and make sensitive upload deletion clear.
+
+## Copy rules
+
+Use clear language: "Exact catalog number", "Manufacturer missing", "Possible collision", "Needs human review", "Draft only".
+
+Never use: "100% accurate", "AI verified", "Equivalent certified", "Guaranteed match" without explicit validated standards and evidence.
+
+## Design validation with five real users
+
+Observe whether a sales rep can identify an ambiguous line, fix a quantity, approve an exact MPN, export the correct CSV, and explain what remains their responsibility. Capture task time, clicks, confusion and objections. Visual polish is secondary to accurate action.
