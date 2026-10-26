@@ -1,0 +1,369 @@
+"use client";
+
+import React, { useEffect, useState } from "react";
+import { RFQCase } from "@/types";
+import { exportWorksheet, getEmailDraft, getExportDownloadUrl } from "@/services/api";
+
+interface ExportModalProps {
+  isOpen: boolean;
+  caseData: RFQCase;
+  onClose: () => void;
+}
+
+export function ExportModal({ isOpen, caseData, onClose }: ExportModalProps) {
+  const [allowPartial, setAllowPartial] = useState(false);
+  const [format, setFormat] = useState<"xlsx" | "csv">("xlsx");
+  const [exporting, setExporting] = useState(false);
+  const [emailDraft, setEmailDraft] = useState<string>("");
+  const [copiedEmail, setCopiedEmail] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      getEmailDraft(caseData.case_id)
+        .then((res) => setEmailDraft(res.draft))
+        .catch(() => setEmailDraft("Failed to generate email draft."));
+    }
+  }, [isOpen, caseData.case_id]);
+
+  if (!isOpen) return null;
+
+  const hasUnresolved = caseData.unresolved_count > 0;
+
+  const handleDownload = async () => {
+    setErrorMsg(null);
+    setExporting(true);
+    try {
+      const manifest = await exportWorksheet(
+        caseData.case_id,
+        allowPartial,
+        format,
+        "Inside Sales"
+      );
+      // Trigger file download
+      const downloadUrl = getExportDownloadUrl(caseData.case_id, manifest.export_id);
+      window.open(downloadUrl, "_blank");
+    } catch (err: any) {
+      setErrorMsg(err.message || "Export validation failed.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleCopyEmail = () => {
+    navigator.clipboard.writeText(emailDraft);
+    setCopiedEmail(true);
+    setTimeout(() => setCopiedEmail(false), 2500);
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <h2 className="modal-title">Export Quotation Worksheet</h2>
+            <p className="modal-subtitle">Case #{caseData.case_id} — {caseData.title}</p>
+          </div>
+          <button className="close-btn" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+
+        <div className="modal-body">
+          {errorMsg && <div className="error-banner">⚠ {errorMsg}</div>}
+
+          {/* Validation Status Summary */}
+          <div className={`status-summary-card ${hasUnresolved ? "warning" : "success"}`}>
+            <div className="status-summary-header">
+              <span className="summary-icon">{hasUnresolved ? "⚠" : "✓"}</span>
+              <span className="summary-title font-bold">
+                {hasUnresolved
+                  ? `${caseData.unresolved_count} Unresolved Line(s) Pending Review`
+                  : "All Line Items Approved and Grounded"}
+              </span>
+            </div>
+            <p className="summary-desc">
+              {hasUnresolved
+                ? "Some lines have missing quantities, unresolved brand collisions, or pending decisions. By default, final exports are blocked until all rows are verified."
+                : "All items have verified manufacturer part numbers and approved quantities. Ready for quotation export."}
+            </p>
+          </div>
+
+          {/* Format & Mode Selection */}
+          <div className="options-grid">
+            <div className="form-group">
+              <label className="form-label">Worksheet Format:</label>
+              <div className="radio-group">
+                <label className="radio-label">
+                  <input
+                    type="radio"
+                    name="export-fmt"
+                    checked={format === "xlsx"}
+                    onChange={() => setFormat("xlsx")}
+                  />
+                  <span>Excel Workbook (.xlsx)</span>
+                </label>
+                <label className="radio-label">
+                  <input
+                    type="radio"
+                    name="export-fmt"
+                    checked={format === "csv"}
+                    onChange={() => setFormat("csv")}
+                  />
+                  <span>Comma-Separated Values (.csv)</span>
+                </label>
+              </div>
+            </div>
+
+            {hasUnresolved && (
+              <div className="partial-box">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={allowPartial}
+                    onChange={(e) => setAllowPartial(e.target.checked)}
+                  />
+                  <span className="checkbox-text font-bold">
+                    Allow Partial Draft Export (Include unresolved lines with DRAFT banner)
+                  </span>
+                </label>
+                <div className="checkbox-hint">
+                  Required to export when lines remain unverified. Watermarked as internal draft.
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            className="download-btn"
+            disabled={exporting || (hasUnresolved && !allowPartial)}
+            onClick={handleDownload}
+          >
+            {exporting ? "Generating Worksheet..." : `Download Quote Preparation Worksheet (${format.toUpperCase()})`}
+          </button>
+
+          {/* Unsent Email Draft Box */}
+          <div className="email-draft-section">
+            <div className="email-header">
+              <div className="email-title">
+                ✉ Unsent Customer Clarification Draft (Staff Sends Manually):
+              </div>
+              <button className="copy-btn" onClick={handleCopyEmail}>
+                {copiedEmail ? "✓ Copied to Clipboard!" : "Copy Draft Text"}
+              </button>
+            </div>
+            <textarea
+              className="email-textarea font-mono"
+              rows={8}
+              readOnly
+              value={emailDraft}
+            />
+          </div>
+
+          <div className="safety-footer-notice">
+            ⚠ <strong>Safety Invariant:</strong> No automatic emails or purchase orders will ever be sent.
+            Unit prices are blank unless authorized. Staff retains commercial ownership of quotations.
+          </div>
+        </div>
+      </div>
+
+      <style jsx>{`
+        .modal-backdrop {
+          position: fixed;
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: rgba(15, 23, 42, 0.6);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 100;
+          backdrop-filter: blur(2px);
+        }
+        .modal-dialog {
+          background: #ffffff;
+          border-radius: 10px;
+          width: 90%;
+          max-width: 680px;
+          box-shadow: var(--shadow-lg);
+          border: 1px solid var(--border-medium);
+          max-height: 90vh;
+          overflow-y: auto;
+        }
+        .modal-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          padding: 1.25rem 1.5rem;
+          border-bottom: 1px solid var(--border-light);
+        }
+        .modal-title {
+          font-size: 1.2rem;
+          font-weight: 700;
+          color: var(--text-primary);
+        }
+        .modal-subtitle {
+          font-size: 0.82rem;
+          color: var(--text-muted);
+          margin-top: 0.2rem;
+        }
+        .close-btn {
+          background: none;
+          border: none;
+          font-size: 1.1rem;
+          cursor: pointer;
+          color: var(--text-muted);
+        }
+        .modal-body {
+          padding: 1.5rem;
+          display: flex;
+          flex-direction: column;
+          gap: 1.25rem;
+        }
+        .error-banner {
+          background: var(--status-error-bg);
+          color: var(--status-error-text);
+          border: 1px solid var(--status-error-border);
+          padding: 0.65rem 1rem;
+          border-radius: 6px;
+          font-size: 0.85rem;
+        }
+        .status-summary-card {
+          border-radius: 6px;
+          padding: 0.85rem 1rem;
+          border: 1px solid transparent;
+        }
+        .status-summary-card.warning {
+          background: #FFFBEB;
+          border-color: #FDE68A;
+          color: #92400E;
+        }
+        .status-summary-card.success {
+          background: #ECFDF5;
+          border-color: #A7F3D0;
+          color: #065F46;
+        }
+        .status-summary-header {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          font-size: 0.92rem;
+          margin-bottom: 0.25rem;
+        }
+        .summary-desc {
+          font-size: 0.8rem;
+          line-height: 1.4;
+        }
+        .options-grid {
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+          background: var(--bg-subtle);
+          padding: 1rem;
+          border-radius: 6px;
+          border: 1px solid var(--border-light);
+        }
+        .form-label {
+          font-size: 0.82rem;
+          font-weight: 600;
+          color: var(--text-secondary);
+          margin-bottom: 0.35rem;
+          display: block;
+        }
+        .radio-group {
+          display: flex;
+          gap: 1.25rem;
+        }
+        .radio-label {
+          display: flex;
+          align-items: center;
+          gap: 0.45rem;
+          font-size: 0.85rem;
+          cursor: pointer;
+        }
+        .partial-box {
+          border-top: 1px solid var(--border-light);
+          padding-top: 0.75rem;
+        }
+        .checkbox-label {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          cursor: pointer;
+        }
+        .checkbox-text {
+          font-size: 0.85rem;
+          color: #B45309;
+        }
+        .checkbox-hint {
+          font-size: 0.75rem;
+          color: var(--text-muted);
+          margin-left: 1.4rem;
+          margin-top: 0.15rem;
+        }
+        .download-btn {
+          background: var(--accent-primary);
+          border: 1px solid var(--accent-primary);
+          color: #ffffff;
+          padding: 0.75rem;
+          border-radius: 6px;
+          font-size: 0.92rem;
+          font-weight: 700;
+          cursor: pointer;
+          transition: background 0.15s ease;
+        }
+        .download-btn:hover:not(:disabled) {
+          background: var(--accent-primary-hover);
+        }
+        .download-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        .email-draft-section {
+          border: 1px solid var(--border-light);
+          border-radius: 6px;
+          overflow: hidden;
+        }
+        .email-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          background: var(--bg-subtle);
+          padding: 0.5rem 0.75rem;
+          border-bottom: 1px solid var(--border-light);
+        }
+        .email-title {
+          font-size: 0.78rem;
+          font-weight: 600;
+          color: var(--text-secondary);
+        }
+        .copy-btn {
+          background: #ffffff;
+          border: 1px solid var(--border-medium);
+          padding: 0.25rem 0.6rem;
+          border-radius: 4px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .email-textarea {
+          width: 100%;
+          padding: 0.75rem;
+          border: none;
+          font-size: 0.78rem;
+          line-height: 1.4;
+          resize: vertical;
+          background: #ffffff;
+        }
+        .safety-footer-notice {
+          font-size: 0.75rem;
+          color: var(--text-muted);
+          line-height: 1.4;
+          padding: 0.5rem;
+          background: var(--bg-subtle);
+          border-radius: 4px;
+        }
+        .font-mono { font-family: var(--font-mono); }
+        .font-bold { font-weight: 700; }
+      `}</style>
+    </div>
+  );
+}
