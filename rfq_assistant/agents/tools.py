@@ -130,12 +130,23 @@ class QuotationCommercialService:
                 "Blocked: Draft was modified after approval. Re-approval is required."
             )
 
+        import os
+        require_real_transport = os.environ.get("REQUIRE_REAL_TRANSPORT", "").lower() in ("1", "true")
+        if require_real_transport:
+            raise ApprovalGateError(
+                "Blocked: Real outbound transport is not configured. Live customer transmission requires configured transport provider."
+            )
+
         transmission_record = {
             "quote_id": quote_id,
             "hash": current_hash,
             "sender": sender_name,
             "sent_at": datetime.now(timezone.utc).isoformat(),
             "status": "SENT",
+            "transport": "simulated_local",
+            "is_simulated": True,
+            "outbound_transport_invoked": False,
+            "transport_notes": "Local pilot simulation. No live SMTP or external network transport was invoked.",
         }
         self._sent_quotes[quote_id] = transmission_record
         return transmission_record

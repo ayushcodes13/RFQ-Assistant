@@ -72,10 +72,12 @@ class RFQLineItem(BaseModel):
     reviewed_by: Optional[str] = None
     reviewed_at: Optional[datetime] = None
     reviewer_notes: Optional[str] = None
+    version: int = 1
 
 
 class RFQLineItemUpdate(BaseModel):
     """Payload for human reviewer correcting or approving a line item."""
+    expected_version: Optional[int] = None
     requested_manufacturer: Optional[str] = None
     requested_mpn: Optional[str] = None
     description: Optional[str] = None

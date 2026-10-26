@@ -185,6 +185,12 @@ class CaseManager:
         if not line:
             return None
 
+        # Optimistic concurrency check
+        if update.expected_version is not None and update.expected_version != line.version:
+            raise ValueError(
+                f"Stale state / conflict: Line item version is {line.version}, but client expected version {update.expected_version}. Please refresh."
+            )
+
         material_changes = []
 
         # Validate quantity strictly
@@ -340,6 +346,7 @@ class CaseManager:
         if update.reviewer_notes is not None:
             line.reviewer_notes = update.reviewer_notes
 
+        line.version += 1
         self._refresh_case_metrics(case_id)
         return line
 
