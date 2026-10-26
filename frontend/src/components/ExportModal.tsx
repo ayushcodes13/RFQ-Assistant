@@ -171,118 +171,104 @@ export function ExportModal({ isOpen, caseData, onClose }: ExportModalProps) {
         .modal-backdrop {
           position: fixed;
           top: 0; left: 0; right: 0; bottom: 0;
-          background: rgba(4, 6, 12, 0.8);
+          background: rgba(15, 23, 42, 0.4);
           display: flex;
           align-items: center;
           justify-content: center;
           z-index: 100;
-          backdrop-filter: blur(16px);
         }
         .modal-dialog {
-          background: var(--bg-surface-elevated);
-          border-radius: 12px;
+          background: #FFFFFF;
+          border-radius: 8px;
           width: 90%;
-          max-width: 680px;
-          box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
-          border: 1px solid var(--border-medium);
+          max-width: 640px;
+          box-shadow: var(--shadow-lg);
+          border: 1px solid var(--border-light);
           max-height: 90vh;
           overflow-y: auto;
-          position: relative;
-        }
-        .modal-dialog::before {
-          content: "";
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          height: 2px;
-          background: var(--accent-gradient);
         }
         .modal-header {
           display: flex;
           align-items: flex-start;
           justify-content: space-between;
-          padding: 1.5rem 1.75rem;
+          padding: 1.25rem 1.5rem;
           border-bottom: 1px solid var(--border-light);
-          background: var(--bg-surface);
+          background: #FFFFFF;
         }
         .modal-title {
-          font-size: 1.25rem;
-          font-weight: 700;
+          font-size: 1.15rem;
+          font-weight: 600;
           color: var(--text-primary);
-          letter-spacing: -0.01em;
         }
         .modal-subtitle {
           font-size: 0.82rem;
           color: var(--text-muted);
-          margin-top: 0.25rem;
+          margin-top: 0.2rem;
         }
         .close-btn {
           background: none;
           border: none;
-          font-size: 1.2rem;
+          font-size: 1.1rem;
           cursor: pointer;
           color: var(--text-muted);
-          transition: color 0.15s ease;
         }
         .close-btn:hover {
           color: var(--text-primary);
         }
         .modal-body {
-          padding: 1.75rem;
+          padding: 1.5rem;
           display: flex;
           flex-direction: column;
           gap: 1.25rem;
         }
         .error-banner {
-          background: rgba(239, 68, 68, 0.15);
-          color: #F87171;
-          border: 1px solid rgba(239, 68, 68, 0.3);
-          padding: 0.75rem 1.25rem;
-          border-radius: 8px;
+          background: #FEF2F2;
+          color: #991B1B;
+          border: 1px solid #FECACA;
+          padding: 0.65rem 1rem;
+          border-radius: 6px;
           font-size: 0.85rem;
         }
         .status-summary-card {
-          border-radius: 8px;
-          padding: 1rem 1.25rem;
+          border-radius: 6px;
+          padding: 0.85rem 1rem;
           border: 1px solid transparent;
         }
         .status-summary-card.warning {
-          background: rgba(245, 158, 11, 0.1);
-          border-color: rgba(245, 158, 11, 0.3);
-          color: #FCD34D;
+          background: #FFFBEB;
+          border-color: #FDE68A;
+          color: #92400E;
         }
         .status-summary-card.success {
-          background: rgba(16, 185, 129, 0.1);
-          border-color: rgba(16, 185, 129, 0.3);
-          color: #34D399;
+          background: #ECFDF5;
+          border-color: #A7F3D0;
+          color: #065F46;
         }
         .status-summary-header {
           display: flex;
           align-items: center;
           gap: 0.5rem;
-          font-size: 0.95rem;
-          margin-bottom: 0.35rem;
+          font-size: 0.92rem;
+          margin-bottom: 0.25rem;
         }
         .summary-desc {
           font-size: 0.82rem;
-          line-height: 1.45;
-          opacity: 0.9;
+          line-height: 1.4;
         }
         .options-grid {
           display: flex;
           flex-direction: column;
-          gap: 1rem;
-          background: var(--bg-surface);
-          padding: 1.25rem;
-          border-radius: 8px;
+          gap: 0.85rem;
+          background: #F8FAFC;
+          padding: 1rem;
+          border-radius: 6px;
           border: 1px solid var(--border-light);
         }
         .form-label {
           font-size: 0.82rem;
           font-weight: 600;
           color: var(--text-secondary);
-          margin-bottom: 0.45rem;
+          margin-bottom: 0.35rem;
           display: block;
         }
         .radio-group {
@@ -292,14 +278,14 @@ export function ExportModal({ isOpen, caseData, onClose }: ExportModalProps) {
         .radio-label {
           display: flex;
           align-items: center;
-          gap: 0.5rem;
+          gap: 0.45rem;
           font-size: 0.85rem;
           color: var(--text-primary);
           cursor: pointer;
         }
         .partial-box {
           border-top: 1px solid var(--border-light);
-          padding-top: 0.85rem;
+          padding-top: 0.75rem;
         }
         .checkbox-label {
           display: flex;
@@ -309,48 +295,45 @@ export function ExportModal({ isOpen, caseData, onClose }: ExportModalProps) {
         }
         .checkbox-text {
           font-size: 0.85rem;
-          color: #F59E0B;
-          font-weight: 600;
+          color: #92400E;
+          font-weight: 500;
         }
         .checkbox-hint {
           font-size: 0.75rem;
           color: var(--text-muted);
           margin-left: 1.4rem;
-          margin-top: 0.2rem;
+          margin-top: 0.15rem;
         }
         .download-btn {
-          background: var(--accent-gradient);
-          border: 1px solid rgba(14, 165, 233, 0.4);
-          color: #ffffff;
-          padding: 0.85rem;
-          border-radius: 8px;
-          font-size: 0.92rem;
-          font-weight: 700;
+          background: var(--accent-primary);
+          border: 1px solid var(--accent-primary);
+          color: #FFFFFF;
+          padding: 0.65rem 1rem;
+          border-radius: 6px;
+          font-size: 0.875rem;
+          font-weight: 500;
           cursor: pointer;
-          box-shadow: 0 0 12px rgba(14, 165, 233, 0.25);
-          transition: all 0.2s ease;
+          transition: background 0.15s ease;
         }
         .download-btn:hover:not(:disabled) {
-          box-shadow: 0 0 18px rgba(14, 165, 233, 0.45);
-          transform: translateY(-1px);
+          background: var(--accent-primary-hover);
         }
         .download-btn:disabled {
-          opacity: 0.5;
+          opacity: 0.6;
           cursor: not-allowed;
-          box-shadow: none;
         }
         .email-draft-section {
           border: 1px solid var(--border-light);
-          border-radius: 8px;
+          border-radius: 6px;
           overflow: hidden;
-          background: var(--bg-surface);
+          background: #FFFFFF;
         }
         .email-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          background: var(--bg-subtle);
-          padding: 0.6rem 0.85rem;
+          background: #F8FAFC;
+          padding: 0.5rem 0.75rem;
           border-bottom: 1px solid var(--border-light);
         }
         .email-title {
@@ -359,44 +342,43 @@ export function ExportModal({ isOpen, caseData, onClose }: ExportModalProps) {
           color: var(--text-secondary);
         }
         .copy-btn {
-          background: var(--bg-surface-elevated);
+          background: #FFFFFF;
           border: 1px solid var(--border-medium);
-          color: var(--text-primary);
-          padding: 0.3rem 0.75rem;
-          border-radius: 6px;
+          color: var(--text-secondary);
+          padding: 0.25rem 0.6rem;
+          border-radius: 4px;
           font-size: 0.75rem;
-          font-weight: 600;
+          font-weight: 500;
           cursor: pointer;
-          transition: all 0.15s ease;
         }
         .copy-btn:hover {
-          background: var(--bg-surface);
-          border-color: var(--accent-primary);
+          background: var(--bg-subtle);
+          color: var(--text-primary);
         }
         .email-textarea {
           width: 100%;
-          padding: 0.85rem;
+          padding: 0.75rem;
           border: none;
           font-size: 0.8rem;
-          line-height: 1.45;
+          line-height: 1.4;
           resize: vertical;
-          background: var(--bg-app);
+          background: #FAFAFA;
           color: var(--text-primary);
         }
         .safety-footer-notice {
           font-size: 0.75rem;
           color: var(--text-muted);
-          line-height: 1.45;
-          padding: 0.65rem 0.85rem;
-          background: var(--bg-surface);
+          line-height: 1.4;
+          padding: 0.6rem 0.8rem;
+          background: #F8FAFC;
           border: 1px solid var(--border-light);
           border-radius: 6px;
         }
         .safety-footer-notice strong {
-          color: #F59E0B;
+          color: var(--text-secondary);
         }
         .font-mono { font-family: var(--font-mono); }
-        .font-bold { font-weight: 700; }
+        .font-bold { font-weight: 600; }
       `}</style>
     </div>
   );

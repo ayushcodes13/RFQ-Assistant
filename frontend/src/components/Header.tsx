@@ -24,13 +24,9 @@ export function Header({
           <div className="logo-icon">RFQ</div>
           <div>
             <div className="logo-title">RFQ Assistant</div>
-            <div className="logo-subtitle">Industrial Quotation Workbench</div>
+            <div className="logo-subtitle">Quotation Workbench</div>
           </div>
         </div>
-
-        <span className="demo-badge" title="No real customer data or outbound email access.">
-          DEMO BENCHMARK — SYNTHETIC DATA
-        </span>
       </div>
 
       <nav className="header-nav">
@@ -38,7 +34,7 @@ export function Header({
           className={`nav-btn ${currentTab === "inbox" ? "active" : ""}`}
           onClick={() => onTabChange("inbox")}
         >
-          Cases Inbox
+          All Inquiries
         </button>
 
         {activeCaseId && (
@@ -46,7 +42,7 @@ export function Header({
             className={`nav-btn ${currentTab === "workbench" ? "active" : ""}`}
             onClick={() => onTabChange("workbench")}
           >
-            Review Workbench (#{activeCaseId.slice(0, 10)})
+            Review Worksheet
           </button>
         )}
 
@@ -54,21 +50,17 @@ export function Header({
           className={`nav-btn ${currentTab === "catalog" ? "active" : ""}`}
           onClick={() => onTabChange("catalog")}
         >
-          Catalog Master
+          Item Catalog
         </button>
       </nav>
 
       <div className="header-right">
-        <button className="secondary-btn" onClick={onOpenShortcuts} title="Keyboard shortcuts & guide">
-          ⌨ Shortcuts / Help
+        <button className="btn-secondary" onClick={onOpenShortcuts} title="Keyboard shortcuts & guide">
+          Help & Rules
         </button>
-        <button className="primary-btn" onClick={onOpenNewRfq}>
-          + New RFQ
+        <button className="btn-primary" onClick={onOpenNewRfq}>
+          + New Quote Request
         </button>
-        <div className="user-indicator" title="Logged in operator">
-          <span className="user-dot"></span>
-          Inside Sales Desk
-        </div>
       </div>
 
       <style jsx>{`
@@ -76,16 +68,13 @@ export function Header({
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0 1.75rem;
-          height: 68px;
-          background: var(--bg-glass);
-          backdrop-filter: blur(16px);
-          -webkit-backdrop-filter: blur(16px);
+          padding: 0 1.5rem;
+          height: 60px;
+          background: #FFFFFF;
           border-bottom: 1px solid var(--border-light);
           position: sticky;
           top: 0;
-          z-index: 50;
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+          z-index: 40;
         }
         .header-left {
           display: flex;
@@ -95,107 +84,61 @@ export function Header({
         .logo-group {
           display: flex;
           align-items: center;
-          gap: 0.85rem;
+          gap: 0.65rem;
           cursor: pointer;
         }
         .logo-icon {
-          width: 38px;
-          height: 38px;
-          background: var(--accent-gradient);
-          color: #ffffff;
-          border-radius: 9px;
+          width: 32px;
+          height: 32px;
+          background: var(--accent-primary);
+          color: #FFFFFF;
+          border-radius: 6px;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-weight: 800;
-          font-size: 0.88rem;
+          font-weight: 700;
+          font-size: 0.78rem;
           letter-spacing: -0.5px;
-          box-shadow: 0 0 16px rgba(2, 132, 199, 0.4);
-          border: 1px solid rgba(255, 255, 255, 0.15);
         }
         .logo-title {
-          font-size: 1.1rem;
-          font-weight: 700;
+          font-size: 0.95rem;
+          font-weight: 600;
           color: var(--text-primary);
           line-height: 1.2;
-          font-family: var(--font-heading);
-          letter-spacing: -0.02em;
         }
         .logo-subtitle {
           font-size: 0.72rem;
           color: var(--text-muted);
-          font-weight: 500;
-          letter-spacing: 0.02em;
-        }
-        .demo-badge {
-          background: rgba(2, 132, 199, 0.1);
-          color: #38BDF8;
-          border: 1px solid rgba(56, 189, 248, 0.25);
-          padding: 0.25rem 0.65rem;
-          border-radius: 6px;
-          font-size: 0.7rem;
-          font-weight: 600;
-          letter-spacing: 0.04em;
-          text-transform: uppercase;
-          display: inline-flex;
-          align-items: center;
-          gap: 0.4rem;
         }
         .header-nav {
           display: flex;
           align-items: center;
-          gap: 0.35rem;
-          background: rgba(0, 0, 0, 0.25);
-          padding: 0.3rem;
-          border-radius: 10px;
-          border: 1px solid var(--border-light);
+          gap: 0.5rem;
         }
         .nav-btn {
           background: transparent;
           border: none;
-          padding: 0.45rem 1rem;
-          border-radius: 7px;
+          padding: 0.45rem 0.85rem;
+          border-radius: 6px;
           font-size: 0.875rem;
           font-weight: 500;
-          color: var(--text-muted);
+          color: var(--text-secondary);
           cursor: pointer;
-          transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+          transition: all 0.15s ease;
         }
         .nav-btn:hover {
           color: var(--text-primary);
-          background: rgba(255, 255, 255, 0.05);
+          background: var(--bg-subtle);
         }
         .nav-btn.active {
-          background: var(--bg-surface-elevated);
-          color: #38BDF8;
+          background: var(--accent-subtle);
+          color: var(--accent-primary);
           font-weight: 600;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-          border: 1px solid rgba(56, 189, 248, 0.2);
         }
         .header-right {
           display: flex;
           align-items: center;
-          gap: 0.85rem;
-        }
-        .user-indicator {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          font-size: 0.8rem;
-          font-weight: 500;
-          color: var(--text-secondary);
-          padding: 0.35rem 0.75rem;
-          background: rgba(255, 255, 255, 0.03);
-          border: 1px solid var(--border-light);
-          border-radius: 8px;
-        }
-        .user-dot {
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          background: #10B981;
-          box-shadow: 0 0 10px rgba(16, 185, 129, 0.7);
-          animation: beaconGlow 2s infinite ease-in-out;
+          gap: 0.75rem;
         }
       `}</style>
     </header>
