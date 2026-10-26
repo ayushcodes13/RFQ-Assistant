@@ -66,7 +66,6 @@ Please provide unit price and stock for:
         onRefresh();
         onSelectCase(newCase.case_id);
       } else if (scenario === "20lines") {
-        // Fallback text representing the 20-line BOM
         const text = `SYNTHETIC SAMPLE RFQ - ACME AUTOMATION PROJECT
 Line 1: 10 EA Schneider Electric LC1D09BD (TeSys D contactor 9A 24VDC)
 Line 2: 4 EA Schneider Electric LC1D25BD (TeSys D contactor 25A 24VDC)
@@ -105,7 +104,7 @@ Line 20: 5 EA Acme Industrial ABC-12A (Thermal overload relay with aux NC)`;
 
   const handleDelete = async (e: React.MouseEvent, caseId: string) => {
     e.stopPropagation();
-    if (confirm(`Are you sure you want to delete case ${caseId}?`)) {
+    if (confirm(`Are you sure you want to delete quote case ${caseId}?`)) {
       try {
         await deleteCase(caseId);
         onRefresh();
@@ -124,126 +123,117 @@ Line 20: 5 EA Acme Industrial ABC-12A (Thermal overload relay with aux NC)`;
     return matchesSearch && matchesStatus;
   });
 
-  const totalLines = cases.reduce((acc, c) => acc + c.line_count, 0);
   const needsReviewCount = cases.filter((c) => c.status === "NEEDS_REVIEW").length;
   const readyCount = cases.filter((c) => c.status === "READY_TO_EXPORT").length;
 
   return (
     <div className="inbox-container">
-      {/* Top Banner / Metrics */}
-      <section className="metrics-bar">
-        <div className="metric-card">
-          <div className="metric-label">Active RFQ Cases</div>
-          <div className="metric-value">{cases.length}</div>
-        </div>
-        <div className="metric-card warning">
-          <div className="metric-label">Needs Human Review</div>
-          <div className="metric-value">{needsReviewCount}</div>
-        </div>
-        <div className="metric-card success">
-          <div className="metric-label">Ready to Export</div>
-          <div className="metric-value">{readyCount}</div>
-        </div>
-        <div className="metric-card">
-          <div className="metric-label">Extracted Line Items</div>
-          <div className="metric-value">{totalLines}</div>
-        </div>
-      </section>
-
-      {/* Demo Quick Launchers */}
-      <section className="demo-launcher-bar">
-        <div className="demo-launcher-title">
-          <span>⚡ One-Click Demo Scenarios:</span>
-        </div>
-        <div className="demo-launcher-buttons">
-          <button
-            className="demo-btn"
-            disabled={loadingSample}
-            onClick={() => loadSyntheticScenario("20lines")}
-            title="Load 20-line BOM with missing quantity edge case on line 18"
-          >
-            Load 20-Line BOM (Scenario 1)
-          </button>
-          <button
-            className="demo-btn"
-            disabled={loadingSample}
-            onClick={() => loadSyntheticScenario("messy_email")}
-            title="Load natural language email with vague item 'sensor from last time'"
-          >
-            Load Messy Email (Scenario 2)
-          </button>
-          <button
-            className="demo-btn"
-            disabled={loadingSample}
-            onClick={() => loadSyntheticScenario("collision")}
-            title="Load brand collision case: XG-42 without OEM"
-          >
-            Load Brand Collision (Scenario 3)
-          </button>
-        </div>
-      </section>
-
-      {/* Controls & Filter bar */}
-      <div className="controls-row">
-        <div className="search-group">
-          <input
-            type="text"
-            className="search-input"
-            placeholder="Search cases by ID, title, or customer..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+      {/* Page Title & Simple Stats */}
+      <div className="inbox-header">
+        <div>
+          <h1 className="page-title">Quotation Requests</h1>
+          <p className="page-subtitle">Review incoming RFQs, verify exact part numbers, and export ready worksheets.</p>
         </div>
 
-        <div className="filter-group">
+        <div className="stats-row">
+          <div className="stat-pill">
+            <span className="stat-label">Total:</span>
+            <span className="stat-num">{cases.length}</span>
+          </div>
+          <div className="stat-pill warning">
+            <span className="stat-label">Needs Review:</span>
+            <span className="stat-num">{needsReviewCount}</span>
+          </div>
+          <div className="stat-pill success">
+            <span className="stat-label">Ready:</span>
+            <span className="stat-num">{readyCount}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Quick Sample Links */}
+      <div className="sample-bar">
+        <span className="sample-label">Try sample data:</span>
+        <button
+          className="sample-btn"
+          disabled={loadingSample}
+          onClick={() => loadSyntheticScenario("20lines")}
+        >
+          20-Item BOM
+        </button>
+        <button
+          className="sample-btn"
+          disabled={loadingSample}
+          onClick={() => loadSyntheticScenario("messy_email")}
+        >
+          Messy Email
+        </button>
+        <button
+          className="sample-btn"
+          disabled={loadingSample}
+          onClick={() => loadSyntheticScenario("collision")}
+        >
+          Brand Collision
+        </button>
+      </div>
+
+      {/* Controls & Filter Bar */}
+      <div className="toolbar">
+        <input
+          type="text"
+          className="search-input"
+          placeholder="Search by title, customer, or ID..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+
+        <div className="toolbar-actions">
           <select
             className="filter-select"
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
           >
-            <option value="ALL">All Statuses ({cases.length})</option>
+            <option value="ALL">All Statuses</option>
             <option value="NEEDS_REVIEW">Needs Review</option>
             <option value="READY_TO_EXPORT">Ready to Export</option>
             <option value="NEW">New</option>
             <option value="EXPORTED">Exported</option>
           </select>
 
-          <button className="refresh-btn" onClick={onRefresh} title="Refresh case list">
-            ↻ Refresh
+          <button className="btn-secondary" onClick={onRefresh} title="Refresh case list">
+            Refresh
           </button>
-          <button className="primary-btn" onClick={onOpenNewRfq}>
-            + Ingest New RFQ
+          <button className="btn-primary" onClick={onOpenNewRfq}>
+            + Ingest RFQ
           </button>
         </div>
       </div>
 
       {/* Cases Table */}
-      <div className="table-wrapper">
+      <div className="table-card">
         {loading ? (
-          <div className="loading-state">Loading quotation cases...</div>
+          <div className="state-box">Loading quotation cases...</div>
         ) : filteredCases.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">📋</div>
-            <div className="empty-title">No RFQ cases match your criteria</div>
-            <p className="empty-desc">
-              Upload an Excel/PDF/CSV quotation request, paste email text, or click one of the synthetic
-              scenarios above to test the intake workflow.
+          <div className="state-box">
+            <p className="empty-title">No RFQs found</p>
+            <p className="empty-sub">
+              Upload an inquiry file, paste an email quote request, or click one of the sample buttons above.
             </p>
-            <button className="primary-btn" onClick={onOpenNewRfq}>
-              Start New RFQ Intake
+            <button className="btn-primary" style={{ marginTop: "1rem" }} onClick={onOpenNewRfq}>
+              Create Quote Request
             </button>
           </div>
         ) : (
           <table className="cases-table">
             <thead>
               <tr>
-                <th>Case Ref</th>
-                <th>Title / Request</th>
+                <th>Reference</th>
+                <th>Request / Title</th>
                 <th>Customer</th>
-                <th>Source Document</th>
+                <th>Source</th>
                 <th>Status</th>
-                <th className="align-center">Lines</th>
-                <th className="align-center">Unresolved</th>
+                <th className="align-center">Items</th>
+                <th className="align-center">Attention</th>
                 <th>Received</th>
                 <th className="align-right">Action</th>
               </tr>
@@ -258,36 +248,34 @@ Line 20: 5 EA Acme Industrial ABC-12A (Thermal overload relay with aux NC)`;
                   <td className="case-id font-mono">{c.case_id}</td>
                   <td className="case-title">{c.title}</td>
                   <td className="customer-cell">{c.customer_label || "—"}</td>
-                  <td>
-                    <span className="source-tag">
-                      {c.source_file ? c.source_file.file_name : "Pasted Text"}
-                    </span>
+                  <td className="source-cell">
+                    {c.source_file ? c.source_file.file_name : "Pasted Text"}
                   </td>
                   <td>
                     <StatusBadge type="case" value={c.status} />
                   </td>
-                  <td className="align-center font-mono font-bold">{c.line_count}</td>
+                  <td className="align-center font-mono">{c.line_count}</td>
                   <td className="align-center">
                     {c.unresolved_count > 0 ? (
-                      <span className="unresolved-pill">{c.unresolved_count} to fix</span>
+                      <span className="badge-attention">{c.unresolved_count} items</span>
                     ) : (
-                      <span className="resolved-pill">All clear</span>
+                      <span className="badge-ok">✓ Ready</span>
                     )}
                   </td>
                   <td className="time-cell">{new Date(c.created_at).toLocaleDateString()}</td>
                   <td className="align-right" onClick={(e) => e.stopPropagation()}>
                     <button
-                      className="open-btn"
+                      className="btn-secondary btn-sm"
                       onClick={() => onSelectCase(c.case_id)}
                     >
-                      Open Workbench →
+                      Review
                     </button>
                     <button
-                      className="delete-icon-btn"
+                      className="delete-btn"
                       title="Delete case"
                       onClick={(e) => handleDelete(e, c.case_id)}
                     >
-                      🗑
+                      ✕
                     </button>
                   </td>
                 </tr>
@@ -299,314 +287,229 @@ Line 20: 5 EA Acme Industrial ABC-12A (Thermal overload relay with aux NC)`;
 
       <style jsx>{`
         .inbox-container {
-          padding: 1.75rem 2rem;
-          max-width: 1440px;
+          padding: 2rem;
+          max-width: 1200px;
           margin: 0 auto;
         }
-        .metrics-bar {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 1.25rem;
-          margin-bottom: 1.5rem;
+        .inbox-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          margin-bottom: 1.25rem;
         }
-        .metric-card {
-          background: var(--bg-glass-card);
-          backdrop-filter: blur(12px);
-          -webkit-backdrop-filter: blur(12px);
-          border: 1px solid var(--border-light);
-          padding: 1.2rem 1.4rem;
-          border-radius: 12px;
-          box-shadow: var(--shadow-card);
-          transition: transform 0.2s ease, border-color 0.2s ease;
-          position: relative;
-          overflow: hidden;
-        }
-        .metric-card:hover {
-          transform: translateY(-2px);
-          border-color: rgba(255, 255, 255, 0.18);
-        }
-        .metric-card::before {
-          content: '';
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          height: 2px;
-          background: linear-gradient(90deg, rgba(56, 189, 248, 0.4), transparent);
-        }
-        .metric-card.warning::before {
-          background: linear-gradient(90deg, #F59E0B, transparent);
-        }
-        .metric-card.success::before {
-          background: linear-gradient(90deg, #10B981, transparent);
-        }
-        .metric-label {
-          font-size: 0.8rem;
-          color: var(--text-muted);
-          font-weight: 500;
-          letter-spacing: 0.02em;
-          margin-bottom: 0.35rem;
-          text-transform: uppercase;
-        }
-        .metric-value {
-          font-size: 1.85rem;
-          font-weight: 800;
+        .page-title {
+          font-size: 1.35rem;
+          font-weight: 600;
           color: var(--text-primary);
-          font-family: var(--font-heading);
-          letter-spacing: -0.02em;
         }
-        .demo-launcher-bar {
+        .page-subtitle {
+          font-size: 0.875rem;
+          color: var(--text-muted);
+          margin-top: 0.2rem;
+        }
+        .stats-row {
+          display: flex;
+          gap: 0.5rem;
+        }
+        .stat-pill {
+          background: #FFFFFF;
+          border: 1px solid var(--border-light);
+          padding: 0.35rem 0.75rem;
+          border-radius: 6px;
           display: flex;
           align-items: center;
-          gap: 1.25rem;
-          background: rgba(2, 132, 199, 0.08);
-          border: 1px solid rgba(56, 189, 248, 0.25);
-          padding: 0.85rem 1.25rem;
-          border-radius: 10px;
-          margin-bottom: 1.5rem;
-          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-        }
-        .demo-launcher-title {
-          font-size: 0.82rem;
-          font-weight: 700;
-          color: #38BDF8;
-          white-space: nowrap;
-          letter-spacing: 0.02em;
-          text-transform: uppercase;
-        }
-        .demo-launcher-buttons {
-          display: flex;
-          gap: 0.65rem;
-          flex-wrap: wrap;
-        }
-        .demo-btn {
-          background: rgba(255, 255, 255, 0.04);
-          border: 1px solid rgba(56, 189, 248, 0.3);
-          color: #F8FAFC;
-          padding: 0.45rem 0.85rem;
-          border-radius: 7px;
+          gap: 0.4rem;
           font-size: 0.8rem;
+          box-shadow: var(--shadow-sm);
+        }
+        .stat-label {
+          color: var(--text-muted);
+        }
+        .stat-num {
           font-weight: 600;
+          color: var(--text-primary);
+        }
+        .stat-pill.warning .stat-num {
+          color: #D97706;
+        }
+        .stat-pill.success .stat-num {
+          color: #059669;
+        }
+        .sample-bar {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 0.5rem 0.75rem;
+          background: #FFFFFF;
+          border: 1px solid var(--border-light);
+          border-radius: 6px;
+          margin-bottom: 1.25rem;
+          font-size: 0.8rem;
+        }
+        .sample-label {
+          color: var(--text-muted);
+          margin-right: 0.25rem;
+        }
+        .sample-btn {
+          background: var(--bg-subtle);
+          border: 1px solid var(--border-medium);
+          padding: 0.25rem 0.6rem;
+          border-radius: 4px;
+          font-size: 0.75rem;
+          font-weight: 500;
+          color: var(--text-secondary);
           cursor: pointer;
-          transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+          transition: all 0.15s ease;
         }
-        .demo-btn:hover:not(:disabled) {
-          background: var(--accent-gradient);
-          border-color: rgba(255, 255, 255, 0.2);
-          transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(2, 132, 199, 0.35);
+        .sample-btn:hover:not(:disabled) {
+          background: #E2E8F0;
+          color: var(--text-primary);
         }
-        .controls-row {
+        .toolbar {
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: 1rem;
-          margin-bottom: 1.25rem;
+          margin-bottom: 1rem;
         }
         .search-input {
-          width: 420px;
-          padding: 0.6rem 1rem;
+          width: 340px;
+          padding: 0.5rem 0.75rem;
           border: 1px solid var(--border-medium);
-          border-radius: 8px;
-          font-size: 0.88rem;
-          background: var(--bg-surface-elevated);
+          border-radius: 6px;
+          font-size: 0.875rem;
+          background: #FFFFFF;
           color: var(--text-primary);
-          transition: all 0.2s ease;
         }
         .search-input:focus {
           outline: none;
-          border-color: var(--border-focus);
-          box-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
+          border-color: var(--accent-primary);
         }
-        .filter-group {
+        .toolbar-actions {
           display: flex;
           align-items: center;
-          gap: 0.65rem;
+          gap: 0.5rem;
         }
         .filter-select {
-          padding: 0.6rem 0.9rem;
+          padding: 0.5rem 0.75rem;
           border: 1px solid var(--border-medium);
-          border-radius: 8px;
+          border-radius: 6px;
           font-size: 0.85rem;
-          background: var(--bg-surface-elevated);
+          background: #FFFFFF;
           color: var(--text-primary);
           cursor: pointer;
         }
         .filter-select:focus {
           outline: none;
-          border-color: var(--border-focus);
+          border-color: var(--accent-primary);
         }
-        .refresh-btn {
-          background: var(--bg-surface-elevated);
-          border: 1px solid var(--border-medium);
-          color: var(--text-secondary);
-          padding: 0.6rem 0.9rem;
-          border-radius: 8px;
-          font-size: 0.85rem;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-        .refresh-btn:hover {
-          background: var(--bg-subtle);
-          color: #FFFFFF;
-          border-color: var(--border-focus);
-        }
-        .table-wrapper {
-          background: var(--bg-surface);
+        .table-card {
+          background: #FFFFFF;
           border: 1px solid var(--border-light);
-          border-radius: 12px;
-          box-shadow: var(--shadow-lg);
+          border-radius: 8px;
+          box-shadow: var(--shadow-sm);
           overflow: hidden;
         }
         .cases-table {
           width: 100%;
           border-collapse: collapse;
-          font-size: 0.88rem;
+          font-size: 0.875rem;
           text-align: left;
         }
         .cases-table th {
-          background: var(--bg-subtle);
-          padding: 0.85rem 1.1rem;
+          background: #F8FAFC;
+          padding: 0.75rem 1rem;
           font-weight: 600;
           color: var(--text-muted);
-          font-size: 0.78rem;
-          letter-spacing: 0.04em;
+          font-size: 0.75rem;
           text-transform: uppercase;
           border-bottom: 1px solid var(--border-light);
         }
         .cases-table td {
-          padding: 0.95rem 1.1rem;
+          padding: 0.85rem 1rem;
           border-bottom: 1px solid var(--border-light);
-          color: var(--text-primary);
+          color: var(--text-secondary);
         }
         .case-row {
           cursor: pointer;
-          transition: background 0.15s ease, transform 0.15s ease;
+          transition: background 0.1s ease;
         }
         .case-row:hover {
-          background: var(--bg-subtle);
+          background: #F8FAFC;
         }
         .case-id {
-          color: #38BDF8;
-          font-weight: 600;
-          font-size: 0.85rem;
+          font-size: 0.8rem;
+          color: var(--accent-primary);
+          font-weight: 500;
         }
         .case-title {
-          font-weight: 600;
-          max-width: 280px;
+          font-weight: 500;
+          color: var(--text-primary);
+          max-width: 260px;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
-          color: var(--text-primary);
         }
         .customer-cell {
           color: var(--text-secondary);
         }
-        .source-tag {
-          background: rgba(255, 255, 255, 0.04);
-          border: 1px solid var(--border-medium);
-          padding: 0.2rem 0.5rem;
-          border-radius: 5px;
-          font-size: 0.74rem;
+        .source-cell {
+          font-size: 0.8rem;
           color: var(--text-muted);
-          font-family: var(--font-mono);
         }
-        .unresolved-pill {
-          background: rgba(245, 158, 11, 0.15);
-          color: #FBBF24;
-          border: 1px solid rgba(251, 191, 36, 0.3);
-          font-size: 0.75rem;
-          font-weight: 600;
-          padding: 0.2rem 0.55rem;
-          border-radius: 5px;
+        .badge-attention {
+          background: #FFFBEB;
+          color: #B45309;
+          border: 1px solid #FDE68A;
+          font-size: 0.72rem;
+          font-weight: 500;
+          padding: 0.15rem 0.45rem;
+          border-radius: 4px;
         }
-        .resolved-pill {
-          background: rgba(16, 185, 129, 0.15);
-          color: #34D399;
-          border: 1px solid rgba(52, 211, 153, 0.3);
+        .badge-ok {
+          color: #059669;
           font-size: 0.75rem;
-          font-weight: 600;
-          padding: 0.2rem 0.55rem;
-          border-radius: 5px;
+          font-weight: 500;
         }
         .time-cell {
           color: var(--text-muted);
           font-size: 0.8rem;
-          font-family: var(--font-mono);
         }
-        .align-center {
-          text-align: center;
-        }
-        .align-right {
-          text-align: right;
-        }
-        .font-mono {
-          font-family: var(--font-mono);
-        }
-        .font-bold {
-          font-weight: 700;
-        }
-        .open-btn {
-          background: rgba(56, 189, 248, 0.1);
-          border: 1px solid rgba(56, 189, 248, 0.3);
-          color: #38BDF8;
-          padding: 0.4rem 0.75rem;
-          border-radius: 6px;
+        .btn-sm {
+          padding: 0.3rem 0.65rem;
           font-size: 0.8rem;
-          font-weight: 600;
-          cursor: pointer;
-          margin-right: 0.5rem;
-          transition: all 0.15s ease;
         }
-        .open-btn:hover {
-          background: var(--accent-gradient);
-          border-color: transparent;
-          color: #ffffff;
-          transform: translateY(-1px);
-        }
-        .delete-icon-btn {
+        .delete-btn {
           background: none;
           border: none;
-          font-size: 0.95rem;
-          cursor: pointer;
-          opacity: 0.5;
           color: var(--text-muted);
-          transition: opacity 0.15s ease, color 0.15s ease;
+          font-size: 0.85rem;
+          cursor: pointer;
+          padding: 0.3rem 0.5rem;
+          margin-left: 0.35rem;
+          border-radius: 4px;
         }
-        .delete-icon-btn:hover {
-          opacity: 1;
-          color: #F87171;
+        .delete-btn:hover {
+          color: #EF4444;
+          background: #FEF2F2;
         }
-        .empty-state {
-          padding: 4.5rem 2rem;
+        .state-box {
+          padding: 3.5rem 2rem;
           text-align: center;
-        }
-        .empty-icon {
-          font-size: 2.8rem;
-          margin-bottom: 0.85rem;
         }
         .empty-title {
-          font-size: 1.25rem;
-          font-weight: 700;
-          margin-bottom: 0.5rem;
+          font-size: 1.1rem;
+          font-weight: 600;
           color: var(--text-primary);
-          font-family: var(--font-heading);
         }
-        .empty-desc {
+        .empty-sub {
+          font-size: 0.85rem;
           color: var(--text-muted);
-          max-width: 500px;
-          margin: 0 auto 1.75rem auto;
-          font-size: 0.9rem;
-          line-height: 1.6;
+          margin-top: 0.35rem;
         }
-        .loading-state {
-          padding: 3.5rem;
-          text-align: center;
-          color: var(--text-muted);
-          font-size: 0.95rem;
-        }-muted);
-        }
+        .align-center { text-align: center; }
+        .align-right { text-align: right; }
+        .font-mono { font-family: var(--font-mono); }
       `}</style>
     </div>
   );

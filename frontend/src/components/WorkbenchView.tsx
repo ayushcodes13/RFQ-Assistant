@@ -626,133 +626,113 @@ export function WorkbenchView({
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0.85rem 1.75rem;
-          background: rgba(14, 20, 34, 0.85);
-          backdrop-filter: blur(16px);
+          padding: 0.75rem 1.5rem;
+          background: #FFFFFF;
           border-bottom: 1px solid var(--border-light);
           z-index: 20;
         }
         .header-meta {
           display: flex;
           flex-direction: column;
-          gap: 0.25rem;
+          gap: 0.2rem;
         }
         .back-link {
           background: none;
           border: none;
           color: var(--accent-primary);
           font-size: 0.8rem;
-          font-weight: 600;
+          font-weight: 500;
           cursor: pointer;
           padding: 0;
           text-align: left;
-          transition: color 0.15s ease;
-          display: inline-flex;
-          align-items: center;
-          gap: 0.35rem;
         }
         .back-link:hover {
-          color: var(--accent-primary-hover);
           text-decoration: underline;
         }
         .title-row {
           display: flex;
           align-items: center;
-          gap: 0.85rem;
+          gap: 0.75rem;
         }
         .case-title {
-          font-size: 1.15rem;
-          font-weight: 700;
+          font-size: 1.05rem;
+          font-weight: 600;
           color: var(--text-primary);
-          letter-spacing: -0.02em;
         }
         .case-name {
-          font-size: 0.92rem;
+          font-size: 0.875rem;
           color: var(--text-secondary);
         }
         .customer-tag {
-          background: rgba(255, 255, 255, 0.05);
-          padding: 0.2rem 0.6rem;
-          border-radius: 9999px;
+          background: var(--bg-subtle);
+          padding: 0.15rem 0.5rem;
+          border-radius: 4px;
           font-size: 0.75rem;
-          font-weight: 600;
-          color: var(--text-secondary);
+          color: var(--text-muted);
           border: 1px solid var(--border-light);
         }
         .header-actions {
           display: flex;
           align-items: center;
-          gap: 0.85rem;
+          gap: 0.75rem;
         }
         .counters-box {
           display: flex;
           align-items: center;
-          gap: 0.5rem;
-          font-size: 0.82rem;
-          background: var(--bg-surface-elevated);
-          padding: 0.45rem 0.85rem;
-          border-radius: 8px;
+          gap: 0.4rem;
+          font-size: 0.8rem;
+          background: var(--bg-subtle);
+          padding: 0.4rem 0.75rem;
+          border-radius: 6px;
           border: 1px solid var(--border-light);
-          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
         }
         .count-label {
           color: var(--text-muted);
         }
         .divider {
           color: var(--border-medium);
-          margin: 0 0.25rem;
+          margin: 0 0.2rem;
         }
         .text-amber { 
-          color: #F59E0B; 
-          font-weight: 700; 
-          text-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
+          color: #D97706; 
+          font-weight: 600; 
         }
         .text-emerald { 
-          color: #10B981; 
-          font-weight: 700; 
-          text-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
+          color: #059669; 
+          font-weight: 600; 
         }
         .secondary-btn {
-          background: var(--bg-surface);
+          background: #FFFFFF;
           border: 1px solid var(--border-medium);
-          color: var(--text-primary);
-          padding: 0.45rem 0.85rem;
-          border-radius: 8px;
+          color: var(--text-secondary);
+          padding: 0.45rem 0.8rem;
+          border-radius: 6px;
           font-size: 0.82rem;
-          font-weight: 600;
+          font-weight: 500;
           cursor: pointer;
-          transition: all 0.2s ease;
+          transition: all 0.15s ease;
         }
         .secondary-btn:hover {
-          background: var(--bg-surface-elevated);
-          border-color: var(--accent-primary);
+          background: var(--bg-subtle);
           color: var(--text-primary);
         }
         .export-btn {
-          background: var(--accent-gradient);
-          border: 1px solid rgba(14, 165, 233, 0.4);
-          color: #ffffff;
-          padding: 0.5rem 1.1rem;
-          border-radius: 8px;
-          font-size: 0.88rem;
-          font-weight: 600;
+          background: var(--accent-primary);
+          border: 1px solid var(--accent-primary);
+          color: #FFFFFF;
+          padding: 0.45rem 1rem;
+          border-radius: 6px;
+          font-size: 0.875rem;
+          font-weight: 500;
           cursor: pointer;
-          transition: all 0.2s ease;
-          box-shadow: 0 0 12px rgba(14, 165, 233, 0.25);
+          transition: background 0.15s ease;
         }
         .export-btn:hover {
-          box-shadow: 0 0 18px rgba(14, 165, 233, 0.4);
-          transform: translateY(-1px);
+          background: var(--accent-primary-hover);
         }
         .export-btn.has-unresolved {
-          background: var(--bg-surface-elevated);
-          border-color: var(--border-medium);
-          color: var(--text-secondary);
-          box-shadow: none;
-        }
-        .export-btn.has-unresolved:hover {
-          border-color: var(--accent-primary);
-          color: var(--text-primary);
+          background: #0F172A;
+          border-color: #0F172A;
         }
 
         .split-workspace {
@@ -761,10 +741,10 @@ export function WorkbenchView({
           overflow: hidden;
         }
         .source-panel {
-          width: 38%;
-          min-width: 380px;
-          max-width: 500px;
-          background: var(--bg-surface);
+          width: 35%;
+          min-width: 340px;
+          max-width: 460px;
+          background: #FFFFFF;
           border-right: 1px solid var(--border-light);
           display: flex;
           flex-direction: column;
@@ -780,30 +760,29 @@ export function WorkbenchView({
           border-bottom: 1px solid var(--border-light);
         }
         .panel-title {
-          font-size: 0.78rem;
-          font-weight: 700;
+          font-size: 0.75rem;
+          font-weight: 600;
           color: var(--text-muted);
           letter-spacing: 0.5px;
           text-transform: uppercase;
         }
         .badge-source {
-          background: var(--bg-surface-elevated);
-          color: var(--accent-primary);
+          background: var(--bg-subtle);
+          color: var(--text-secondary);
           border: 1px solid var(--border-light);
           font-family: var(--font-mono);
           font-size: 0.72rem;
-          font-weight: 600;
-          padding: 0.15rem 0.5rem;
+          padding: 0.1rem 0.4rem;
           border-radius: 4px;
         }
         .file-info-card {
-          background: var(--bg-surface-elevated);
+          background: var(--bg-subtle);
           border: 1px solid var(--border-light);
-          border-radius: 8px;
-          padding: 0.85rem;
+          border-radius: 6px;
+          padding: 0.75rem;
           display: flex;
           flex-direction: column;
-          gap: 0.4rem;
+          gap: 0.35rem;
         }
         .info-row {
           display: flex;
@@ -817,20 +796,19 @@ export function WorkbenchView({
         .font-xs { font-size: 0.72rem; }
 
         .selected-locator-box {
-          background: rgba(14, 165, 233, 0.05);
-          border: 1px solid rgba(14, 165, 233, 0.3);
-          border-radius: 8px;
+          background: #EFF6FF;
+          border: 1px solid #BFDBFE;
+          border-radius: 6px;
           padding: 0.85rem;
           display: flex;
           flex-direction: column;
           gap: 0.5rem;
-          box-shadow: 0 0 16px rgba(14, 165, 233, 0.05);
         }
         .locator-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          font-size: 0.82rem;
+          font-size: 0.8rem;
           font-weight: 600;
           color: var(--accent-primary);
         }
@@ -839,34 +817,33 @@ export function WorkbenchView({
           color: var(--text-secondary);
         }
         .raw-snippet-container {
-          background: var(--bg-app);
-          border: 1px solid rgba(14, 165, 233, 0.2);
-          border-radius: 6px;
-          padding: 0.75rem;
+          background: #FFFFFF;
+          border: 1px solid #BFDBFE;
+          border-radius: 4px;
+          padding: 0.65rem;
         }
         .snippet-title {
           font-size: 0.72rem;
           color: var(--text-muted);
           margin-bottom: 0.25rem;
-          font-weight: 600;
         }
         .raw-snippet-box {
           font-size: 0.82rem;
           color: var(--text-primary);
-          line-height: 1.45;
+          line-height: 1.4;
           white-space: pre-wrap;
           word-break: break-word;
         }
         .warnings-container {
-          background: rgba(245, 158, 11, 0.1);
-          border: 1px solid rgba(245, 158, 11, 0.3);
-          border-radius: 6px;
-          padding: 0.65rem 0.85rem;
+          background: #FFFBEB;
+          border: 1px solid #FDE68A;
+          border-radius: 4px;
+          padding: 0.5rem 0.65rem;
           font-size: 0.78rem;
-          color: #FCD34D;
+          color: #92400E;
         }
         .warning-heading {
-          font-weight: 700;
+          font-weight: 600;
           margin-bottom: 0.2rem;
         }
         .no-line-selected {
@@ -877,84 +854,87 @@ export function WorkbenchView({
         }
         .doc-preview-wrapper {
           border: 1px solid var(--border-light);
-          border-radius: 8px;
+          border-radius: 6px;
           overflow: hidden;
           display: flex;
           flex-direction: column;
           flex: 1;
-          background: var(--bg-surface-elevated);
+          background: #FFFFFF;
         }
         .doc-preview-header {
           background: var(--bg-subtle);
-          padding: 0.5rem 0.85rem;
+          padding: 0.45rem 0.75rem;
           font-size: 0.75rem;
           font-weight: 600;
           color: var(--text-muted);
           border-bottom: 1px solid var(--border-light);
         }
         .doc-preview-content {
-          padding: 0.85rem;
+          padding: 0.75rem;
           font-size: 0.78rem;
           color: var(--text-secondary);
-          line-height: 1.5;
+          line-height: 1.45;
           white-space: pre-wrap;
           overflow-y: auto;
           flex: 1;
+          background: #FAFAFA;
         }
 
         .table-panel {
           flex: 1;
           display: flex;
           flex-direction: column;
-          background: var(--bg-surface);
+          background: #FFFFFF;
           overflow: hidden;
         }
         .table-toolbar {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0.75rem 1.5rem;
+          padding: 0.65rem 1.25rem;
           border-bottom: 1px solid var(--border-light);
-          background: var(--bg-surface-elevated);
+          background: #FAFAFA;
         }
         .filter-tabs {
           display: flex;
-          gap: 0.4rem;
+          gap: 0.35rem;
         }
         .tab-btn {
           background: none;
           border: 1px solid transparent;
-          padding: 0.4rem 0.75rem;
-          border-radius: 6px;
+          padding: 0.35rem 0.65rem;
+          border-radius: 4px;
           font-size: 0.8rem;
-          font-weight: 600;
+          font-weight: 500;
           color: var(--text-secondary);
           cursor: pointer;
           transition: all 0.15s ease;
         }
         .tab-btn:hover {
           color: var(--text-primary);
-          background: rgba(255, 255, 255, 0.04);
+          background: var(--bg-subtle);
         }
         .tab-btn.active {
-          background: rgba(14, 165, 233, 0.12);
+          background: #FFFFFF;
           color: var(--accent-primary);
-          border-color: rgba(14, 165, 233, 0.3);
+          font-weight: 600;
+          border-color: var(--border-light);
+          box-shadow: var(--shadow-sm);
         }
         .batch-approve-btn {
-          background: rgba(16, 185, 129, 0.1);
-          border: 1px solid rgba(16, 185, 129, 0.3);
-          color: #34D399;
+          background: #FFFFFF;
+          border: 1px solid var(--border-medium);
+          color: #059669;
           font-size: 0.78rem;
-          font-weight: 600;
-          padding: 0.4rem 0.8rem;
-          border-radius: 6px;
+          font-weight: 500;
+          padding: 0.35rem 0.65rem;
+          border-radius: 4px;
           cursor: pointer;
-          transition: all 0.2s ease;
+          transition: all 0.15s ease;
         }
         .batch-approve-btn:hover {
-          background: rgba(16, 185, 129, 0.2);
-          box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
+          background: #ECFDF5;
+          border-color: #A7F3D0;
         }
 
         .grid-scroll-area {
@@ -970,68 +950,64 @@ export function WorkbenchView({
         .review-grid th {
           position: sticky;
           top: 0;
-          background: var(--bg-surface-elevated);
-          padding: 0.75rem 1rem;
+          background: #F8FAFC;
+          padding: 0.65rem 0.85rem;
           font-weight: 600;
-          font-size: 0.74rem;
+          font-size: 0.75rem;
           color: var(--text-muted);
-          letter-spacing: 0.5px;
           text-transform: uppercase;
           border-bottom: 1px solid var(--border-light);
           z-index: 10;
         }
         .review-grid td {
-          padding: 0.75rem 1rem;
+          padding: 0.65rem 0.85rem;
           border-bottom: 1px solid var(--border-light);
           vertical-align: middle;
         }
         .grid-row {
           cursor: pointer;
-          transition: background 0.15s ease;
+          transition: background 0.1s ease;
         }
         .grid-row:hover {
-          background: rgba(255, 255, 255, 0.02);
+          background: #F8FAFC;
         }
         .grid-row.selected {
-          background: rgba(14, 165, 233, 0.1) !important;
+          background: #EFF6FF !important;
           border-left: 3px solid var(--accent-primary);
         }
         .grid-row.row-attention {
-          background: rgba(245, 158, 11, 0.04);
+          background: #FFFDF5;
         }
         .align-center { text-align: center; }
         .align-right { text-align: right; }
         .font-muted { color: var(--text-muted); }
         .font-mono { font-family: var(--font-mono); }
-        .font-bold { font-weight: 700; }
+        .font-bold { font-weight: 600; }
 
         .qty-cell {
           display: flex;
           align-items: center;
-          gap: 0.4rem;
+          gap: 0.35rem;
         }
         .qty-input {
-          width: 60px;
-          padding: 0.3rem 0.45rem;
+          width: 55px;
+          padding: 0.25rem 0.4rem;
           border: 1px solid var(--border-medium);
-          background: var(--bg-app);
+          background: #FFFFFF;
           color: var(--text-primary);
-          border-radius: 6px;
+          border-radius: 4px;
           font-size: 0.85rem;
           font-family: var(--font-mono);
           text-align: center;
-          transition: border-color 0.15s ease, box-shadow 0.15s ease;
         }
         .qty-input:focus {
           border-color: var(--accent-primary);
           outline: none;
-          box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.25);
         }
         .qty-input.missing {
           border-color: #EF4444;
-          background: rgba(239, 68, 68, 0.1);
-          color: #F87171;
-          box-shadow: 0 0 8px rgba(239, 68, 68, 0.2);
+          background: #FEF2F2;
+          color: #DC2626;
         }
         .uom-label {
           font-size: 0.72rem;
@@ -1040,24 +1016,22 @@ export function WorkbenchView({
         .part-desc-cell {
           display: flex;
           flex-direction: column;
-          gap: 0.2rem;
+          gap: 0.15rem;
         }
         .mpn-line {
           display: flex;
           align-items: center;
-          gap: 0.5rem;
+          gap: 0.45rem;
         }
         .mpn-text {
           color: var(--text-primary);
-          font-weight: 600;
         }
         .oem-pill {
-          background: rgba(255, 255, 255, 0.05);
+          background: var(--bg-subtle);
           border: 1px solid var(--border-light);
-          padding: 0.1rem 0.45rem;
-          border-radius: 4px;
+          padding: 0.05rem 0.35rem;
+          border-radius: 3px;
           font-size: 0.7rem;
-          font-weight: 600;
           color: var(--text-secondary);
         }
         .raw-subtext {
@@ -1066,19 +1040,19 @@ export function WorkbenchView({
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
-          max-width: 340px;
+          max-width: 320px;
         }
         .sku-match-cell {
           display: flex;
           flex-direction: column;
-          gap: 0.2rem;
+          gap: 0.15rem;
         }
         .sku-badge {
-          background: rgba(14, 165, 233, 0.1);
+          background: #EFF6FF;
           color: var(--accent-primary);
-          border: 1px solid rgba(14, 165, 233, 0.3);
-          padding: 0.15rem 0.45rem;
-          border-radius: 4px;
+          border: 1px solid #BFDBFE;
+          padding: 0.1rem 0.35rem;
+          border-radius: 3px;
           font-size: 0.75rem;
           display: inline-block;
           width: fit-content;
@@ -1092,8 +1066,8 @@ export function WorkbenchView({
           flex-direction: column;
         }
         .collision-warning {
-          color: #F59E0B;
-          font-weight: 600;
+          color: #B45309;
+          font-weight: 500;
           font-size: 0.75rem;
         }
         .subtle-hint {
@@ -1101,7 +1075,7 @@ export function WorkbenchView({
           color: var(--text-muted);
         }
         .no-match-text {
-          color: #F87171;
+          color: #DC2626;
           font-size: 0.75rem;
           font-weight: 500;
         }
@@ -1110,71 +1084,67 @@ export function WorkbenchView({
           display: flex;
           align-items: center;
           justify-content: flex-end;
-          gap: 0.4rem;
+          gap: 0.35rem;
         }
         .action-icon-btn {
-          width: 30px;
-          height: 30px;
-          border-radius: 6px;
+          width: 26px;
+          height: 26px;
+          border-radius: 4px;
           border: 1px solid var(--border-medium);
-          background: var(--bg-surface-elevated);
+          background: #FFFFFF;
           color: var(--text-secondary);
           cursor: pointer;
-          font-size: 0.85rem;
-          font-weight: 700;
+          font-size: 0.8rem;
+          font-weight: 600;
           display: flex;
           align-items: center;
           justify-content: center;
           transition: all 0.15s ease;
         }
         .action-icon-btn.approve:hover, .action-icon-btn.approve.active {
-          background: #10B981;
-          color: #ffffff;
-          border-color: #10B981;
-          box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+          background: #059669;
+          color: #FFFFFF;
+          border-color: #059669;
         }
         .action-icon-btn.clarify:hover, .action-icon-btn.clarify.active {
-          background: #F59E0B;
-          color: #ffffff;
-          border-color: #F59E0B;
-          box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);
+          background: #D97706;
+          color: #FFFFFF;
+          border-color: #D97706;
         }
         .action-icon-btn.reject:hover, .action-icon-btn.reject.active {
-          background: #EF4444;
-          color: #ffffff;
-          border-color: #EF4444;
-          box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+          background: #DC2626;
+          color: #FFFFFF;
+          border-color: #DC2626;
         }
 
         .line-inspector {
-          height: 250px;
+          height: 230px;
           border-top: 1px solid var(--border-light);
-          background: var(--bg-surface-elevated);
+          background: #FAFAFA;
           display: flex;
           flex-direction: column;
-          padding: 1rem 1.5rem;
-          box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.25);
+          padding: 0.85rem 1.25rem;
         }
         .inspector-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding-bottom: 0.5rem;
+          padding-bottom: 0.45rem;
           border-bottom: 1px solid var(--border-light);
-          margin-bottom: 0.75rem;
+          margin-bottom: 0.65rem;
         }
         .inspector-title {
-          font-size: 0.85rem;
-          font-weight: 700;
+          font-size: 0.82rem;
+          font-weight: 600;
           color: var(--text-primary);
         }
         .saving-indicator {
           font-size: 0.75rem;
-          color: var(--accent-primary);
+          color: var(--text-muted);
         }
         .inspector-content {
           display: flex;
-          gap: 1.5rem;
+          gap: 1.25rem;
           flex: 1;
           overflow: hidden;
         }
@@ -1182,47 +1152,41 @@ export function WorkbenchView({
           flex: 3;
           display: flex;
           flex-direction: column;
-          gap: 0.5rem;
+          gap: 0.45rem;
           overflow-y: auto;
         }
         .notes-column {
           flex: 2;
           display: flex;
           flex-direction: column;
-          gap: 0.5rem;
+          gap: 0.45rem;
         }
         .section-title {
           font-size: 0.75rem;
-          font-weight: 700;
+          font-weight: 600;
           color: var(--text-muted);
           text-transform: uppercase;
-          letter-spacing: 0.5px;
         }
         .candidate-cards {
           display: flex;
           flex-direction: column;
-          gap: 0.5rem;
+          gap: 0.45rem;
         }
         .candidate-card {
           border: 1px solid var(--border-light);
-          border-radius: 8px;
-          padding: 0.75rem;
-          background: var(--bg-surface);
-          transition: all 0.15s ease;
-        }
-        .candidate-card:hover {
-          border-color: var(--border-medium);
+          border-radius: 6px;
+          padding: 0.65rem;
+          background: #FFFFFF;
         }
         .candidate-card.chosen {
           border-color: var(--accent-primary);
-          background: rgba(14, 165, 233, 0.08);
-          box-shadow: 0 0 12px rgba(14, 165, 233, 0.1);
+          background: #EFF6FF;
         }
         .card-top {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          margin-bottom: 0.35rem;
+          margin-bottom: 0.25rem;
         }
         .cand-sku {
           color: var(--accent-primary);
@@ -1233,15 +1197,14 @@ export function WorkbenchView({
           color: var(--text-secondary);
         }
         .select-candidate-btn {
-          background: var(--bg-surface-elevated);
+          background: #FFFFFF;
           border: 1px solid var(--border-medium);
           color: var(--text-secondary);
-          padding: 0.25rem 0.65rem;
-          border-radius: 6px;
+          padding: 0.2rem 0.55rem;
+          border-radius: 4px;
           font-size: 0.75rem;
-          font-weight: 600;
+          font-weight: 500;
           cursor: pointer;
-          transition: all 0.15s ease;
         }
         .select-candidate-btn:hover {
           background: var(--bg-subtle);
@@ -1249,14 +1212,13 @@ export function WorkbenchView({
         }
         .select-candidate-btn.is-selected {
           background: var(--accent-primary);
-          color: #ffffff;
+          color: #FFFFFF;
           border-color: var(--accent-primary);
-          box-shadow: 0 0 8px rgba(14, 165, 233, 0.3);
         }
         .cand-desc {
           font-size: 0.78rem;
           color: var(--text-primary);
-          margin-bottom: 0.35rem;
+          margin-bottom: 0.25rem;
         }
         .cand-footer {
           display: flex;
@@ -1266,112 +1228,100 @@ export function WorkbenchView({
           color: var(--text-muted);
         }
         .cand-price {
-          color: #34D399;
-          font-weight: 700;
+          color: #059669;
+          font-weight: 600;
         }
         .no-candidates-msg {
           font-size: 0.8rem;
           color: var(--text-muted);
-          padding: 0.85rem;
-          background: var(--bg-surface);
-          border-radius: 6px;
-          border: 1px dashed var(--border-light);
+          padding: 0.75rem;
+          background: #FFFFFF;
+          border-radius: 4px;
+          border: 1px dashed var(--border-medium);
         }
 
         .notes-textarea {
           width: 100%;
-          padding: 0.65rem;
+          padding: 0.5rem;
           border: 1px solid var(--border-medium);
-          background: var(--bg-app);
+          background: #FFFFFF;
           color: var(--text-primary);
-          border-radius: 6px;
+          border-radius: 4px;
           font-size: 0.82rem;
           resize: none;
-          line-height: 1.4;
-          transition: border-color 0.15s ease;
         }
         .notes-textarea:focus {
           outline: none;
           border-color: var(--accent-primary);
-          box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.2);
         }
         .decision-actions {
           display: flex;
-          gap: 0.6rem;
+          gap: 0.5rem;
         }
         .approve-big-btn {
           flex: 1;
-          background: rgba(16, 185, 129, 0.15);
-          color: #34D399;
-          border: 1px solid rgba(16, 185, 129, 0.4);
-          padding: 0.55rem;
-          border-radius: 6px;
-          font-size: 0.82rem;
-          font-weight: 600;
+          background: #059669;
+          color: #FFFFFF;
+          border: 1px solid #059669;
+          padding: 0.45rem;
+          border-radius: 4px;
+          font-size: 0.8rem;
+          font-weight: 500;
           cursor: pointer;
-          transition: all 0.2s ease;
         }
         .approve-big-btn:hover {
-          background: #10B981;
-          color: #ffffff;
-          box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+          background: #047857;
         }
         .clarify-big-btn {
           flex: 1;
-          background: rgba(245, 158, 11, 0.15);
-          color: #FBBF24;
-          border: 1px solid rgba(245, 158, 11, 0.4);
-          padding: 0.55rem;
-          border-radius: 6px;
-          font-size: 0.82rem;
-          font-weight: 600;
+          background: #D97706;
+          color: #FFFFFF;
+          border: 1px solid #D97706;
+          padding: 0.45rem;
+          border-radius: 4px;
+          font-size: 0.8rem;
+          font-weight: 500;
           cursor: pointer;
-          transition: all 0.2s ease;
         }
         .clarify-big-btn:hover {
-          background: #F59E0B;
-          color: #ffffff;
-          box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
+          background: #B45309;
         }
 
         .audit-modal-backdrop {
           position: fixed;
           top: 0; left: 0; right: 0; bottom: 0;
-          background: rgba(4, 6, 12, 0.75);
-          backdrop-filter: blur(8px);
+          background: rgba(15, 23, 42, 0.35);
           z-index: 100;
           display: flex;
           justify-content: flex-end;
         }
         .audit-drawer {
-          width: 480px;
-          background: var(--bg-surface-elevated);
-          border-left: 1px solid var(--border-light);
+          width: 440px;
+          background: #FFFFFF;
           height: 100%;
-          box-shadow: -8px 0 24px rgba(0, 0, 0, 0.5);
+          box-shadow: var(--shadow-lg);
           display: flex;
           flex-direction: column;
-          padding: 1.75rem;
+          padding: 1.5rem;
         }
         .drawer-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding-bottom: 1.25rem;
+          padding-bottom: 1rem;
           border-bottom: 1px solid var(--border-light);
         }
         .drawer-header h3 {
-          font-size: 1.05rem;
-          font-weight: 700;
+          font-size: 0.95rem;
+          font-weight: 600;
           color: var(--text-primary);
         }
         .close-btn {
           background: none;
           border: none;
           color: var(--text-muted);
-          font-size: 1.2rem;
+          font-size: 1.1rem;
           cursor: pointer;
-          transition: color 0.15s ease;
         }
         .close-btn:hover {
           color: var(--text-primary);
@@ -1379,53 +1329,52 @@ export function WorkbenchView({
         .audit-list {
           flex: 1;
           overflow-y: auto;
-          padding-top: 1.25rem;
+          padding-top: 1rem;
           display: flex;
           flex-direction: column;
-          gap: 1rem;
+          gap: 0.75rem;
         }
         .audit-item {
           display: flex;
-          gap: 0.85rem;
-          font-size: 0.82rem;
-          padding: 0.75rem;
-          background: var(--bg-surface);
-          border: 1px solid var(--border-light);
-          border-radius: 6px;
+          gap: 0.75rem;
+          font-size: 0.8rem;
+          padding: 0.5rem;
+          background: var(--bg-subtle);
+          border-radius: 4px;
         }
         .audit-time {
-          color: var(--accent-primary);
+          color: var(--text-muted);
           font-size: 0.72rem;
           white-space: nowrap;
         }
         .audit-body {
           display: flex;
           flex-direction: column;
-          gap: 0.25rem;
+          gap: 0.2rem;
         }
         .audit-action {
           color: var(--text-primary);
         }
         .audit-field {
           color: var(--text-secondary);
-          font-size: 0.76rem;
+          font-size: 0.75rem;
         }
         .audit-field code {
-          background: rgba(255, 255, 255, 0.08);
-          padding: 0.1rem 0.3rem;
+          background: #FFFFFF;
+          border: 1px solid var(--border-light);
+          padding: 0.1rem 0.25rem;
           border-radius: 3px;
-          color: var(--accent-primary);
         }
         .audit-notes {
           color: var(--text-muted);
           font-style: italic;
-          font-size: 0.76rem;
+          font-size: 0.75rem;
         }
         .no-audits {
           color: var(--text-muted);
           font-size: 0.85rem;
           text-align: center;
-          padding: 3rem 0;
+          padding: 2rem 0;
         }
       `}</style>
     </div>
