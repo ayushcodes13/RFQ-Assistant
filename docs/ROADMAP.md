@@ -36,13 +36,13 @@
 
 ## Phase 3 — Catalog lookup
 
-- [ ] Import and validate small sample item-master CSV.
-- [ ] Check exact manufacturer+part number; collision is a separate outcome.
-- [ ] Preserve meaningful part-number suffixes, revision and packaging context.
-- [ ] Expose matches/non-matches with clear origin and no fake availability.
-- [ ] Add tests for near-identical MPNs and cross-brand collisions.
+- [x] Import and validate small sample item-master CSV. *(Implemented in rfq_assistant/matching/catalog.py)*
+- [x] Check exact manufacturer+part number; collision is a separate outcome. *(Implemented in rfq_assistant/matching/engine.py)*
+- [x] Preserve meaningful part-number suffixes, revision and packaging context. *(Implemented in rfq_assistant/matching/normalizer.py)*
+- [x] Expose matches/non-matches with clear origin and no fake availability. *(Strict MatchCandidate grounding, blank prices unless authorized)*
+- [x] Add tests for near-identical MPNs and cross-brand collisions. *(Verified in tests/test_matching_and_audit.py)*
 
-**Exit:** Every suggestion is traceable to an actual imported catalog row.
+**Exit:** Every suggestion is traceable to an actual imported catalog row. (Verified via pytest suite in tests/test_matching_and_audit.py)
 
 ## Phase 4 — Review workbench
 
