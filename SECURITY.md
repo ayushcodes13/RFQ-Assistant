@@ -18,6 +18,26 @@ RFQ files can contain names, email addresses, purchase quantities, customer pric
 - Keep customer records tenant-scoped and ensure deletion works before a production pilot.
 - Do not use company/employer intellectual property, data or accounts without permission.
 
+## Pilot API-key configuration
+
+The API must not rely on hard-coded, publicly known credentials. There are **no built-in
+pilot keys**. Authentication is disabled only for an explicitly local, synthetic demo;
+do not expose that mode to other machines or the internet.
+
+For a protected deployment, set `REQUIRE_AUTH=true` and configure `PILOT_API_KEYS`
+outside the repository. The format is a comma-separated list of
+`<random-secret-key>:<admin|reviewer|viewer>:<display-name>`; each secret must
+be at least 16 characters and should be generated with a cryptographically
+secure random generator (prefer substantially longer random secrets).
+Never store real credentials in screenshots, issues, CI logs, or committed files.
+
+With `REQUIRE_AUTH=true`, missing keys reject API access (503) rather than
+falling back to test credentials. Malformed, duplicate, weak or invalid-role
+entries also reject the configuration. Rotate and revoke keys after any
+exposure. API keys are a limited pilot boundary, **not** tenant isolation,
+session management, HTTPS termination, or production-grade identity.
+The current browser prototype is not an authenticated enterprise workspace.
+
 ## Before pilot deployment
 
 Document authentication, access control, encryption, environment separation, data residency, subprocessors, retention, deletion, backup, logging minimization, incident response, permission to process customer data and how a quote is approved. Make contractual scope clear: the software is a **preparation assistant**, not an engineering certification or price authority.
