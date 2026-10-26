@@ -1,5 +1,7 @@
 """FastAPI application for RFQ Assistant backend API."""
 
+import hashlib
+import json
 from pathlib import Path
 from typing import List, Optional
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
@@ -46,6 +48,45 @@ if DEFAULT_CATALOG_PATH.exists():
         rapidfuzz_engine.index_catalog(catalog_repo.list_all())
     except Exception as e:
         print(f"Warning: Failed to pre-load default catalog: {e}")
+
+def _rfq_source_snapshot_hash(case_id: str) -> str:
+    """Fingerprint the *current* RFQ and item master, not a saved quotation copy.
+
+    Including the full prototype catalog is deliberately conservative: any
+    import/update requires re-drafting and re-approval. Customer deployments
+    should replace this with versioned, workspace-scoped catalog snapshots.
+    """
+    case = case_manager.get_case(case_id)
+    if case is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Source RFQ no longer exists. Quote must not be approved or sent.",
+        )
+    payload = {
+        "case_id": case_id,
+        "customer_label": case.customer_label,
+        "file_digest": case.source_file.sha256_digest if case.source_file else None,
+        "lines": [line.model_dump(mode="json") for line in case_manager.get_lines(case_id)],
+        "catalog": [
+            item.model_dump(mode="json")
+            for item in sorted(catalog_repo.list_all(), key=lambda row: row.internal_sku)
+        ],
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _require_fresh_quote_source(quote_id: str) -> None:
+    """Reject a saved draft if its underlying RFQ or catalog changed."""
+    draft = commercial_service.get_draft(quote_id)
+    if draft is None:
+        return  # The commercial service reports the missing quote.
+    if not draft.source_state_hash or draft.source_state_hash != _rfq_source_snapshot_hash(draft.case_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="RFQ lines, reviewer decisions or catalog changed since this draft was created. Regenerate and review the quote.",
+        )
+
 
 app = FastAPI(
     title="RFQ Assistant API",
@@ -500,6 +541,7 @@ def v1_draft_quote(
         case_id=case_id,
         customer_name=case.customer_label or "Valued Customer",
         currency=currency,
+        source_state_hash=_rfq_source_snapshot_hash(case_id),
         lines=quote_lines,
     )
 
@@ -524,6 +566,7 @@ def v1_approve_quote_draft(
     current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     """Version-bound human approval of a quotation draft."""
+    _require_fresh_quote_source(quote_id)
     effective_approver = current_user.name if current_user.user_id != "usr-local-demo" else approver_name
     try:
         record = commercial_service.approve_draft(
@@ -564,6 +607,7 @@ def v1_send_approved_quote(
     current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     """Transmits quote strictly after human approval verification and hash validation."""
+    _require_fresh_quote_source(quote_id)
     effective_sender = current_user.name if current_user.user_id != "usr-local-demo" else sender_name
     try:
         result = commercial_service.send_approved_quote(

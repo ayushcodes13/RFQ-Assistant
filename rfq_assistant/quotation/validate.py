@@ -50,6 +50,7 @@ class ProposedQuote(BaseModel):
     currency: str = "USD"
     lines: List[QuoteLine] = Field(default_factory=list)
     total_amount: Optional[Decimal] = None
+    source_state_hash: Optional[str] = None  # Snapshot of RFQ rows and catalog at draft creation
     draft_hash: str = ""
     is_approved: bool = False
     approved_by: Optional[str] = None
@@ -69,6 +70,7 @@ class ProposedQuote(BaseModel):
             "case_id": self.case_id,
             "customer_name": self.customer_name,
             "currency": self.currency,
+            "source_state_hash": self.source_state_hash,
             "lines": [
                 {
                     "line_no": l.line_no,
