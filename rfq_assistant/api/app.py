@@ -2,10 +2,11 @@
 
 from pathlib import Path
 from typing import List, Optional
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from decimal import Decimal
 from rfq_assistant.agents.tools import ApprovalGateError, QuotationCommercialService
+from rfq_assistant.auth import PilotUser, get_current_user, require_role
 from rfq_assistant.cases.manager import CaseManager
 from rfq_assistant.exports import ExportGenerator, ExportValidationError
 from rfq_assistant.ingestion.excel import ExcelBOMInspector
@@ -77,8 +78,11 @@ def health_check():
 # ---------------------------------------------------------------------------
 
 @app.post("/api/catalogs/import")
-async def import_catalog(file: UploadFile = File(...)):
-    """Imports tenant-authorized catalog CSV."""
+async def import_catalog(
+    file: UploadFile = File(...),
+    current_user: PilotUser = Depends(require_role(["admin"])),
+):
+    """Imports tenant-authorized catalog CSV (admin only)."""
     content = await file.read()
     try:
         summary = catalog_repo.import_csv(content)
@@ -88,7 +92,7 @@ async def import_catalog(file: UploadFile = File(...)):
 
 
 @app.get("/api/catalogs", response_model=List[CatalogItem])
-def list_catalog():
+def list_catalog(current_user: PilotUser = Depends(get_current_user)):
     """Lists all catalog items in item master."""
     return catalog_repo.list_all()
 
@@ -104,6 +108,7 @@ async def create_rfq(
     title: Optional[str] = Form(None),
     customer_label: Optional[str] = Form(None),
     actor: str = Form("Inside Sales"),
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     """Creates draft case from an uploaded file or pasted email text with malware defense."""
     if not file and not pasted_text:
@@ -111,6 +116,8 @@ async def create_rfq(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Must provide either an uploaded file or pasted text.",
         )
+
+    effective_actor = current_user.name if current_user.user_id != "usr-local-demo" else actor
 
     try:
         if file:
@@ -129,7 +136,7 @@ async def create_rfq(
                 content=content,
                 title=title,
                 customer_label=customer_label,
-                actor=actor,
+                actor=effective_actor,
             )
             return case
         else:
@@ -145,7 +152,7 @@ async def create_rfq(
                 raw_text=raw_text,
                 title=title,
                 customer_label=customer_label,
-                actor=actor,
+                actor=effective_actor,
             )
             return case
     except (UploadValidationError, DocumentParserError) as e:
@@ -157,13 +164,13 @@ async def create_rfq(
 
 
 @app.get("/api/rfqs", response_model=List[RFQCase])
-def list_rfqs():
+def list_rfqs(current_user: PilotUser = Depends(get_current_user)):
     """Returns all RFQ cases sorted by date."""
     return case_manager.list_cases()
 
 
 @app.get("/api/rfqs/{case_id}", response_model=RFQCase)
-def get_rfq(case_id: str):
+def get_rfq(case_id: str, current_user: PilotUser = Depends(get_current_user)):
     case = case_manager.get_case(case_id)
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ case not found.")
@@ -171,7 +178,7 @@ def get_rfq(case_id: str):
 
 
 @app.get("/api/rfqs/{case_id}/lines", response_model=List[RFQLineItem])
-def get_rfq_lines(case_id: str):
+def get_rfq_lines(case_id: str, current_user: PilotUser = Depends(get_current_user)):
     case = case_manager.get_case(case_id)
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ case not found.")
@@ -179,24 +186,42 @@ def get_rfq_lines(case_id: str):
 
 
 @app.patch("/api/rfqs/{case_id}/lines/{line_id}", response_model=RFQLineItem)
-def update_rfq_line(case_id: str, line_id: str, update: RFQLineItemUpdate):
-    updated = case_manager.update_line(case_id, line_id, update)
+def update_rfq_line(
+    case_id: str,
+    line_id: str,
+    update: RFQLineItemUpdate,
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
+):
+    if current_user.user_id != "usr-local-demo":
+        update.actor = current_user.name
+    try:
+        updated = case_manager.update_line(case_id, line_id, update)
+    except ValueError as e:
+        if "conflict" in str(e).lower() or "stale" in str(e).lower():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Line item not found.")
     return updated
 
 
 @app.post("/api/rfqs/{case_id}/review")
-def batch_review_lines(case_id: str, request: BatchReviewRequest):
+def batch_review_lines(
+    case_id: str,
+    request: BatchReviewRequest,
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
+):
     case = case_manager.get_case(case_id)
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ case not found.")
+    if current_user.user_id != "usr-local-demo":
+        request.actor = current_user.name
     count = case_manager.batch_review(case_id, request)
     return {"status": "success", "updated_count": count}
 
 
 @app.get("/api/rfqs/{case_id}/audit", response_model=List[AuditEvent])
-def get_rfq_audit_trail(case_id: str):
+def get_rfq_audit_trail(case_id: str, current_user: PilotUser = Depends(get_current_user)):
     case = case_manager.get_case(case_id)
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ case not found.")
@@ -204,7 +229,11 @@ def get_rfq_audit_trail(case_id: str):
 
 
 @app.delete("/api/rfqs/{case_id}")
-def delete_rfq(case_id: str):
+def delete_rfq(
+    case_id: str,
+    current_user: PilotUser = Depends(require_role(["admin"])),
+):
+    """Deletes RFQ case (restricted to administrators)."""
     success = case_manager.delete_case(case_id)
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ case not found.")
@@ -216,13 +245,19 @@ def delete_rfq(case_id: str):
 # ---------------------------------------------------------------------------
 
 @app.post("/api/rfqs/{case_id}/exports", response_model=ExportManifest)
-def export_rfq_worksheet(case_id: str, request: ExportRequest):
+def export_rfq_worksheet(
+    case_id: str,
+    request: ExportRequest,
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
+):
     """Generates deterministic XLSX/CSV quote worksheet and email draft."""
     case = case_manager.get_case(case_id)
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ case not found.")
 
     lines = case_manager.get_lines(case_id)
+    if current_user.user_id != "usr-local-demo":
+        request.actor = current_user.name
     try:
         manifest = export_generator.generate_export(case, lines, request)
         # Record audit event
@@ -238,17 +273,38 @@ def export_rfq_worksheet(case_id: str, request: ExportRequest):
 
 
 @app.get("/api/rfqs/{case_id}/exports/{export_id}")
-def download_export(case_id: str, export_id: str):
-    """Downloads the generated export artifact."""
+def download_export(
+    case_id: str,
+    export_id: str,
+    current_user: PilotUser = Depends(get_current_user),
+):
+    """Downloads the generated export artifact with strict case-scoping verification."""
     export_dir = Path("storage/exports") / export_id
     if not export_dir.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export not found.")
 
-    files = list(export_dir.iterdir())
+    manifest_path = export_dir / "manifest.json"
+    if manifest_path.exists():
+        import json
+        with open(manifest_path, "r", encoding="utf-8") as mf:
+            manifest_data = json.load(mf)
+            if manifest_data.get("case_id") != case_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Export '{export_id}' does not belong to case '{case_id}'.",
+                )
+
+    files = [f for f in export_dir.iterdir() if f.name != "manifest.json"]
     if not files:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export artifact missing.")
 
     artifact = files[0]
+    if case_id not in artifact.name:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Export '{export_id}' does not belong to case '{case_id}'.",
+        )
+
     from fastapi.responses import FileResponse
     media_type = (
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -259,7 +315,7 @@ def download_export(case_id: str, export_id: str):
 
 
 @app.get("/api/rfqs/{case_id}/email-draft")
-def get_unsent_email_draft(case_id: str):
+def get_unsent_email_draft(case_id: str, current_user: PilotUser = Depends(get_current_user)):
     """Returns the unsent customer clarification email draft."""
     case = case_manager.get_case(case_id)
     if not case:
@@ -280,6 +336,7 @@ async def v1_extract_rfq(
     pasted_text: Optional[str] = Form(None),
     title: Optional[str] = Form(None),
     customer_name: Optional[str] = Form(None),
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     """V1 Extract: Scans attachment with ClamAV, isolates untrusted data, extracts RFQ lines."""
     if not file and not pasted_text:
@@ -304,6 +361,7 @@ async def v1_extract_rfq(
             content=content,
             title=title,
             customer_label=customer_name,
+            actor=current_user.name,
         )
     else:
         content = (pasted_text or "").encode("utf-8")
@@ -317,6 +375,7 @@ async def v1_extract_rfq(
             raw_text=pasted_text or "",
             title=title,
             customer_label=customer_name,
+            actor=current_user.name,
         )
 
     lines = case_manager.get_lines(case.case_id)
@@ -332,7 +391,10 @@ async def v1_extract_rfq(
 
 
 @app.post("/v1/rfqs/{case_id}/match")
-def v1_match_rfq(case_id: str):
+def v1_match_rfq(
+    case_id: str,
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
+):
     """V1 Match: Runs exact catalog matching and RapidFuzz candidate retrieval."""
     case = case_manager.get_case(case_id)
     if not case:
@@ -369,7 +431,11 @@ def v1_match_rfq(case_id: str):
 
 
 @app.post("/v1/rfqs/{case_id}/draft-quote")
-def v1_draft_quote(case_id: str, currency: str = "USD"):
+def v1_draft_quote(
+    case_id: str,
+    currency: str = "USD",
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
+):
     """V1 Draft Quote: Compiles ProposedQuote with provenance, authoritative pricing, and draft hash."""
     case = case_manager.get_case(case_id)
     if not case:
@@ -442,7 +508,7 @@ def v1_draft_quote(case_id: str, currency: str = "USD"):
 
 
 @app.get("/v1/quote-drafts/{quote_id}")
-def v1_get_quote_draft(quote_id: str):
+def v1_get_quote_draft(quote_id: str, current_user: PilotUser = Depends(get_current_user)):
     """Retrieves a quotation draft with current hash and validation errors."""
     draft = commercial_service.get_draft(quote_id)
     if not draft:
@@ -455,13 +521,15 @@ def v1_approve_quote_draft(
     quote_id: str,
     expected_hash: str = Form(...),
     approver_name: str = Form("Inside Sales"),
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     """Version-bound human approval of a quotation draft."""
+    effective_approver = current_user.name if current_user.user_id != "usr-local-demo" else approver_name
     try:
         record = commercial_service.approve_draft(
             quote_id=quote_id,
             expected_hash=expected_hash,
-            approver_name=approver_name,
+            approver_name=effective_approver,
         )
         return {"status": "success", "approval_record": record}
     except ApprovalGateError as e:
@@ -473,12 +541,14 @@ def v1_reject_quote_draft(
     quote_id: str,
     reason: str = Form(...),
     approver_name: str = Form("Inside Sales"),
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     """Rejects quotation draft with explicit reason."""
+    effective_approver = current_user.name if current_user.user_id != "usr-local-demo" else approver_name
     try:
         record = commercial_service.reject_draft(
             quote_id=quote_id,
-            approver_name=approver_name,
+            approver_name=effective_approver,
             reason=reason,
         )
         return {"status": "success", "rejection_record": record}
@@ -491,13 +561,15 @@ def v1_send_approved_quote(
     quote_id: str,
     expected_hash: str = Form(...),
     sender_name: str = Form("Inside Sales"),
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     """Transmits quote strictly after human approval verification and hash validation."""
+    effective_sender = current_user.name if current_user.user_id != "usr-local-demo" else sender_name
     try:
         result = commercial_service.send_approved_quote(
             quote_id=quote_id,
             expected_hash=expected_hash,
-            sender_name=sender_name,
+            sender_name=effective_sender,
         )
         return {"status": "success", "transmission": result}
     except ApprovalGateError as e:

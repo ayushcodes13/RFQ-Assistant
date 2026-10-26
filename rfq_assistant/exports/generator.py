@@ -83,6 +83,15 @@ class ExportGenerator:
         else:
             self._write_csv(case, lines, file_path, request.allow_partial, request.actor)
 
+        import json
+        manifest_path = export_dir / "manifest.json"
+        with open(manifest_path, "w", encoding="utf-8") as mf:
+            json.dump({
+                "export_id": export_id,
+                "case_id": case.case_id,
+                "file_name": file_name,
+            }, mf)
+
         unsent_email = generate_unsent_email_draft(case, lines)
 
         approved_count = sum(1 for l in lines if l.review_decision == ReviewDecision.APPROVED)

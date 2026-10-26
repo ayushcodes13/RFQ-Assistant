@@ -68,7 +68,7 @@
 ## Phase 6 — Pilot readiness (not required for initial demo)
 
 - [ ] Obtain consent and review data retention, processors, deletion and permissions.
-- [ ] Isolate customer files and users with authentication.
+- [x] Isolate customer files and users with authentication. *(Implemented pilot API key & RBAC in rfq_assistant/auth.py, cross-case export boundary isolation, and optimistic concurrency in rfq_assistant/cases/manager.py)*
 - [ ] Benchmark on historical RFQs with human-reviewed ground truth.
 - [ ] Measure end-to-end reviewer time against manual baseline.
 - [ ] Agree paid pilot success criteria, refund conditions only if feasible and documented.
