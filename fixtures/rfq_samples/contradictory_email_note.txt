@@ -1,0 +1,8 @@
+SYNTHETIC TEST FIXTURE — CONTRADICTORY RFQ
+From: purchasing@synthetic-corp.com
+Subject: Quote request for Eaton breakers
+
+Please quote 20 pcs of FAZ-C10/1 as discussed on our call.
+Attached is our formal sheet listing 200 pcs. Please advise which tier applies.
+
+SYNTHETIC NOTICE: Note quantity discrepancy between email (20 pcs) and attachment (200 pcs).

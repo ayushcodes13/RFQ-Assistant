@@ -4,23 +4,23 @@
 
 ## Phase 0 — Validate the workflow
 
-- [ ] Interview at least 5 relevant operators; record exact RFQ types, manual steps and biggest bottlenecks.
-- [ ] Find 2–3 prospects willing to share sanitized sample RFQs and sample catalog format.
-- [ ] Choose exactly one product family and one target export format.
+- [ ] Interview at least 5 relevant operators; record exact RFQ types, manual steps and biggest bottlenecks. *(Blocked pending live customer access; documented in docs/DECISIONS.md ADR 001)*
+- [ ] Find 2–3 prospects willing to share sanitized sample RFQs and sample catalog format. *(Blocked pending commercial agreements; proceeding with synthetic data)*
+- [x] Choose exactly one product family and one target export format. *(Selected Industrial Automation & Control; standard quote-preparation CSV/XLSX)*
 - [ ] Record a baseline: manual time, error counts and cost assumptions per RFQ.
-- [ ] Decide whether to proceed, narrow, or pivot; update docs/DECISIONS.md.
+- [x] Decide whether to proceed, narrow, or pivot; update docs/DECISIONS.md. *(Recorded ADR 001 in docs/DECISIONS.md)*
 
 **Exit:** At least two operators confirm the same costly workflow, and one agrees to a benchmark, ideally paid. This is a guideline, not proof of demand.
 
 ## Phase 1 — Test fixtures and schemas
 
-- [ ] Create synthetic email, CSV, XLSX, native PDF and scanned PDF fixtures; mark each SYNTHETIC.
-- [ ] Annotate expected rows including quantities, manufacturer names, MPNs and source locators.
-- [ ] Define Pydantic/API and TypeScript types for cases, rows, catalogs, matches, audit.
-- [ ] Lock explicit error states and non-goals.
-- [ ] Add lint/test commands and automated checks in a PR.
+- [x] Create synthetic email, CSV, XLSX, native PDF and scanned PDF fixtures; mark each SYNTHETIC.
+- [x] Annotate expected rows including quantities, manufacturer names, MPNs and source locators.
+- [x] Define Pydantic/API and TypeScript types for cases, rows, catalogs, matches, audit.
+- [x] Lock explicit error states and non-goals.
+- [x] Add lint/test commands and automated checks in a PR.
 
-**Exit:** Golden examples can be verified programmatically independent of a UI.
+**Exit:** Golden examples can be verified programmatically independent of a UI. (Verified via pytest suite in tests/test_schemas_and_fixtures.py)
 
 ## Phase 2 — Single-document ingestion
 
