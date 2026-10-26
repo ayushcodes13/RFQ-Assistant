@@ -76,130 +76,126 @@ export function Header({
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0 1.5rem;
-          height: 64px;
-          background: #ffffff;
+          padding: 0 1.75rem;
+          height: 68px;
+          background: var(--bg-glass);
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
           border-bottom: 1px solid var(--border-light);
           position: sticky;
           top: 0;
-          z-index: 40;
+          z-index: 50;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
         }
         .header-left {
           display: flex;
           align-items: center;
-          gap: 1.25rem;
+          gap: 1.5rem;
         }
         .logo-group {
           display: flex;
           align-items: center;
-          gap: 0.75rem;
+          gap: 0.85rem;
           cursor: pointer;
         }
         .logo-icon {
-          width: 36px;
-          height: 36px;
-          background: var(--accent-primary);
+          width: 38px;
+          height: 38px;
+          background: var(--accent-gradient);
           color: #ffffff;
-          border-radius: 6px;
+          border-radius: 9px;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-weight: 700;
-          font-size: 0.9rem;
+          font-weight: 800;
+          font-size: 0.88rem;
           letter-spacing: -0.5px;
+          box-shadow: 0 0 16px rgba(2, 132, 199, 0.4);
+          border: 1px solid rgba(255, 255, 255, 0.15);
         }
         .logo-title {
-          font-size: 1.05rem;
+          font-size: 1.1rem;
           font-weight: 700;
           color: var(--text-primary);
           line-height: 1.2;
+          font-family: var(--font-heading);
+          letter-spacing: -0.02em;
         }
         .logo-subtitle {
-          font-size: 0.75rem;
+          font-size: 0.72rem;
           color: var(--text-muted);
+          font-weight: 500;
+          letter-spacing: 0.02em;
         }
         .demo-badge {
-          background: var(--bg-subtle);
-          color: var(--text-secondary);
-          border: 1px solid var(--border-medium);
-          padding: 0.2rem 0.55rem;
-          border-radius: 4px;
-          font-size: 0.72rem;
+          background: rgba(2, 132, 199, 0.1);
+          color: #38BDF8;
+          border: 1px solid rgba(56, 189, 248, 0.25);
+          padding: 0.25rem 0.65rem;
+          border-radius: 6px;
+          font-size: 0.7rem;
           font-weight: 600;
-          letter-spacing: 0.3px;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          display: inline-flex;
+          align-items: center;
+          gap: 0.4rem;
         }
         .header-nav {
           display: flex;
           align-items: center;
-          gap: 0.5rem;
+          gap: 0.35rem;
+          background: rgba(0, 0, 0, 0.25);
+          padding: 0.3rem;
+          border-radius: 10px;
+          border: 1px solid var(--border-light);
         }
         .nav-btn {
-          background: none;
+          background: transparent;
           border: none;
-          padding: 0.45rem 0.85rem;
-          border-radius: 6px;
-          font-size: 0.88rem;
+          padding: 0.45rem 1rem;
+          border-radius: 7px;
+          font-size: 0.875rem;
           font-weight: 500;
-          color: var(--text-secondary);
+          color: var(--text-muted);
           cursor: pointer;
-          transition: all 0.15s ease;
+          transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         }
         .nav-btn:hover {
-          background: var(--bg-subtle);
           color: var(--text-primary);
+          background: rgba(255, 255, 255, 0.05);
         }
         .nav-btn.active {
-          background: var(--accent-subtle);
-          color: var(--accent-primary);
+          background: var(--bg-surface-elevated);
+          color: #38BDF8;
           font-weight: 600;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+          border: 1px solid rgba(56, 189, 248, 0.2);
         }
         .header-right {
           display: flex;
           align-items: center;
-          gap: 0.75rem;
-        }
-        .secondary-btn {
-          background: #ffffff;
-          border: 1px solid var(--border-medium);
-          color: var(--text-secondary);
-          padding: 0.45rem 0.75rem;
-          border-radius: 6px;
-          font-size: 0.82rem;
-          font-weight: 500;
-          cursor: pointer;
-        }
-        .secondary-btn:hover {
-          background: var(--bg-subtle);
-          color: var(--text-primary);
-        }
-        .primary-btn {
-          background: var(--accent-primary);
-          border: 1px solid var(--accent-primary);
-          color: #ffffff;
-          padding: 0.45rem 0.9rem;
-          border-radius: 6px;
-          font-size: 0.85rem;
-          font-weight: 600;
-          cursor: pointer;
-          transition: background 0.15s ease;
-        }
-        .primary-btn:hover {
-          background: var(--accent-primary-hover);
+          gap: 0.85rem;
         }
         .user-indicator {
           display: flex;
           align-items: center;
-          gap: 0.4rem;
-          font-size: 0.78rem;
-          color: var(--text-muted);
-          padding-left: 0.5rem;
-          border-left: 1px solid var(--border-light);
+          gap: 0.5rem;
+          font-size: 0.8rem;
+          font-weight: 500;
+          color: var(--text-secondary);
+          padding: 0.35rem 0.75rem;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid var(--border-light);
+          border-radius: 8px;
         }
         .user-dot {
           width: 8px;
           height: 8px;
           border-radius: 50%;
           background: #10B981;
+          box-shadow: 0 0 10px rgba(16, 185, 129, 0.7);
+          animation: beaconGlow 2s infinite ease-in-out;
         }
       `}</style>
     </header>

@@ -80,79 +80,99 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
         .modal-backdrop {
           position: fixed;
           top: 0; left: 0; right: 0; bottom: 0;
-          background: rgba(15, 23, 42, 0.6);
+          background: rgba(4, 6, 12, 0.8);
           display: flex;
           align-items: center;
           justify-content: center;
           z-index: 100;
-          backdrop-filter: blur(2px);
+          backdrop-filter: blur(16px);
         }
         .modal-dialog {
-          background: #ffffff;
-          border-radius: 10px;
+          background: var(--bg-surface-elevated);
+          border-radius: 12px;
           width: 90%;
           max-width: 600px;
-          box-shadow: var(--shadow-lg);
+          box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
           border: 1px solid var(--border-medium);
+          position: relative;
+          overflow: hidden;
+        }
+        .modal-dialog::before {
+          content: "";
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 2px;
+          background: var(--accent-gradient);
         }
         .modal-header {
           display: flex;
           align-items: flex-start;
           justify-content: space-between;
-          padding: 1.25rem 1.5rem;
+          padding: 1.5rem 1.75rem;
           border-bottom: 1px solid var(--border-light);
+          background: var(--bg-surface);
         }
         .modal-title {
-          font-size: 1.15rem;
+          font-size: 1.2rem;
           font-weight: 700;
           color: var(--text-primary);
+          letter-spacing: -0.01em;
         }
         .modal-subtitle {
           font-size: 0.82rem;
           color: var(--text-muted);
-          margin-top: 0.2rem;
+          margin-top: 0.25rem;
         }
         .close-btn {
           background: none;
           border: none;
-          font-size: 1.1rem;
+          font-size: 1.2rem;
           cursor: pointer;
           color: var(--text-muted);
+          transition: color 0.15s ease;
+        }
+        .close-btn:hover {
+          color: var(--text-primary);
         }
         .modal-body {
-          padding: 1.5rem;
+          padding: 1.75rem;
           display: flex;
           flex-direction: column;
-          gap: 1.25rem;
+          gap: 1.5rem;
         }
         .section-title {
-          font-size: 0.9rem;
+          font-size: 0.88rem;
           font-weight: 700;
           color: var(--text-primary);
-          margin-bottom: 0.65rem;
+          margin-bottom: 0.75rem;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
         }
         .shortcut-table {
           display: flex;
           flex-direction: column;
-          gap: 0.45rem;
-          background: var(--bg-subtle);
-          padding: 0.75rem;
-          border-radius: 6px;
+          gap: 0.6rem;
+          background: var(--bg-surface);
+          padding: 1rem;
+          border-radius: 8px;
           border: 1px solid var(--border-light);
         }
         .shortcut-row {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          font-size: 0.82rem;
+          font-size: 0.85rem;
         }
         .key-combo {
-          background: #ffffff;
+          background: var(--bg-app);
           border: 1px solid var(--border-medium);
-          padding: 0.15rem 0.5rem;
-          border-radius: 4px;
+          padding: 0.25rem 0.65rem;
+          border-radius: 6px;
           font-weight: 600;
-          color: var(--text-primary);
+          color: var(--accent-primary);
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
         }
         .key-desc {
           color: var(--text-secondary);
@@ -163,8 +183,8 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
           color: var(--text-secondary);
           display: flex;
           flex-direction: column;
-          gap: 0.45rem;
-          line-height: 1.4;
+          gap: 0.6rem;
+          line-height: 1.5;
         }
         .rules-list strong {
           color: var(--text-primary);
@@ -172,17 +192,23 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
         .modal-footer {
           display: flex;
           justify-content: flex-end;
-          padding-top: 0.5rem;
+          padding-top: 0.75rem;
         }
         .close-action-btn {
-          background: var(--accent-primary);
+          background: var(--accent-gradient);
           color: #ffffff;
-          border: none;
-          padding: 0.45rem 1rem;
-          border-radius: 6px;
+          border: 1px solid rgba(14, 165, 233, 0.4);
+          padding: 0.55rem 1.25rem;
+          border-radius: 8px;
           font-size: 0.85rem;
           font-weight: 600;
           cursor: pointer;
+          box-shadow: 0 0 12px rgba(14, 165, 233, 0.25);
+          transition: all 0.2s ease;
+        }
+        .close-action-btn:hover {
+          box-shadow: 0 0 18px rgba(14, 165, 233, 0.45);
+          transform: translateY(-1px);
         }
         .font-mono { font-family: var(--font-mono); }
       `}</style>

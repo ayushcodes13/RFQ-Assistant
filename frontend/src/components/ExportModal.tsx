@@ -171,117 +171,135 @@ export function ExportModal({ isOpen, caseData, onClose }: ExportModalProps) {
         .modal-backdrop {
           position: fixed;
           top: 0; left: 0; right: 0; bottom: 0;
-          background: rgba(15, 23, 42, 0.6);
+          background: rgba(4, 6, 12, 0.8);
           display: flex;
           align-items: center;
           justify-content: center;
           z-index: 100;
-          backdrop-filter: blur(2px);
+          backdrop-filter: blur(16px);
         }
         .modal-dialog {
-          background: #ffffff;
-          border-radius: 10px;
+          background: var(--bg-surface-elevated);
+          border-radius: 12px;
           width: 90%;
           max-width: 680px;
-          box-shadow: var(--shadow-lg);
+          box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
           border: 1px solid var(--border-medium);
           max-height: 90vh;
           overflow-y: auto;
+          position: relative;
+        }
+        .modal-dialog::before {
+          content: "";
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 2px;
+          background: var(--accent-gradient);
         }
         .modal-header {
           display: flex;
           align-items: flex-start;
           justify-content: space-between;
-          padding: 1.25rem 1.5rem;
+          padding: 1.5rem 1.75rem;
           border-bottom: 1px solid var(--border-light);
+          background: var(--bg-surface);
         }
         .modal-title {
-          font-size: 1.2rem;
+          font-size: 1.25rem;
           font-weight: 700;
           color: var(--text-primary);
+          letter-spacing: -0.01em;
         }
         .modal-subtitle {
           font-size: 0.82rem;
           color: var(--text-muted);
-          margin-top: 0.2rem;
+          margin-top: 0.25rem;
         }
         .close-btn {
           background: none;
           border: none;
-          font-size: 1.1rem;
+          font-size: 1.2rem;
           cursor: pointer;
           color: var(--text-muted);
+          transition: color 0.15s ease;
+        }
+        .close-btn:hover {
+          color: var(--text-primary);
         }
         .modal-body {
-          padding: 1.5rem;
+          padding: 1.75rem;
           display: flex;
           flex-direction: column;
           gap: 1.25rem;
         }
         .error-banner {
-          background: var(--status-error-bg);
-          color: var(--status-error-text);
-          border: 1px solid var(--status-error-border);
-          padding: 0.65rem 1rem;
-          border-radius: 6px;
+          background: rgba(239, 68, 68, 0.15);
+          color: #F87171;
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          padding: 0.75rem 1.25rem;
+          border-radius: 8px;
           font-size: 0.85rem;
         }
         .status-summary-card {
-          border-radius: 6px;
-          padding: 0.85rem 1rem;
+          border-radius: 8px;
+          padding: 1rem 1.25rem;
           border: 1px solid transparent;
         }
         .status-summary-card.warning {
-          background: #FFFBEB;
-          border-color: #FDE68A;
-          color: #92400E;
+          background: rgba(245, 158, 11, 0.1);
+          border-color: rgba(245, 158, 11, 0.3);
+          color: #FCD34D;
         }
         .status-summary-card.success {
-          background: #ECFDF5;
-          border-color: #A7F3D0;
-          color: #065F46;
+          background: rgba(16, 185, 129, 0.1);
+          border-color: rgba(16, 185, 129, 0.3);
+          color: #34D399;
         }
         .status-summary-header {
           display: flex;
           align-items: center;
           gap: 0.5rem;
-          font-size: 0.92rem;
-          margin-bottom: 0.25rem;
+          font-size: 0.95rem;
+          margin-bottom: 0.35rem;
         }
         .summary-desc {
-          font-size: 0.8rem;
-          line-height: 1.4;
+          font-size: 0.82rem;
+          line-height: 1.45;
+          opacity: 0.9;
         }
         .options-grid {
           display: flex;
           flex-direction: column;
           gap: 1rem;
-          background: var(--bg-subtle);
-          padding: 1rem;
-          border-radius: 6px;
+          background: var(--bg-surface);
+          padding: 1.25rem;
+          border-radius: 8px;
           border: 1px solid var(--border-light);
         }
         .form-label {
           font-size: 0.82rem;
           font-weight: 600;
           color: var(--text-secondary);
-          margin-bottom: 0.35rem;
+          margin-bottom: 0.45rem;
           display: block;
         }
         .radio-group {
           display: flex;
-          gap: 1.25rem;
+          gap: 1.5rem;
         }
         .radio-label {
           display: flex;
           align-items: center;
-          gap: 0.45rem;
+          gap: 0.5rem;
           font-size: 0.85rem;
+          color: var(--text-primary);
           cursor: pointer;
         }
         .partial-box {
           border-top: 1px solid var(--border-light);
-          padding-top: 0.75rem;
+          padding-top: 0.85rem;
         }
         .checkbox-label {
           display: flex;
@@ -291,43 +309,48 @@ export function ExportModal({ isOpen, caseData, onClose }: ExportModalProps) {
         }
         .checkbox-text {
           font-size: 0.85rem;
-          color: #B45309;
+          color: #F59E0B;
+          font-weight: 600;
         }
         .checkbox-hint {
           font-size: 0.75rem;
           color: var(--text-muted);
           margin-left: 1.4rem;
-          margin-top: 0.15rem;
+          margin-top: 0.2rem;
         }
         .download-btn {
-          background: var(--accent-primary);
-          border: 1px solid var(--accent-primary);
+          background: var(--accent-gradient);
+          border: 1px solid rgba(14, 165, 233, 0.4);
           color: #ffffff;
-          padding: 0.75rem;
-          border-radius: 6px;
+          padding: 0.85rem;
+          border-radius: 8px;
           font-size: 0.92rem;
           font-weight: 700;
           cursor: pointer;
-          transition: background 0.15s ease;
+          box-shadow: 0 0 12px rgba(14, 165, 233, 0.25);
+          transition: all 0.2s ease;
         }
         .download-btn:hover:not(:disabled) {
-          background: var(--accent-primary-hover);
+          box-shadow: 0 0 18px rgba(14, 165, 233, 0.45);
+          transform: translateY(-1px);
         }
         .download-btn:disabled {
           opacity: 0.5;
           cursor: not-allowed;
+          box-shadow: none;
         }
         .email-draft-section {
           border: 1px solid var(--border-light);
-          border-radius: 6px;
+          border-radius: 8px;
           overflow: hidden;
+          background: var(--bg-surface);
         }
         .email-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
           background: var(--bg-subtle);
-          padding: 0.5rem 0.75rem;
+          padding: 0.6rem 0.85rem;
           border-bottom: 1px solid var(--border-light);
         }
         .email-title {
@@ -336,30 +359,41 @@ export function ExportModal({ isOpen, caseData, onClose }: ExportModalProps) {
           color: var(--text-secondary);
         }
         .copy-btn {
-          background: #ffffff;
+          background: var(--bg-surface-elevated);
           border: 1px solid var(--border-medium);
-          padding: 0.25rem 0.6rem;
-          border-radius: 4px;
+          color: var(--text-primary);
+          padding: 0.3rem 0.75rem;
+          border-radius: 6px;
           font-size: 0.75rem;
           font-weight: 600;
           cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .copy-btn:hover {
+          background: var(--bg-surface);
+          border-color: var(--accent-primary);
         }
         .email-textarea {
           width: 100%;
-          padding: 0.75rem;
+          padding: 0.85rem;
           border: none;
-          font-size: 0.78rem;
-          line-height: 1.4;
+          font-size: 0.8rem;
+          line-height: 1.45;
           resize: vertical;
-          background: #ffffff;
+          background: var(--bg-app);
+          color: var(--text-primary);
         }
         .safety-footer-notice {
           font-size: 0.75rem;
           color: var(--text-muted);
-          line-height: 1.4;
-          padding: 0.5rem;
-          background: var(--bg-subtle);
-          border-radius: 4px;
+          line-height: 1.45;
+          padding: 0.65rem 0.85rem;
+          background: var(--bg-surface);
+          border: 1px solid var(--border-light);
+          border-radius: 6px;
+        }
+        .safety-footer-notice strong {
+          color: #F59E0B;
         }
         .font-mono { font-family: var(--font-mono); }
         .font-bold { font-weight: 700; }

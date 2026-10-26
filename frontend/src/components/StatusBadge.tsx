@@ -137,15 +137,18 @@ export function StatusBadge({ type, value }: StatusBadgeProps) {
           background-color: ${bg};
           color: ${text};
           border: 1px solid ${border};
-          padding: 0.15rem 0.5rem;
-          border-radius: 4px;
-          font-size: 0.75rem;
+          padding: 0.22rem 0.65rem;
+          border-radius: 6px;
+          font-size: 0.73rem;
           font-weight: 600;
+          letter-spacing: 0.02em;
           white-space: nowrap;
           line-height: 1.2;
+          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+          transition: all 0.15s ease;
         }
         .badge-icon {
-          font-size: 0.8rem;
+          font-size: 0.75rem;
           line-height: 1;
         }
       `}</style>

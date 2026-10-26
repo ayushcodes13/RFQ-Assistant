@@ -165,7 +165,7 @@ export function CatalogView() {
 
       <style jsx>{`
         .catalog-container {
-          padding: 1.5rem;
+          padding: 2rem 2.5rem;
           max-width: 1440px;
           margin: 0 auto;
         }
@@ -173,90 +173,115 @@ export function CatalogView() {
           display: flex;
           align-items: flex-start;
           justify-content: space-between;
-          margin-bottom: 1.25rem;
+          margin-bottom: 1.75rem;
         }
         .page-title {
-          font-size: 1.3rem;
+          font-size: 1.4rem;
           font-weight: 700;
           color: var(--text-primary);
+          letter-spacing: -0.02em;
         }
         .page-subtitle {
-          font-size: 0.85rem;
+          font-size: 0.88rem;
           color: var(--text-muted);
-          margin-top: 0.2rem;
+          margin-top: 0.25rem;
         }
         .import-btn {
-          background: var(--accent-primary);
+          background: var(--accent-gradient);
           color: #ffffff;
-          padding: 0.5rem 1rem;
-          border-radius: 6px;
+          padding: 0.6rem 1.25rem;
+          border-radius: 8px;
           font-size: 0.85rem;
           font-weight: 600;
           cursor: pointer;
           display: inline-block;
+          border: 1px solid rgba(14, 165, 233, 0.4);
+          box-shadow: 0 0 12px rgba(14, 165, 233, 0.25);
+          transition: all 0.2s ease;
+        }
+        .import-btn:hover {
+          box-shadow: 0 0 18px rgba(14, 165, 233, 0.45);
+          transform: translateY(-1px);
         }
         .hidden-file-input { display: none; }
         .summary-alert {
-          background: #ECFDF5;
-          border: 1px solid #A7F3D0;
-          color: #065F46;
-          padding: 0.65rem 1rem;
-          border-radius: 6px;
+          background: rgba(16, 185, 129, 0.1);
+          border: 1px solid rgba(16, 185, 129, 0.3);
+          color: #34D399;
+          padding: 0.75rem 1.25rem;
+          border-radius: 8px;
           font-size: 0.85rem;
-          margin-bottom: 1rem;
+          margin-bottom: 1.25rem;
+          box-shadow: 0 0 16px rgba(16, 185, 129, 0.1);
         }
         .collision-banner {
-          background: #FFFBEB;
-          border: 1px solid #FDE68A;
-          color: #92400E;
-          padding: 0.85rem 1rem;
-          border-radius: 6px;
-          margin-bottom: 1rem;
+          background: rgba(245, 158, 11, 0.1);
+          border: 1px solid rgba(245, 158, 11, 0.3);
+          color: #FCD34D;
+          padding: 1rem 1.25rem;
+          border-radius: 8px;
+          margin-bottom: 1.25rem;
           font-size: 0.82rem;
+          box-shadow: 0 0 16px rgba(245, 158, 11, 0.1);
         }
         .banner-title {
-          margin-bottom: 0.35rem;
+          margin-bottom: 0.45rem;
         }
         .collision-list {
           display: flex;
           gap: 0.5rem;
           flex-wrap: wrap;
-          margin-bottom: 0.35rem;
+          margin-bottom: 0.45rem;
         }
         .collision-tag {
-          background: #FEF3C7;
-          border: 1px solid #FCD34D;
-          padding: 0.15rem 0.45rem;
-          border-radius: 4px;
+          background: rgba(245, 158, 11, 0.2);
+          border: 1px solid rgba(245, 158, 11, 0.4);
+          padding: 0.2rem 0.55rem;
+          border-radius: 6px;
           font-size: 0.76rem;
+          color: #FDE68A;
         }
         .banner-note {
-          color: #B45309;
+          color: rgba(253, 230, 138, 0.8);
           font-size: 0.75rem;
         }
         .search-bar {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          margin-bottom: 1rem;
+          margin-bottom: 1.25rem;
         }
         .search-input {
-          width: 420px;
-          padding: 0.5rem 0.85rem;
+          width: 440px;
+          padding: 0.6rem 1rem;
           border: 1px solid var(--border-medium);
-          border-radius: 6px;
+          border-radius: 8px;
           font-size: 0.88rem;
-          background: #ffffff;
+          background: var(--bg-surface);
+          color: var(--text-primary);
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .search-input:focus {
+          outline: none;
+          border-color: var(--accent-primary);
+          box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+        }
+        .search-input::placeholder {
+          color: var(--text-muted);
         }
         .item-count {
           font-size: 0.8rem;
-          color: var(--text-muted);
+          color: var(--accent-primary);
+          background: var(--bg-surface-elevated);
+          padding: 0.4rem 0.75rem;
+          border-radius: 6px;
+          border: 1px solid var(--border-light);
         }
         .table-card {
-          background: #ffffff;
+          background: var(--bg-surface-elevated);
           border: 1px solid var(--border-light);
-          border-radius: 8px;
-          box-shadow: var(--shadow-sm);
+          border-radius: 10px;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
           overflow: hidden;
         }
         .catalog-table {
@@ -267,14 +292,25 @@ export function CatalogView() {
         }
         .catalog-table th {
           background: var(--bg-subtle);
-          padding: 0.75rem 1rem;
+          padding: 0.85rem 1.15rem;
           font-weight: 600;
-          color: var(--text-secondary);
+          font-size: 0.74rem;
+          letter-spacing: 0.5px;
+          text-transform: uppercase;
+          color: var(--text-muted);
           border-bottom: 1px solid var(--border-light);
         }
         .catalog-table td {
-          padding: 0.75rem 1rem;
+          padding: 0.85rem 1.15rem;
           border-bottom: 1px solid var(--border-light);
+          color: var(--text-secondary);
+        }
+        .catalog-table tr {
+          transition: background 0.15s ease;
+        }
+        .catalog-table tr:hover td {
+          background: rgba(255, 255, 255, 0.02);
+          color: var(--text-primary);
         }
         .desc-cell {
           max-width: 400px;
@@ -285,13 +321,14 @@ export function CatalogView() {
         .align-right { text-align: right; }
         .align-center { text-align: center; }
         .font-mono { font-family: var(--font-mono); }
-        .font-bold { font-weight: 700; }
+        .font-bold { font-weight: 700; color: var(--text-primary); }
         .font-muted { color: var(--text-muted); }
         .text-accent { color: var(--accent-primary); }
         .loading, .empty {
-          padding: 3rem;
+          padding: 4rem;
           text-align: center;
           color: var(--text-muted);
+          font-size: 0.9rem;
         }
       `}</style>
     </div>
