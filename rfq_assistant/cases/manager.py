@@ -18,15 +18,18 @@ from rfq_assistant.schemas.enums import (
     ReviewDecision,
     SourceType,
 )
+
 from rfq_assistant.schemas.models import (
     AuditEvent,
     BatchReviewRequest,
+    ExtractionWarning,
     RFQCase,
     RFQLineItem,
     RFQLineItemUpdate,
     SourceFileMetadata,
     SourceLocator,
 )
+
 
 
 class CaseManager:
@@ -173,23 +176,38 @@ class CaseManager:
         if not line:
             return None
 
-        # Track fields that changed for audit
-        if update.quantity is not None and update.quantity != line.quantity:
-            self._record_audit(
-                case_id=case_id,
-                line_id=line_id,
-                actor=update.actor,
-                action=AuditAction.LINE_EDITED,
-                field_name="quantity",
-                old_value=str(line.quantity),
-                new_value=str(update.quantity),
-                notes=update.reviewer_notes,
-            )
-            line.quantity = update.quantity
-            # Clear missing quantity warning if fixed
-            line.extraction_warnings = [w for w in line.extraction_warnings if w.code != "MISSING_QUANTITY"]
+        material_changes = []
+
+        # Validate quantity strictly
+        if update.quantity is not None:
+            import math
+            try:
+                q_val = float(update.quantity)
+            except (ValueError, TypeError):
+                raise ValueError(f"Quantity must be a numeric value, got '{update.quantity}'")
+            if math.isnan(q_val) or math.isinf(q_val):
+                raise ValueError(f"Quantity cannot be NaN or Infinite: {update.quantity}")
+            if q_val <= 0:
+                raise ValueError(f"Quantity must be strictly positive (> 0), got {update.quantity}")
+
+            if update.quantity != line.quantity:
+                material_changes.append("quantity")
+                self._record_audit(
+                    case_id=case_id,
+                    line_id=line_id,
+                    actor=update.actor,
+                    action=AuditAction.LINE_EDITED,
+                    field_name="quantity",
+                    old_value=str(line.quantity),
+                    new_value=str(update.quantity),
+                    notes=update.reviewer_notes,
+                )
+                line.quantity = update.quantity
+                # Clear missing quantity warning if fixed
+                line.extraction_warnings = [w for w in line.extraction_warnings if w.code != "MISSING_QUANTITY"]
 
         if update.requested_mpn is not None and update.requested_mpn != line.requested_mpn:
+            material_changes.append("requested_mpn")
             self._record_audit(
                 case_id=case_id,
                 line_id=line_id,
@@ -207,6 +225,7 @@ class CaseManager:
             line.candidates = rematch.candidates
 
         if update.requested_manufacturer is not None and update.requested_manufacturer != line.requested_manufacturer:
+            material_changes.append("requested_manufacturer")
             self._record_audit(
                 case_id=case_id,
                 line_id=line_id,
@@ -223,6 +242,7 @@ class CaseManager:
             line.candidates = rematch.candidates
 
         if update.selected_catalog_sku is not None and update.selected_catalog_sku != line.selected_catalog_sku:
+            material_changes.append("selected_catalog_sku")
             self._record_audit(
                 case_id=case_id,
                 line_id=line_id,
@@ -235,11 +255,58 @@ class CaseManager:
             line.selected_catalog_sku = update.selected_catalog_sku
             line.match_status = MatchStatus.MANUAL_OVERRIDE
 
-        if update.unit is not None:
+        if update.unit is not None and update.unit != line.unit:
+            material_changes.append("unit")
             line.unit = update.unit
 
-        if update.notes is not None:
+        if update.description is not None and update.description != line.description:
+            material_changes.append("description")
+            line.description = update.description
+
+        if update.notes is not None and update.notes != line.notes:
+            material_changes.append("notes")
             line.notes = update.notes
+
+        # Contradiction check: verify selected SKU against requested OEM
+        if line.selected_catalog_sku:
+            cat_item = self.catalog.get_by_sku(line.selected_catalog_sku)
+            if cat_item and line.requested_manufacturer:
+                req_oem = line.requested_manufacturer.strip().lower()
+                cat_oem = cat_item.manufacturer.strip().lower()
+                if req_oem not in cat_oem and cat_oem not in req_oem:
+                    # Remove any existing contradiction warning then add high severity alert
+                    line.extraction_warnings = [w for w in line.extraction_warnings if w.code != "CONTRADICTION"]
+                    line.extraction_warnings.append(
+                        ExtractionWarning(
+                            code="CONTRADICTION",
+                            message=(
+                                f"Selected SKU '{line.selected_catalog_sku}' ({cat_item.manufacturer}) "
+                                f"contradicts requested manufacturer '{line.requested_manufacturer}'."
+                            ),
+                            severity="error",
+                        )
+                    )
+
+                else:
+                    line.extraction_warnings = [w for w in line.extraction_warnings if w.code != "CONTRADICTION"]
+
+        # Invariant: If line was previously approved and any material field was changed,
+        # approval is revoked unless the update explicitly re-approves with APPROVED.
+        if line.review_decision == ReviewDecision.APPROVED and material_changes:
+            if update.review_decision != ReviewDecision.APPROVED:
+                self._record_audit(
+                    case_id=case_id,
+                    line_id=line_id,
+                    actor=update.actor,
+                    action=AuditAction.LINE_FLAGGED,
+                    field_name="review_decision",
+                    old_value=ReviewDecision.APPROVED.value,
+                    new_value=ReviewDecision.PENDING.value,
+                    notes=f"Material changes to {', '.join(material_changes)} invalidated prior approval. Re-approval required.",
+                )
+                line.review_decision = ReviewDecision.PENDING
+                line.reviewed_by = None
+                line.reviewed_at = None
 
         if update.review_decision is not None and update.review_decision != line.review_decision:
             action_map = {
@@ -266,6 +333,7 @@ class CaseManager:
 
         self._refresh_case_metrics(case_id)
         return line
+
 
     def batch_review(self, case_id: str, request: BatchReviewRequest) -> int:
         """Applies batch decision to specified lines."""

@@ -181,9 +181,11 @@ class TestDeterministicQuoteValidation:
             currency="USD",
             source_price_id="CAT-v1-SKU-SCH-001",
             match_status="exact",
+            requires_human_review=False,
         )
         errors = validate_quote_line(line)
         assert len(errors) == 0
+
 
     def test_missing_price_or_source_blocked(self):
         line = QuoteLine(
@@ -256,7 +258,9 @@ class TestVersionBoundApprovalLifecycle:
             currency="USD",
             source_price_id="CAT-v1-001",
             match_status="exact",
+            requires_human_review=False,
         )
+
         draft = ProposedQuote(
             quote_id="Q-100",
             case_id="RFQ-100",
@@ -374,8 +378,17 @@ class TestV1APIEndpoints:
         match_data = match_resp.json()
         assert len(match_data["results"]) == 1
         assert match_data["results"][0]["requested_mpn"] == "LC1D09BD"
+        line_id = match_data["results"][0]["line_id"]
 
-        # 3. Draft Quote
+        # 3. Human reviews and approves the line item
+        rev_resp = client.patch(
+            f"/api/rfqs/{case_id}/lines/{line_id}",
+            json={"review_decision": "APPROVED", "actor": "Sales Rep #402"},
+        )
+        assert rev_resp.status_code == 200
+        assert rev_resp.json()["review_decision"] == "APPROVED"
+
+        # 4. Draft Quote
         draft_resp = client.post(f"/v1/rfqs/{case_id}/draft-quote?currency=USD")
         assert draft_resp.status_code == 200
         draft_data = draft_resp.json()
@@ -383,14 +396,14 @@ class TestV1APIEndpoints:
         draft_hash = draft_data["draft_hash"]
         assert len(draft_hash) == 64
 
-        # 4. Attempt send before approval (must be 403 Forbidden)
+        # 5. Attempt send before quote approval (must be 403 Forbidden)
         unapproved_send = client.post(
             f"/v1/approved-quotes/{quote_id}/send",
             data={"expected_hash": draft_hash, "sender_name": "Sales Rep #402"},
         )
         assert unapproved_send.status_code == 403
 
-        # 5. Approve
+        # 6. Approve Quote
         approve_resp = client.post(
             f"/v1/quote-drafts/{quote_id}/approve",
             data={"expected_hash": draft_hash, "approver_name": "Sales Rep #402"},
@@ -398,7 +411,8 @@ class TestV1APIEndpoints:
         assert approve_resp.status_code == 200
         assert approve_resp.json()["approval_record"]["commercial_status"] == "APPROVED"
 
-        # 6. Send approved quote
+        # 7. Send approved quote
+
         send_resp = client.post(
             f"/v1/approved-quotes/{quote_id}/send",
             data={"expected_hash": draft_hash, "sender_name": "Sales Rep #402"},

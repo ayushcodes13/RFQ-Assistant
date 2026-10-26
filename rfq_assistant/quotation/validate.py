@@ -58,7 +58,12 @@ class ProposedQuote(BaseModel):
     validation_errors: List[str] = Field(default_factory=list)
 
     def compute_draft_hash(self) -> str:
-        """Computes cryptographic digest of the draft for version-bound approvals."""
+        """Computes cryptographic digest of the draft for version-bound approvals.
+
+        Binds to quote_id, case_id, customer_name, currency, and every material line field.
+        Any modification to quantities, prices, MPNs, manufacturers, notes, or review status
+        changes the hash and invalidates prior approvals.
+        """
         payload = {
             "quote_id": self.quote_id,
             "case_id": self.case_id,
@@ -68,11 +73,17 @@ class ProposedQuote(BaseModel):
                 {
                     "line_no": l.line_no,
                     "mpn": l.requested_mpn,
+                    "manufacturer": l.requested_manufacturer,
                     "cat_id": l.catalogue_part_id,
+                    "description": l.description,
                     "qty": str(l.quantity),
+                    "unit": l.unit,
                     "price": str(l.unit_price) if l.unit_price is not None else None,
+                    "currency": l.currency,
                     "source_price_id": l.source_price_id,
                     "match_status": l.match_status,
+                    "requires_review": l.requires_human_review,
+                    "notes": l.line_notes,
                 }
                 for l in self.lines
             ],
@@ -83,19 +94,38 @@ class ProposedQuote(BaseModel):
 
 def validate_quote_line(line: QuoteLine) -> List[str]:
     """Validates an individual quote line against strict commercial invariants."""
+    import math
     errors: List[str] = []
 
     if line.match_status != "exact":
-        errors.append(f"Line {line.line_no}: Part '{line.requested_mpn}' requires human match approval.")
+        errors.append(f"Line {line.line_no}: Part '{line.requested_mpn}' has non-exact status ({line.match_status}) and requires human match approval.")
+
+    if line.requires_human_review:
+        errors.append(f"Line {line.line_no}: Part '{line.requested_mpn}' is still pending reviewer approval.")
 
     if line.unit_price is None:
         errors.append(f"Line {line.line_no}: No authoritative unit price for '{line.requested_mpn}'.")
+    else:
+        try:
+            p_val = float(line.unit_price)
+            if math.isnan(p_val) or math.isinf(p_val):
+                errors.append(f"Line {line.line_no}: Unit price cannot be NaN or Infinite.")
+            elif line.unit_price < Decimal("0"):
+                errors.append(f"Line {line.line_no}: Unit price cannot be negative.")
+        except (ValueError, TypeError):
+            errors.append(f"Line {line.line_no}: Malformed unit price '{line.unit_price}'.")
 
     if line.source_price_id is None:
         errors.append(f"Line {line.line_no}: Price has no authoritative source ID.")
 
-    if line.quantity <= Decimal("0"):
-        errors.append(f"Line {line.line_no}: Quantity must be greater than zero.")
+    try:
+        q_val = float(line.quantity)
+        if math.isnan(q_val) or math.isinf(q_val):
+            errors.append(f"Line {line.line_no}: Quantity cannot be NaN or Infinite.")
+        elif line.quantity <= Decimal("0"):
+            errors.append(f"Line {line.line_no}: Quantity must be greater than zero.")
+    except (ValueError, TypeError):
+        errors.append(f"Line {line.line_no}: Malformed quantity '{line.quantity}'.")
 
     if not line.currency:
         errors.append(f"Line {line.line_no}: Currency is missing.")
@@ -121,3 +151,4 @@ def validate_proposed_quote(quote: ProposedQuote) -> List[str]:
         errors.append(f"Mixed currencies detected ({', '.join(currencies)}). Commercial policy requires unified currency.")
 
     return errors
+
