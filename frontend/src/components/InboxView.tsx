@@ -299,134 +299,164 @@ Line 20: 5 EA Acme Industrial ABC-12A (Thermal overload relay with aux NC)`;
 
       <style jsx>{`
         .inbox-container {
-          padding: 1.5rem;
+          padding: 1.75rem 2rem;
           max-width: 1440px;
           margin: 0 auto;
         }
         .metrics-bar {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
-          gap: 1rem;
-          margin-bottom: 1.25rem;
+          gap: 1.25rem;
+          margin-bottom: 1.5rem;
         }
         .metric-card {
-          background: #ffffff;
+          background: var(--bg-glass-card);
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
           border: 1px solid var(--border-light);
-          padding: 1rem 1.25rem;
-          border-radius: 8px;
-          box-shadow: var(--shadow-sm);
+          padding: 1.2rem 1.4rem;
+          border-radius: 12px;
+          box-shadow: var(--shadow-card);
+          transition: transform 0.2s ease, border-color 0.2s ease;
+          position: relative;
+          overflow: hidden;
         }
-        .metric-card.warning {
-          border-left: 4px solid #F59E0B;
+        .metric-card:hover {
+          transform: translateY(-2px);
+          border-color: rgba(255, 255, 255, 0.18);
         }
-        .metric-card.success {
-          border-left: 4px solid #10B981;
+        .metric-card::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 2px;
+          background: linear-gradient(90deg, rgba(56, 189, 248, 0.4), transparent);
+        }
+        .metric-card.warning::before {
+          background: linear-gradient(90deg, #F59E0B, transparent);
+        }
+        .metric-card.success::before {
+          background: linear-gradient(90deg, #10B981, transparent);
         }
         .metric-label {
           font-size: 0.8rem;
           color: var(--text-muted);
           font-weight: 500;
-          margin-bottom: 0.25rem;
+          letter-spacing: 0.02em;
+          margin-bottom: 0.35rem;
+          text-transform: uppercase;
         }
         .metric-value {
-          font-size: 1.6rem;
-          font-weight: 700;
+          font-size: 1.85rem;
+          font-weight: 800;
           color: var(--text-primary);
+          font-family: var(--font-heading);
+          letter-spacing: -0.02em;
         }
         .demo-launcher-bar {
           display: flex;
           align-items: center;
-          gap: 1rem;
-          background: #EFF6FF;
-          border: 1px solid var(--accent-border);
-          padding: 0.65rem 1rem;
-          border-radius: 6px;
-          margin-bottom: 1.25rem;
+          gap: 1.25rem;
+          background: rgba(2, 132, 199, 0.08);
+          border: 1px solid rgba(56, 189, 248, 0.25);
+          padding: 0.85rem 1.25rem;
+          border-radius: 10px;
+          margin-bottom: 1.5rem;
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
         }
         .demo-launcher-title {
           font-size: 0.82rem;
-          font-weight: 600;
-          color: var(--accent-primary);
+          font-weight: 700;
+          color: #38BDF8;
           white-space: nowrap;
+          letter-spacing: 0.02em;
+          text-transform: uppercase;
         }
         .demo-launcher-buttons {
           display: flex;
-          gap: 0.5rem;
+          gap: 0.65rem;
           flex-wrap: wrap;
         }
         .demo-btn {
-          background: #ffffff;
-          border: 1px solid var(--accent-border);
-          color: var(--accent-primary);
-          padding: 0.35rem 0.65rem;
-          border-radius: 4px;
-          font-size: 0.78rem;
+          background: rgba(255, 255, 255, 0.04);
+          border: 1px solid rgba(56, 189, 248, 0.3);
+          color: #F8FAFC;
+          padding: 0.45rem 0.85rem;
+          border-radius: 7px;
+          font-size: 0.8rem;
           font-weight: 600;
           cursor: pointer;
-          transition: all 0.15s ease;
+          transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         }
         .demo-btn:hover:not(:disabled) {
-          background: var(--accent-primary);
-          color: #ffffff;
+          background: var(--accent-gradient);
+          border-color: rgba(255, 255, 255, 0.2);
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(2, 132, 199, 0.35);
         }
         .controls-row {
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: 1rem;
-          margin-bottom: 1rem;
+          margin-bottom: 1.25rem;
         }
         .search-input {
-          width: 380px;
-          padding: 0.5rem 0.85rem;
+          width: 420px;
+          padding: 0.6rem 1rem;
           border: 1px solid var(--border-medium);
-          border-radius: 6px;
+          border-radius: 8px;
           font-size: 0.88rem;
-          background: #ffffff;
+          background: var(--bg-surface-elevated);
+          color: var(--text-primary);
+          transition: all 0.2s ease;
         }
         .search-input:focus {
           outline: none;
           border-color: var(--border-focus);
+          box-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
         }
         .filter-group {
           display: flex;
           align-items: center;
-          gap: 0.5rem;
+          gap: 0.65rem;
         }
         .filter-select {
-          padding: 0.5rem 0.75rem;
+          padding: 0.6rem 0.9rem;
           border: 1px solid var(--border-medium);
-          border-radius: 6px;
+          border-radius: 8px;
           font-size: 0.85rem;
-          background: #ffffff;
+          background: var(--bg-surface-elevated);
+          color: var(--text-primary);
+          cursor: pointer;
+        }
+        .filter-select:focus {
+          outline: none;
+          border-color: var(--border-focus);
         }
         .refresh-btn {
-          background: #ffffff;
+          background: var(--bg-surface-elevated);
           border: 1px solid var(--border-medium);
-          padding: 0.5rem 0.75rem;
-          border-radius: 6px;
+          color: var(--text-secondary);
+          padding: 0.6rem 0.9rem;
+          border-radius: 8px;
           font-size: 0.85rem;
           font-weight: 500;
           cursor: pointer;
+          transition: all 0.2s ease;
         }
-        .primary-btn {
-          background: var(--accent-primary);
-          border: 1px solid var(--accent-primary);
-          color: #ffffff;
-          padding: 0.5rem 1rem;
-          border-radius: 6px;
-          font-size: 0.88rem;
-          font-weight: 600;
-          cursor: pointer;
-        }
-        .primary-btn:hover {
-          background: var(--accent-primary-hover);
+        .refresh-btn:hover {
+          background: var(--bg-subtle);
+          color: #FFFFFF;
+          border-color: var(--border-focus);
         }
         .table-wrapper {
-          background: #ffffff;
+          background: var(--bg-surface);
           border: 1px solid var(--border-light);
-          border-radius: 8px;
-          box-shadow: var(--shadow-sm);
+          border-radius: 12px;
+          box-shadow: var(--shadow-lg);
           overflow: hidden;
         }
         .cases-table {
@@ -437,25 +467,28 @@ Line 20: 5 EA Acme Industrial ABC-12A (Thermal overload relay with aux NC)`;
         }
         .cases-table th {
           background: var(--bg-subtle);
-          padding: 0.75rem 1rem;
+          padding: 0.85rem 1.1rem;
           font-weight: 600;
-          color: var(--text-secondary);
+          color: var(--text-muted);
+          font-size: 0.78rem;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
           border-bottom: 1px solid var(--border-light);
         }
         .cases-table td {
-          padding: 0.85rem 1rem;
+          padding: 0.95rem 1.1rem;
           border-bottom: 1px solid var(--border-light);
           color: var(--text-primary);
         }
         .case-row {
           cursor: pointer;
-          transition: background 0.1s ease;
+          transition: background 0.15s ease, transform 0.15s ease;
         }
         .case-row:hover {
-          background: #F8FAFC;
+          background: var(--bg-subtle);
         }
         .case-id {
-          color: var(--accent-primary);
+          color: #38BDF8;
           font-weight: 600;
           font-size: 0.85rem;
         }
@@ -465,37 +498,42 @@ Line 20: 5 EA Acme Industrial ABC-12A (Thermal overload relay with aux NC)`;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
+          color: var(--text-primary);
         }
         .customer-cell {
           color: var(--text-secondary);
         }
         .source-tag {
-          background: var(--bg-subtle);
+          background: rgba(255, 255, 255, 0.04);
           border: 1px solid var(--border-medium);
-          padding: 0.15rem 0.45rem;
-          border-radius: 4px;
-          font-size: 0.75rem;
+          padding: 0.2rem 0.5rem;
+          border-radius: 5px;
+          font-size: 0.74rem;
+          color: var(--text-muted);
           font-family: var(--font-mono);
         }
         .unresolved-pill {
-          background: #FEF3C7;
-          color: #92400E;
+          background: rgba(245, 158, 11, 0.15);
+          color: #FBBF24;
+          border: 1px solid rgba(251, 191, 36, 0.3);
           font-size: 0.75rem;
           font-weight: 600;
-          padding: 0.15rem 0.45rem;
-          border-radius: 4px;
+          padding: 0.2rem 0.55rem;
+          border-radius: 5px;
         }
         .resolved-pill {
-          background: #D1FAE5;
-          color: #065F46;
+          background: rgba(16, 185, 129, 0.15);
+          color: #34D399;
+          border: 1px solid rgba(52, 211, 153, 0.3);
           font-size: 0.75rem;
           font-weight: 600;
-          padding: 0.15rem 0.45rem;
-          border-radius: 4px;
+          padding: 0.2rem 0.55rem;
+          border-radius: 5px;
         }
         .time-cell {
           color: var(--text-muted);
           font-size: 0.8rem;
+          font-family: var(--font-mono);
         }
         .align-center {
           text-align: center;
@@ -510,54 +548,64 @@ Line 20: 5 EA Acme Industrial ABC-12A (Thermal overload relay with aux NC)`;
           font-weight: 700;
         }
         .open-btn {
-          background: var(--bg-subtle);
-          border: 1px solid var(--border-medium);
-          color: var(--text-primary);
-          padding: 0.35rem 0.65rem;
-          border-radius: 4px;
+          background: rgba(56, 189, 248, 0.1);
+          border: 1px solid rgba(56, 189, 248, 0.3);
+          color: #38BDF8;
+          padding: 0.4rem 0.75rem;
+          border-radius: 6px;
           font-size: 0.8rem;
           font-weight: 600;
           cursor: pointer;
           margin-right: 0.5rem;
+          transition: all 0.15s ease;
         }
         .open-btn:hover {
-          background: var(--accent-primary);
-          border-color: var(--accent-primary);
+          background: var(--accent-gradient);
+          border-color: transparent;
           color: #ffffff;
+          transform: translateY(-1px);
         }
         .delete-icon-btn {
           background: none;
           border: none;
-          font-size: 0.9rem;
+          font-size: 0.95rem;
           cursor: pointer;
-          opacity: 0.6;
+          opacity: 0.5;
+          color: var(--text-muted);
+          transition: opacity 0.15s ease, color 0.15s ease;
         }
         .delete-icon-btn:hover {
           opacity: 1;
+          color: #F87171;
         }
         .empty-state {
-          padding: 4rem 2rem;
+          padding: 4.5rem 2rem;
           text-align: center;
         }
         .empty-icon {
-          font-size: 2.5rem;
-          margin-bottom: 0.75rem;
+          font-size: 2.8rem;
+          margin-bottom: 0.85rem;
         }
         .empty-title {
-          font-size: 1.15rem;
+          font-size: 1.25rem;
           font-weight: 700;
           margin-bottom: 0.5rem;
+          color: var(--text-primary);
+          font-family: var(--font-heading);
         }
         .empty-desc {
           color: var(--text-muted);
-          max-width: 480px;
-          margin: 0 auto 1.5rem auto;
+          max-width: 500px;
+          margin: 0 auto 1.75rem auto;
           font-size: 0.9rem;
+          line-height: 1.6;
         }
         .loading-state {
-          padding: 3rem;
+          padding: 3.5rem;
           text-align: center;
           color: var(--text-muted);
+          font-size: 0.95rem;
+        }-muted);
         }
       `}</style>
     </div>

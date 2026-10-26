@@ -185,83 +185,102 @@ export function IngestModal({ isOpen, onClose, onCaseCreated }: IngestModalProps
           left: 0;
           right: 0;
           bottom: 0;
-          background: rgba(15, 23, 42, 0.6);
+          background: rgba(4, 6, 12, 0.8);
           display: flex;
           align-items: center;
           justify-content: center;
           z-index: 100;
-          backdrop-filter: blur(2px);
+          backdrop-filter: blur(16px);
         }
         .modal-dialog {
-          background: #ffffff;
-          border-radius: 10px;
+          background: var(--bg-surface-elevated);
+          border-radius: 12px;
           width: 90%;
           max-width: 680px;
-          box-shadow: var(--shadow-lg);
+          box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
           border: 1px solid var(--border-medium);
           overflow: hidden;
+          position: relative;
+        }
+        .modal-dialog::before {
+          content: "";
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 2px;
+          background: var(--accent-gradient);
         }
         .modal-header {
           display: flex;
           align-items: flex-start;
           justify-content: space-between;
-          padding: 1.25rem 1.5rem;
+          padding: 1.5rem 1.75rem;
           border-bottom: 1px solid var(--border-light);
           background: var(--bg-surface);
         }
         .modal-title {
-          font-size: 1.2rem;
+          font-size: 1.25rem;
           font-weight: 700;
           color: var(--text-primary);
+          letter-spacing: -0.01em;
         }
         .modal-subtitle {
           font-size: 0.85rem;
           color: var(--text-muted);
-          margin-top: 0.2rem;
+          margin-top: 0.25rem;
         }
         .close-btn {
           background: none;
           border: none;
-          font-size: 1.1rem;
+          font-size: 1.2rem;
           cursor: pointer;
           color: var(--text-muted);
+          transition: color 0.15s ease;
+        }
+        .close-btn:hover {
+          color: var(--text-primary);
         }
         .tab-switcher {
           display: flex;
-          background: var(--bg-subtle);
+          background: var(--bg-app);
           border-bottom: 1px solid var(--border-light);
-          padding: 0 1.5rem;
+          padding: 0 1.75rem;
         }
         .tab-btn {
           background: none;
           border: none;
-          padding: 0.75rem 1.25rem;
+          padding: 0.85rem 1.25rem;
           font-size: 0.88rem;
           font-weight: 600;
           color: var(--text-secondary);
           cursor: pointer;
           border-bottom: 2px solid transparent;
+          transition: all 0.15s ease;
+        }
+        .tab-btn:hover {
+          color: var(--text-primary);
         }
         .tab-btn.active {
           color: var(--accent-primary);
           border-bottom-color: var(--accent-primary);
-          background: #ffffff;
+          background: var(--bg-surface);
         }
         .modal-body {
-          padding: 1.5rem;
+          padding: 1.75rem;
         }
         .error-banner {
-          background: var(--status-error-bg);
-          color: var(--status-error-text);
-          border: 1px solid var(--status-error-border);
-          padding: 0.65rem 1rem;
-          margin: 1rem 1.5rem 0 1.5rem;
-          border-radius: 6px;
+          background: rgba(239, 68, 68, 0.15);
+          color: #F87171;
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          padding: 0.75rem 1.25rem;
+          margin: 1rem 1.75rem 0 1.75rem;
+          border-radius: 8px;
           font-size: 0.85rem;
         }
         .form-row {
           display: flex;
-          gap: 1rem;
+          gap: 1.25rem;
           margin-bottom: 1.25rem;
         }
         .flex-2 { flex: 2; }
@@ -269,7 +288,7 @@ export function IngestModal({ isOpen, onClose, onCaseCreated }: IngestModalProps
         .form-group {
           display: flex;
           flex-direction: column;
-          gap: 0.35rem;
+          gap: 0.45rem;
         }
         .form-label {
           font-size: 0.82rem;
@@ -277,35 +296,45 @@ export function IngestModal({ isOpen, onClose, onCaseCreated }: IngestModalProps
           color: var(--text-secondary);
         }
         .form-input {
-          padding: 0.5rem 0.75rem;
+          padding: 0.6rem 0.85rem;
           border: 1px solid var(--border-medium);
-          border-radius: 6px;
+          background: var(--bg-app);
+          color: var(--text-primary);
+          border-radius: 8px;
           font-size: 0.88rem;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
         }
         .form-textarea {
-          padding: 0.75rem;
+          padding: 0.85rem;
           border: 1px solid var(--border-medium);
-          border-radius: 6px;
+          background: var(--bg-app);
+          color: var(--text-primary);
+          border-radius: 8px;
           font-size: 0.88rem;
           font-family: var(--font-mono);
           resize: vertical;
+          line-height: 1.5;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
         }
         .form-input:focus, .form-textarea:focus {
           outline: none;
-          border-color: var(--border-focus);
+          border-color: var(--accent-primary);
+          box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
         }
         .dropzone {
-          border: 2px dashed var(--border-medium);
-          border-radius: 8px;
-          background: var(--bg-subtle);
-          padding: 2.25rem 1.5rem;
+          border: 2px dashed rgba(14, 165, 233, 0.3);
+          border-radius: 10px;
+          background: rgba(14, 165, 233, 0.03);
+          padding: 2.5rem 1.5rem;
           text-align: center;
           cursor: pointer;
-          transition: border-color 0.15s ease;
+          transition: all 0.2s ease;
           margin-bottom: 1.25rem;
         }
         .dropzone:hover {
           border-color: var(--accent-primary);
+          background: rgba(14, 165, 233, 0.06);
+          box-shadow: 0 0 20px rgba(14, 165, 233, 0.1);
         }
         .file-input-hidden {
           display: none;
@@ -318,11 +347,12 @@ export function IngestModal({ isOpen, onClose, onCaseCreated }: IngestModalProps
           gap: 0.5rem;
         }
         .dropzone-icon {
-          font-size: 2.2rem;
+          font-size: 2.4rem;
         }
         .dropzone-text {
-          font-size: 0.92rem;
+          font-size: 0.95rem;
           color: var(--text-primary);
+          font-weight: 500;
         }
         .dropzone-hint {
           font-size: 0.78rem;
@@ -330,47 +360,63 @@ export function IngestModal({ isOpen, onClose, onCaseCreated }: IngestModalProps
         }
         .file-selected {
           color: var(--accent-primary);
+          font-weight: 600;
         }
         .security-notice {
-          background: var(--bg-subtle);
+          background: var(--bg-surface);
           border: 1px solid var(--border-light);
-          padding: 0.65rem 0.85rem;
-          border-radius: 6px;
+          padding: 0.75rem 1rem;
+          border-radius: 8px;
           font-size: 0.76rem;
           color: var(--text-muted);
-          line-height: 1.4;
-          margin-top: 1rem;
+          line-height: 1.45;
+          margin-top: 1.25rem;
+        }
+        .security-notice strong {
+          color: var(--text-secondary);
         }
         .modal-footer {
           display: flex;
           align-items: center;
           justify-content: flex-end;
-          gap: 0.75rem;
-          margin-top: 1.5rem;
+          gap: 0.85rem;
+          margin-top: 1.75rem;
         }
         .cancel-btn {
-          background: #ffffff;
+          background: var(--bg-surface);
           border: 1px solid var(--border-medium);
           color: var(--text-secondary);
-          padding: 0.55rem 1rem;
-          border-radius: 6px;
+          padding: 0.6rem 1.15rem;
+          border-radius: 8px;
           font-size: 0.88rem;
           font-weight: 500;
           cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .cancel-btn:hover {
+          background: var(--bg-surface-elevated);
+          color: var(--text-primary);
         }
         .submit-btn {
-          background: var(--accent-primary);
-          border: 1px solid var(--accent-primary);
+          background: var(--accent-gradient);
+          border: 1px solid rgba(14, 165, 233, 0.4);
           color: #ffffff;
-          padding: 0.55rem 1.25rem;
-          border-radius: 6px;
+          padding: 0.6rem 1.35rem;
+          border-radius: 8px;
           font-size: 0.88rem;
           font-weight: 600;
           cursor: pointer;
+          box-shadow: 0 0 12px rgba(14, 165, 233, 0.25);
+          transition: all 0.2s ease;
+        }
+        .submit-btn:hover:not(:disabled) {
+          box-shadow: 0 0 18px rgba(14, 165, 233, 0.45);
+          transform: translateY(-1px);
         }
         .submit-btn:disabled {
-          opacity: 0.6;
+          opacity: 0.5;
           cursor: not-allowed;
+          box-shadow: none;
         }
       `}</style>
     </div>
