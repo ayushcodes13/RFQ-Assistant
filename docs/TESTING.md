@@ -33,6 +33,7 @@ Maintain a synthetic annotated corpus covering:
 5. Unresolved required attributes, nonpositive/nonfinite quantities, unknown selected SKUs and high-severity extraction contradictions block a full validated export, **even if the line is marked approved**. Such rows may appear only in prominently labeled partial drafts.
 6. Broken files or model errors cannot produce a silent "all clear".
 7. No outbound email or order submission exists in v0.
+   Unsent customer clarification drafts must never describe an unresolved collision or critical source contradiction as verified, or ask customers to resolve a line that only awaits internal review.
 8. No sensitive data appears in test fixtures, telemetry or CI logs.
 
 ## Metrics (to measure, not promises)
