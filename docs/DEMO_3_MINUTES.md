@@ -66,6 +66,26 @@ Ask these, in order:
 
 **Offer:** a **scoped, evaluation-only pilot**, not a free production integration. Start with 5-10 redacted/synthetic RFQs, one component family and the buyer's own empty quote worksheet template. Produce a readout of missing fields, wrong/unflagged MPNs, reviewer edits and the team's qualitative feedback. Agree scope, price, privacy and measurement plan before touching live documents. Do not promise fixed time savings.
 
+### Reproducible synthetic baseline (not a customer result)
+
+From repository root, run:
+
+```bash
+python -m scripts.evaluate_synthetic_demo
+```
+
+This prints a JSON comparison of the 20-line synthetic XLSX fixture against its
+checked-in ground-truth annotations, including extracted line coverage, MPN/OEM/
+quantity/unit agreement, exact catalog matches, source locator coverage,
+expected warning flags and unflagged critical discrepancies. The report has an
+explicit `synthetic_ground_truth_not_customer_metrics` evidence marker.
+Do **not** present these measurements as buyer performance or time saved.
+
+For an actual buyer evaluation, first obtain written authorization and
+redacted example RFQs, run blind independent annotation, and separately
+record operator correction time and manual-versus-assisted process time.
+Keep private customer data out of the public repo and CI artifacts.
+
 ### Pilot scorecard, to fill with actual evidence later
 
 | Metric | How measured | Baseline | Assisted | Status |
