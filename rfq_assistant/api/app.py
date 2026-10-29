@@ -226,6 +226,44 @@ def get_rfq_lines(case_id: str, current_user: PilotUser = Depends(get_current_us
     return case_manager.get_lines(case_id)
 
 
+@app.get("/api/rfqs/{case_id}/source")
+def get_original_source(
+    case_id: str,
+    current_user: PilotUser = Depends(get_current_user),
+):
+    """Open the original uploaded RFQ for human source verification.
+
+    Always resolve the stored file from an existing authorized case, never from
+    an arbitrary path supplied in the URL. Native PDF/text can open inline;
+    XLSX is downloaded for inspection in the operator's spreadsheet tool.
+    """
+    from fastapi.responses import FileResponse
+
+    case = case_manager.get_case(case_id)
+    if not case or not case.source_file:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ source not found.")
+
+    source = case_manager.storage.uploads_dir / case.case_id / case.source_file.file_name
+    if not source.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original source file is missing.")
+
+    ext = source.suffix.lower()
+    mime = {
+        ".pdf": "application/pdf",
+        ".csv": "text/csv",
+        ".txt": "text/plain",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }.get(ext, "application/octet-stream")
+
+    return FileResponse(
+        path=source,
+        filename=case.source_file.file_name,
+        media_type=mime,
+        content_disposition_type="inline" if ext in {".pdf", ".txt", ".csv"} else "attachment",
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @app.patch("/api/rfqs/{case_id}/lines/{line_id}", response_model=RFQLineItem)
 def update_rfq_line(
     case_id: str,
