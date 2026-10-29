@@ -19,6 +19,7 @@ Maintain a synthetic annotated corpus covering:
 - Empty/header-only RFQs and document-level fatal parse errors: block case creation and clean up partially saved files.
 - Nonempty quantity with missing MPN and description: preserve as an unresolved review row instead of silently dropping it.
 - Catalog duplicate IDs, unknown SKU, stale price, malformed CSV.
+- Catalog imports are atomic: any malformed row, duplicate SKU inside an upload, missing OEM/MPN or invalid/nonfinite price or stock quantity rejects the entire import without changing existing catalog matching.
 - Malicious spreadsheet formula or macros, prompt-injection PDF content, corrupt/password-protected files.
 - Formula-like user/customer/catalog fields in generated CSV and XLSX (including leading whitespace, plus, minus and at-sign); exported text must not execute spreadsheet formulas.
 - Zero-line exports must fail even in partial-draft mode.
