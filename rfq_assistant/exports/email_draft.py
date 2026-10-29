@@ -1,29 +1,52 @@
-"""Generator for unsent customer clarification and quotation reply drafts."""
+"""Generate an unsent customer clarification draft from verified RFQ decisions."""
 
-from typing import List, Optional
+import math
+from typing import List
+
 from rfq_assistant.schemas.enums import MatchStatus, ReviewDecision
 from rfq_assistant.schemas.models import RFQCase, RFQLineItem
 
 
+def _needs_customer_clarification(line: RFQLineItem) -> bool:
+    """Distinguish true customer ambiguities from an operator's pending review."""
+    if line.review_decision == ReviewDecision.REJECTED:
+        return False
+    return (
+        line.review_decision == ReviewDecision.NEEDS_CLARIFICATION
+        or line.match_status in (MatchStatus.COLLISION, MatchStatus.NO_MATCH)
+        or not line.requested_mpn
+        or not line.unit
+        or line.quantity is None
+        or not math.isfinite(line.quantity)
+        or line.quantity <= 0
+        or any(w.severity.lower() == "error" for w in line.extraction_warnings)
+    )
+
+
 def generate_unsent_email_draft(case: RFQCase, lines: List[RFQLineItem]) -> str:
+    """Create a human-editable draft, without approval or outbound email effects.
+
+    Important: an APPROVED status does not make a collision, missing part or
+    unresolved high-severity source contradiction commercially verified.
     """
-    Constructs a polite, structured email draft summarizing approved items and asking specific
-    clarification questions for ambiguous or unquoted items.
-    NEVER automatically sends emails. Prominently labeled as UNSENT DRAFT.
-    """
-    approved_lines = [l for l in lines if l.review_decision == ReviewDecision.APPROVED]
-    clarification_lines = [
-        l for l in lines
-        if l.review_decision in (ReviewDecision.NEEDS_CLARIFICATION, ReviewDecision.PENDING)
-        or l.match_status in (MatchStatus.COLLISION, MatchStatus.NO_MATCH)
-        or l.quantity is None
+    clarification = [line for line in lines if _needs_customer_clarification(line)]
+    approved = [
+        line for line in lines
+        if line.review_decision == ReviewDecision.APPROVED
+        and not _needs_customer_clarification(line)
+    ]
+    internally_pending = [
+        line for line in lines
+        if line.review_decision == ReviewDecision.PENDING
+        and not _needs_customer_clarification(line)
     ]
 
+    customer_label = " ".join((case.customer_label or "").splitlines()).strip()
     subject = f"Quote Preparation Update: RFQ #{case.case_id}"
-    if case.customer_label:
-        subject += f" - {case.customer_label}"
+    if customer_label:
+        subject += f" - {customer_label}"
 
-    body_lines = [
+    body = [
         "==================================================================",
         "*** UNSENT DRAFT REPLY — HUMAN REVIEW REQUIRED BEFORE SENDING ***",
         "*** NO AUTOMATIC OUTBOUND DISPATCH — STAFF SENDS MANUALLY     ***",
@@ -32,48 +55,75 @@ def generate_unsent_email_draft(case: RFQCase, lines: List[RFQLineItem]) -> str:
         "",
         "Hi there,",
         "",
-        f"Thank you for your quotation request (#{case.case_id}). We have reviewed your line items.",
+        f"Thank you for your quotation request (#{case.case_id}). We are preparing a reviewed worksheet.",
         "",
     ]
 
-    if approved_lines:
-        body_lines.append("We have verified the following items and are preparing your quotation:")
-        for idx, item in enumerate(approved_lines, start=1):
-            qty_str = f"{item.quantity:g} {item.unit}" if item.quantity is not None else "Qty TBD"
-            oem_str = item.requested_manufacturer or "Brand not specified"
-            mpn_str = item.requested_mpn or "Part not specified"
-            body_lines.append(f"  {idx}. {qty_str} - {oem_str} (Part: {mpn_str})")
-        body_lines.append("")
+    if approved:
+        body.append("Our team has reviewed the following requested items for quote preparation:")
+        for idx, line in enumerate(approved, start=1):
+            quantity = f"{line.quantity:g} {line.unit or 'EA'}"
+            oem = line.requested_manufacturer or "Manufacturer not specified"
+            body.append(f"  {idx}. {quantity} - {oem} (Part: {line.requested_mpn})")
+        body.append("")
 
-    if clarification_lines:
-        body_lines.append("Before finalizing your quote, could you please help clarify the following item(s)?")
-        for idx, item in enumerate(clarification_lines, start=1):
-            notes = []
-            if item.quantity is None:
-                notes.append("Quantity was missing from the request — please specify your required quantity and packaging.")
-            if item.match_status == MatchStatus.COLLISION:
-                candidates_oem = {c.catalog_item.manufacturer for c in item.candidates}
-                if candidates_oem:
-                    notes.append(
-                        f"Part number '{item.requested_mpn}' is supplied by multiple manufacturers ({', '.join(sorted(candidates_oem))}). "
-                        "Please confirm your preferred brand or equipment specification."
+    if clarification:
+        body.append("Before finalizing your quote, could you please help clarify the following item(s)?")
+        for line in clarification:
+            questions: List[str] = []
+            if line.quantity is None:
+                questions.append(
+                    "Quantity was missing from the request — please specify your required quantity and packaging."
+                )
+            elif not math.isfinite(line.quantity) or line.quantity <= 0:
+                questions.append("Please confirm a valid positive quantity and packaging.")
+
+            if not line.requested_mpn:
+                questions.append("Please provide the exact manufacturer part number or a datasheet/photo.")
+            elif line.match_status == MatchStatus.COLLISION:
+                manufacturers = sorted({c.catalog_item.manufacturer for c in line.candidates})
+                if len(manufacturers) > 1:
+                    questions.append(
+                        f"Part number '{line.requested_mpn}' appears under different manufacturers "
+                        f"({', '.join(manufacturers)}). Please confirm the exact brand and suffix."
+                    )
+                elif manufacturers:
+                    questions.append(
+                        f"Please confirm the manufacturer for part '{line.requested_mpn}' "
+                        f"(catalog candidate: {manufacturers[0]})."
                     )
                 else:
-                    notes.append(f"Multiple options exist for part '{item.requested_mpn}'. Please confirm exact suffix or manufacturer.")
-            elif item.match_status == MatchStatus.NO_MATCH:
-                notes.append(
-                    f"Part number '{item.requested_mpn or item.description}' is not currently in our standard catalog. "
-                    "Could you send a datasheet, label photo, or acceptable approved alternate?"
+                    questions.append("Please confirm the exact manufacturer and part-number suffix.")
+            elif line.match_status == MatchStatus.NO_MATCH:
+                questions.append(
+                    f"Part number '{line.requested_mpn}' is not in our current item master. "
+                    "Could you provide a datasheet or verify the full manufacturer and suffix?"
                 )
-            elif item.review_decision == ReviewDecision.NEEDS_CLARIFICATION and item.reviewer_notes:
-                notes.append(item.reviewer_notes)
 
-            clarif_text = "; ".join(notes) if notes else "Please confirm required specifications."
-            body_lines.append(f"  * Line {item.line_number} ({item.raw_text[:60]}...): {clarif_text}")
-        body_lines.append("")
+            if not line.unit:
+                questions.append("Please confirm the requested unit or packaging.")
+            if any(w.severity.lower() == "error" for w in line.extraction_warnings):
+                questions.append(
+                    "Our review found contradictory source details. Please confirm the requested "
+                    "manufacturer and part number; no substitute has been approved."
+                )
+            if line.review_decision == ReviewDecision.NEEDS_CLARIFICATION and line.reviewer_notes:
+                questions.append(line.reviewer_notes)
 
-    body_lines.extend([
-        "We will send over the formal quotation as soon as these details are confirmed.",
+            question_text = "; ".join(questions) or "Please confirm the requested specifications."
+            original = line.raw_text.replace("\r", " ").replace("\n", " ")[:60]
+            body.append(f"  * Line {line.line_number} ({original}...): {question_text}")
+        body.append("")
+
+    if internally_pending:
+        body.append(
+            "Other requested items are still undergoing internal verification. "
+            "No customer action is required for those lines at this stage."
+        )
+        body.append("")
+
+    body.extend([
+        "We will prepare the formal quotation after the required confirmations and internal review.",
         "",
         "Best regards,",
         "Inside Sales & Quotations Team",
@@ -83,5 +133,4 @@ def generate_unsent_email_draft(case: RFQCase, lines: List[RFQLineItem]) -> str:
         "pricing, and technical verification remain the responsibility of staff.",
         "------------------------------------------------------------------",
     ])
-
-    return "\n".join(body_lines)
+    return "\n".join(body)
