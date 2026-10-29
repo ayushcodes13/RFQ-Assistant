@@ -102,8 +102,9 @@ class SpreadsheetParser(BaseDocumentParser):
                 break
 
         if header_row_idx == -1:
-            # Fallback column mapping if no explicit header recognized
-            header_row_idx = 0
+            # Headerless distributor CSVs are common. Preserve the very first
+            # line as data rather than silently discarding it as a header.
+            header_row_idx = -1
             col_map = {"mpn": 0, "quantity": 1, "description": 2}
 
         lines: List[ParsedLineDraft] = []
@@ -143,8 +144,15 @@ class SpreadsheetParser(BaseDocumentParser):
                 )
 
             if not mpn and not desc:
-                # Row has no identifier
-                continue
+                if not oem and qty is None and not notes:
+                    continue
+                line_warnings.append(
+                    ExtractionWarning(
+                        code="MISSING_PART_REFERENCE",
+                        message=f"Cannot identify requested part on row {row_idx}; review original row.",
+                        severity="warning",
+                    )
+                )
 
             lines.append(
                 ParsedLineDraft(
@@ -161,6 +169,13 @@ class SpreadsheetParser(BaseDocumentParser):
                 )
             )
             line_counter += 1
+
+        if not lines:
+            warnings.append(ExtractionWarning(
+                code="NO_LINES_EXTRACTED",
+                message="No RFQ line items found in CSV. Manual entry or a corrected file is required.",
+                severity="error",
+            ))
 
         return ParsedDocumentResult(lines=lines, warnings=warnings, total_lines_detected=len(lines))
 
@@ -232,7 +247,15 @@ class SpreadsheetParser(BaseDocumentParser):
                     )
 
                 if not mpn and not desc:
-                    continue
+                    if not oem and qty is None and not notes:
+                        continue
+                    line_warnings.append(
+                        ExtractionWarning(
+                            code="MISSING_PART_REFERENCE",
+                            message=f"Cannot identify requested part on row {row_idx} of sheet '{sheet_name}'.",
+                            severity="warning",
+                        )
+                    )
 
                 lines.append(
                     ParsedLineDraft(
