@@ -157,7 +157,7 @@ export function WorkbenchView({
 
   const unresolvedCount = lines.filter(
     (l) =>
-      l.quantity === null ||
+      typeof l.quantity !== "number" ||
       !Number.isFinite(l.quantity) || l.quantity <= 0 ||
       !l.selected_catalog_sku ||
       !l.unit?.trim() ||
@@ -206,6 +206,8 @@ export function WorkbenchView({
           <button
             className={`export-btn ${unresolvedCount > 0 ? "has-unresolved" : "ready"}`}
             onClick={onOpenExport}
+            disabled={savingLine || Object.keys(quantityDrafts).length > 0}
+            title={Object.keys(quantityDrafts).length > 0 ? "Finish editing quantities before export" : "Prepare a reviewed draft quotation"}
           >
             Export Quotation Worksheet →
           </button>
