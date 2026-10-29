@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from rfq_assistant.ingestion import (
+    DocumentParserError,
     DocumentStorage,
     get_parser,
     validate_file_upload,
@@ -104,6 +105,17 @@ class CaseManager:
             # Parse document
             parser = get_parser(src_type)
             parse_result = parser.parse(content, clean_name)
+            # A "successful" empty RFQ is worse than an explicit parse failure:
+            # operators might otherwise export an empty worksheet as complete.
+            if not parse_result.lines:
+                raise DocumentParserError(
+                    "No RFQ line items could be extracted. Please correct the document or paste items manually."
+                )
+            fatal_warnings = [w for w in parse_result.warnings if w.severity.lower() == "error"]
+            if fatal_warnings:
+                raise DocumentParserError(
+                    "Document extraction failed: " + "; ".join(w.message for w in fatal_warnings)
+                )
 
             # Match lines against catalog
             lines: List[RFQLineItem] = []
