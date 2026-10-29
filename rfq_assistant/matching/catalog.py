@@ -2,6 +2,7 @@
 
 import csv
 import io
+import math
 from typing import Dict, List, Optional
 from pydantic import ValidationError
 
@@ -46,68 +47,108 @@ class CatalogRepository:
         return len(self._items_by_sku)
 
     def import_csv(self, csv_content: bytes, version: str = "v1") -> Dict[str, int]:
-        """
-        Imports and validates distributor catalog CSV.
-        Returns validation summary: {"imported": count, "duplicates": count, "collisions": count}
-        """
-        text = csv_content.decode("utf-8", errors="replace")
-        reader = csv.DictReader(io.StringIO(text))
+        """Validate every row before changing the item master.
 
-        required_cols = {"internal_sku", "manufacturer", "manufacturer_part_number", "description"}
-        if not reader.fieldnames or not required_cols.issubset(set(reader.fieldnames)):
-            missing = required_cols - set(reader.fieldnames or [])
-            raise CatalogImportError(f"Catalog CSV is missing required columns: {', '.join(sorted(missing))}")
+        Failures are all-or-nothing: never leave half an imported catalog or
+        silently erase a malformed OEM, MPN, price or stock quantity.
+        """
+        from decimal import Decimal, InvalidOperation
 
-        imported_count = 0
+        text = csv_content.decode("utf-8-sig", errors="replace")
+        reader = csv.DictReader(io.StringIO(text), restkey="__extra_columns__")
+        required = {"internal_sku", "manufacturer", "manufacturer_part_number", "description"}
+        columns = reader.fieldnames or []
+        missing = required.difference(columns)
+        if missing:
+            raise CatalogImportError(
+                f"Catalog CSV is missing required columns: {', '.join(sorted(missing))}"
+            )
+        if len(columns) != len(set(columns)):
+            raise CatalogImportError("Catalog CSV has duplicate column headers.")
+
+        staged: List[CatalogItem] = []
+        seen_skus = set()
         duplicate_count = 0
 
-        for row in reader:
+        for row_num, row in enumerate(reader, start=2):
+            if row.get("__extra_columns__"):
+                raise CatalogImportError(f"Catalog row {row_num} has more fields than its header.")
+            if all(not (value or "").strip() for key, value in row.items() if key != "__extra_columns__"):
+                continue
+
             sku = (row.get("internal_sku") or "").strip()
             oem = (row.get("manufacturer") or "").strip()
             mpn = (row.get("manufacturer_part_number") or "").strip()
             desc = (row.get("description") or "").strip()
+            if not sku or not oem or not mpn:
+                raise CatalogImportError(
+                    f"Catalog row {row_num} requires a nonempty SKU, manufacturer and MPN."
+                )
+            if sku in seen_skus:
+                raise CatalogImportError(
+                    f"Catalog row {row_num} repeats SKU '{sku}' in the uploaded file."
+                )
+            seen_skus.add(sku)
 
-            if not sku or not mpn or not oem:
-                continue
+            price_raw = (row.get("list_price") or "").strip()
+            list_price = None
+            if price_raw:
+                try:
+                    price = Decimal(price_raw)
+                except InvalidOperation:
+                    raise CatalogImportError(f"Catalog row {row_num} has invalid list_price.")
+                if not price.is_finite() or price < 0:
+                    raise CatalogImportError(
+                        f"Catalog row {row_num} requires a finite nonnegative list_price."
+                    )
+                list_price = float(price)
+                if not math.isfinite(list_price):
+                    raise CatalogImportError(f"Catalog row {row_num} has an overflowing list_price.")
+
+            stock_raw = (row.get("stock_qty") or "").strip()
+            stock_qty = None
+            if stock_raw:
+                try:
+                    stock = Decimal(stock_raw)
+                except InvalidOperation:
+                    raise CatalogImportError(f"Catalog row {row_num} has invalid stock_qty.")
+                if not stock.is_finite() or stock < 0 or stock != stock.to_integral_value():
+                    raise CatalogImportError(
+                        f"Catalog row {row_num} requires a nonnegative whole-number stock_qty."
+                    )
+                stock_qty = int(stock)
+
+            try:
+                item = CatalogItem(
+                    internal_sku=sku,
+                    manufacturer=oem,
+                    manufacturer_part_number=mpn,
+                    description=desc,
+                    list_price=list_price,
+                    stock_qty=stock_qty,
+                    catalog_version=version,
+                )
+            except ValidationError as exc:
+                raise CatalogImportError(f"Catalog row {row_num} is invalid: {exc}") from exc
 
             if sku in self._items_by_sku:
                 duplicate_count += 1
-                continue
+            else:
+                staged.append(item)
 
-            list_price = None
-            if row.get("list_price") and row["list_price"].strip():
-                try:
-                    list_price = float(row["list_price"].strip())
-                except ValueError:
-                    list_price = None
+        if not staged and duplicate_count == 0:
+            raise CatalogImportError("Catalog CSV contains no importable item rows.")
 
-            stock_qty = None
-            if row.get("stock_qty") and row["stock_qty"].strip():
-                try:
-                    stock_qty = int(float(row["stock_qty"].strip()))
-                except ValueError:
-                    stock_qty = None
-
-            item = CatalogItem(
-                internal_sku=sku,
-                manufacturer=oem,
-                manufacturer_part_number=mpn,
-                description=desc,
-                list_price=list_price,
-                stock_qty=stock_qty,
-                catalog_version=version,
-            )
+        # Commit only after every input row has passed validation.
+        for item in staged:
             self.add_item(item)
-            imported_count += 1
 
-        # Count cross-brand collisions
         collision_count = sum(
             1 for items in self._items_by_normalized_mpn.values()
             if len({normalize_manufacturer(i.manufacturer) for i in items}) > 1
         )
-
         return {
-            "imported": imported_count,
+            "imported": len(staged),
             "duplicates": duplicate_count,
             "collisions": collision_count,
             "total_catalog_size": len(self._items_by_sku),
