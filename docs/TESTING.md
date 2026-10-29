@@ -20,6 +20,8 @@ Maintain a synthetic annotated corpus covering:
 - Nonempty quantity with missing MPN and description: preserve as an unresolved review row instead of silently dropping it.
 - Catalog duplicate IDs, unknown SKU, stale price, malformed CSV.
 - Malicious spreadsheet formula or macros, prompt-injection PDF content, corrupt/password-protected files.
+- Formula-like user/customer/catalog fields in generated CSV and XLSX (including leading whitespace, plus, minus and at-sign); exported text must not execute spreadsheet formulas.
+- Zero-line exports must fail even in partial-draft mode.
 
 ## Key invariants
 
