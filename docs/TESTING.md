@@ -15,6 +15,9 @@ Maintain a synthetic annotated corpus covering:
 - Contradictory email vs attached spreadsheet quantities.
 - Part described as "equivalent" without engineering documentation.
 - Blank quantities, zero/negative quantities and unit ambiguity.
+- Headerless CSVs: first record must remain a line item, never mistaken for a header.
+- Empty/header-only RFQs and document-level fatal parse errors: block case creation and clean up partially saved files.
+- Nonempty quantity with missing MPN and description: preserve as an unresolved review row instead of silently dropping it.
 - Catalog duplicate IDs, unknown SKU, stale price, malformed CSV.
 - Malicious spreadsheet formula or macros, prompt-injection PDF content, corrupt/password-protected files.
 
