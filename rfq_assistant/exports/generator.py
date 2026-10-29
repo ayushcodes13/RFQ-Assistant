@@ -27,6 +27,22 @@ class ExportValidationError(Exception):
     pass
 
 
+def _looks_like_spreadsheet_formula(value: str) -> bool:
+    """Detect formula-like values even when prefixed by whitespace/control characters."""
+    return value.lstrip(" \t\r\n\ufeff").startswith(("=", "+", "-", "@"))
+
+
+def _safe_csv_cell(value):
+    """CSV consumers may interpret untrusted strings as formulas; prefix them as text."""
+    if isinstance(value, str) and _looks_like_spreadsheet_formula(value):
+        return "'" + value
+    return value
+
+
+def _safe_csv_row(writer, values) -> None:
+    writer.writerow([_safe_csv_cell(value) for value in values])
+
+
 class ExportGenerator:
     """Produces deterministic quotation preparation sheets in XLSX or CSV format."""
 
@@ -42,6 +58,9 @@ class ExportGenerator:
         Validates case lines and outputs a deterministic quotation worksheet.
         Blocks final export if unresolved items exist unless allow_partial is True.
         """
+        if not lines:
+            raise ExportValidationError("Export blocked: RFQ contains no extracted line items.")
+
         line_problems = [(line, blocking_line_issues(line, self.catalog)) for line in lines]
         unresolved_lines = [line for line, problems in line_problems if problems]
 
@@ -228,6 +247,13 @@ class ExportGenerator:
             col_letter = openpyxl.utils.get_column_letter(col[0].column)
             ws.column_dimensions[col_letter].width = max(max_len + 3, 10)
 
+        # openpyxl infers executable formulas from strings beginning with "=".
+        # Save untrusted spreadsheet-like strings as literal text cells instead.
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and _looks_like_spreadsheet_formula(cell.value):
+                    cell.data_type = "s"
+
         wb.save(output_path)
 
     def _write_csv(
@@ -240,10 +266,10 @@ class ExportGenerator:
     ):
         with open(output_path, mode="w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["# DRAFT QUOTATION WORKSHEET - INTERNAL USE ONLY - NOT A FINAL COMMITMENT"])
-            writer.writerow([f"# Case ID: {case.case_id}", f"Customer: {case.customer_label or 'Unspecified'}", f"Date: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"])
-            writer.writerow([f"# Reviewer: {actor}", f"Mode: {'Partial Draft' if is_partial else 'Standard Validated'}"])
-            writer.writerow([])
+            _safe_csv_row(writer, ["# DRAFT QUOTATION WORKSHEET - INTERNAL USE ONLY - NOT A FINAL COMMITMENT"])
+            _safe_csv_row(writer, [f"# Case ID: {case.case_id}", f"Customer: {case.customer_label or 'Unspecified'}", f"Date: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"])
+            _safe_csv_row(writer, [f"# Reviewer: {actor}", f"Mode: {'Partial Draft' if is_partial else 'Standard Validated'}"])
+            _safe_csv_row(writer, [])
             headers = [
                 "line_number",
                 "review_status",
@@ -259,7 +285,7 @@ class ExportGenerator:
                 "ext_price",
                 "notes_and_locator",
             ]
-            writer.writerow(headers)
+            _safe_csv_row(writer, headers)
 
             for item in lines:
                 catalog_item = self.catalog.get_by_sku(item.selected_catalog_sku) if item.selected_catalog_sku else None
@@ -270,7 +296,7 @@ class ExportGenerator:
                     else ""
                 )
                 locator_str = f"File: {item.source_locator.file_name} Row: {item.source_locator.row_number}"
-                writer.writerow([
+                _safe_csv_row(writer, [
                     item.line_number,
                     item.review_decision.value,
                     item.requested_manufacturer or "",
