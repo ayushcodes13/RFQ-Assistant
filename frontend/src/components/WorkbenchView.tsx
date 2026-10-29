@@ -13,6 +13,7 @@ import {
   batchReviewLines,
   getAuditTrail,
   getCaseLines,
+  getCaseSourceUrl,
   updateLineItem,
 } from "@/services/api";
 
@@ -35,6 +36,7 @@ export function WorkbenchView({
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [showAuditDrawer, setShowAuditDrawer] = useState(false);
   const [reviewerNote, setReviewerNote] = useState("");
+  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
 
   const loadData = async () => {
     setLoading(true);
@@ -65,19 +67,47 @@ export function WorkbenchView({
     }
   }, [selectedLineId]);
 
-  // Handle single line field updates
-  const handleQuickUpdate = async (lineId: string, updates: Partial<RFQLineItem>) => {
+  // Each update is conditional on the line revision read by the operator.
+  const handleQuickUpdate = async (lineId: string, updates: Partial<RFQLineItem>): Promise<boolean> => {
+    const current = lines.find((line) => line.line_id === lineId);
+    if (!current || savingLine) return false;
     setSavingLine(true);
     try {
-      const updated = await updateLineItem(caseData.case_id, lineId, updates);
-      setLines((prev) => prev.map((l) => (l.line_id === lineId ? updated : l)));
+      const updated = await updateLineItem(caseData.case_id, lineId, {
+        ...updates,
+        expected_version: current.version,
+      });
+      setLines((prev) => prev.map((line) => line.line_id === lineId ? updated : line));
       const audits = await getAuditTrail(caseData.case_id);
       setAuditEvents(audits);
+      return true;
     } catch (err: any) {
-      alert(`Update failed: ${err.message}`);
+      alert(`Update failed: ${err.message}. Refreshing the latest source values.`);
+      await loadData();
+      return false;
     } finally {
       setSavingLine(false);
     }
+  };
+
+  // A quantity is committed once, on blur/Enter, not on each keystroke.
+  const commitQuantityEdit = async (line: RFQLineItem, raw: string) => {
+    setQuantityDrafts((prev) => {
+      const next = { ...prev };
+      delete next[line.line_id];
+      return next;
+    });
+    if (raw.trim() === String(line.quantity ?? "")) return;
+    if (!raw.trim()) {
+      alert("Quantity cannot be cleared here. Flag the line for customer clarification.");
+      return;
+    }
+    const quantity = Number(raw);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      alert("Enter a positive, finite quantity.");
+      return;
+    }
+    await handleQuickUpdate(line.line_id, { quantity });
   };
 
   // Batch approve all visible exact matches
@@ -128,6 +158,10 @@ export function WorkbenchView({
   const unresolvedCount = lines.filter(
     (l) =>
       l.quantity === null ||
+      !Number.isFinite(l.quantity) || l.quantity <= 0 ||
+      !l.selected_catalog_sku ||
+      !l.unit?.trim() ||
+      l.extraction_warnings.some((w) => w.severity.toLowerCase() === "error") ||
       (l.match_status !== "EXACT_MATCH" && l.match_status !== "MANUAL_OVERRIDE") ||
       l.review_decision !== "APPROVED"
   ).length;
@@ -247,11 +281,21 @@ export function WorkbenchView({
 
           {/* Document Overview Snippet */}
           <div className="doc-preview-wrapper">
-            <div className="doc-preview-header">Source Document Excerpt</div>
+            <div className="doc-preview-header">Original source verification</div>
+            {caseData.source_file && (
+              <a
+                href={getCaseSourceUrl(caseData.case_id)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="secondary-btn"
+              >
+                {caseData.source_file.source_type === "XLSX" ? "Download original XLSX" : "Open original RFQ"}
+              </a>
+            )}
             <pre className="doc-preview-content font-mono">
               {caseData.raw_text ||
                 (caseData.source_file
-                  ? `[Binary ${caseData.source_file.source_type} document loaded securely. Lines extracted with deterministic coordinates.]`
+                  ? "Select Open Original RFQ to verify the full document against the source line, sheet and row locator above."
                   : "")}
             </pre>
           </div>
@@ -347,11 +391,25 @@ export function WorkbenchView({
                               type="number"
                               className={`qty-input ${hasMissingQty ? "missing" : ""}`}
                               placeholder="?"
-                              value={line.quantity ?? ""}
-                              onChange={(e) => {
-                                const val = e.target.value === "" ? null : parseFloat(e.target.value);
-                                handleQuickUpdate(line.line_id, { quantity: val });
+                              value={quantityDrafts[line.line_id] ?? String(line.quantity ?? "")}
+                              onChange={(e) => setQuantityDrafts((prev) => ({
+                                ...prev, [line.line_id]: e.target.value,
+                              }))}
+                              onBlur={(e) => { void commitQuantityEdit(line, e.currentTarget.value); }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") e.currentTarget.blur();
+                                if (e.key === "Escape") {
+                                  e.preventDefault();
+                                  e.currentTarget.value = String(line.quantity ?? "");
+                                  setQuantityDrafts((prev) => {
+                                    const next = { ...prev };
+                                    delete next[line.line_id];
+                                    return next;
+                                  });
+                                  e.currentTarget.blur();
+                                }
                               }}
+                              disabled={savingLine}
                               onClick={(e) => e.stopPropagation()}
                             />
                             <span className="uom-label font-mono">{line.unit || "EA"}</span>
