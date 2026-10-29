@@ -35,7 +35,7 @@ export async function getCaseLines(caseId: string): Promise<RFQLineItem[]> {
 export async function updateLineItem(
   caseId: string,
   lineId: string,
-  update: Partial<RFQLineItem> & { actor?: string; reviewer_notes?: string | null }
+  update: Partial<RFQLineItem> & { actor?: string; reviewer_notes?: string | null; expected_version?: number }
 ): Promise<RFQLineItem> {
   const res = await fetch(`${API_BASE}/api/rfqs/${caseId}/lines/${lineId}`, {
     method: "PATCH",
@@ -168,4 +168,9 @@ export async function getEmailDraft(caseId: string): Promise<{ draft: string }> 
 
 export function getExportDownloadUrl(caseId: string, exportId: string): string {
   return `${API_BASE}/api/rfqs/${caseId}/exports/${exportId}`;
+}
+
+/** Original uploaded RFQ for source verification (local demo / authenticated endpoint). */
+export function getCaseSourceUrl(caseId: string): string {
+  return `${API_BASE}/api/rfqs/${encodeURIComponent(caseId)}/source`;
 }

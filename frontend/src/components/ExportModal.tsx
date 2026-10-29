@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { RFQCase } from "@/types";
-import { exportWorksheet, getEmailDraft, getExportDownloadUrl } from "@/services/api";
+import { exportWorksheet, getCase, getEmailDraft, getExportDownloadUrl } from "@/services/api";
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -17,6 +17,25 @@ export function ExportModal({ isOpen, caseData, onClose }: ExportModalProps) {
   const [emailDraft, setEmailDraft] = useState<string>("");
   const [copiedEmail, setCopiedEmail] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [freshCase, setFreshCase] = useState<RFQCase | null>(null);
+  const [statusLoading, setStatusLoading] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
+
+  // Case props can be stale after inline review. Always refetch from the
+  // backend on open; it owns the authoritative export eligibility.
+  useEffect(() => {
+    if (!isOpen) return;
+    let active = true;
+    setAllowPartial(false);
+    setFreshCase(null);
+    setStatusError(null);
+    setStatusLoading(true);
+    getCase(caseData.case_id)
+      .then((value) => { if (active) setFreshCase(value); })
+      .catch(() => { if (active) setStatusError("Cannot verify the latest review status. Close and reopen export."); })
+      .finally(() => { if (active) setStatusLoading(false); });
+    return () => { active = false; };
+  }, [isOpen, caseData.case_id]);
 
   useEffect(() => {
     if (isOpen) {
@@ -28,12 +47,19 @@ export function ExportModal({ isOpen, caseData, onClose }: ExportModalProps) {
 
   if (!isOpen) return null;
 
-  const hasUnresolved = caseData.unresolved_count > 0;
+  const hasUnresolved = (freshCase?.unresolved_count ?? 0) > 0;
+  const canExport = !!freshCase && !statusLoading && !statusError && (!hasUnresolved || allowPartial);
 
   const handleDownload = async () => {
     setErrorMsg(null);
     setExporting(true);
     try {
+      // Race defense: verify current backend state again at the moment of export.
+      const verified = await getCase(caseData.case_id);
+      setFreshCase(verified);
+      if (verified.unresolved_count > 0 && !allowPartial) {
+        throw new Error("Review status changed. Resolve remaining lines or choose a partial draft.");
+      }
       const manifest = await exportWorksheet(
         caseData.case_id,
         allowPartial,
@@ -73,19 +99,22 @@ export function ExportModal({ isOpen, caseData, onClose }: ExportModalProps) {
           {errorMsg && <div className="error-banner">⚠ {errorMsg}</div>}
 
           {/* Validation Status Summary */}
-          <div className={`status-summary-card ${hasUnresolved ? "warning" : "success"}`}>
+          <div className={`status-summary-card ${statusLoading || statusError || hasUnresolved ? "warning" : "success"}`}>
             <div className="status-summary-header">
               <span className="summary-icon">{hasUnresolved ? "⚠" : "✓"}</span>
               <span className="summary-title font-bold">
-                {hasUnresolved
-                  ? `${caseData.unresolved_count} Unresolved Line(s) Pending Review`
+                {statusLoading ? "Checking latest review status..."
+                  : statusError ? "Current review status unavailable"
+                  : hasUnresolved ? `${freshCase?.unresolved_count ?? 0} Unresolved Line(s) Pending Review`
                   : "All Line Items Approved and Grounded"}
               </span>
             </div>
             <p className="summary-desc">
-              {hasUnresolved
-                ? "Some lines have missing quantities, unresolved brand collisions, or pending decisions. By default, final exports are blocked until all rows are verified."
-                : "All items have verified manufacturer part numbers and approved quantities. Ready for quotation export."}
+              {statusLoading ? "Checking the backend before enabling export."
+                : statusError || !freshCase ? "Cannot safely export without a fresh case status."
+                : hasUnresolved
+                  ? "Some lines have missing quantities, brand collisions, critical warnings or pending review. Full validated exports are blocked."
+                  : "The latest backend review state reports all line items approved and eligible for a draft worksheet."}
             </p>
           </div>
 
@@ -136,7 +165,7 @@ export function ExportModal({ isOpen, caseData, onClose }: ExportModalProps) {
 
           <button
             className="download-btn"
-            disabled={exporting || (hasUnresolved && !allowPartial)}
+            disabled={exporting || !canExport}
             onClick={handleDownload}
           >
             {exporting ? "Generating Worksheet..." : `Download Quote Preparation Worksheet (${format.toUpperCase()})`}

@@ -58,6 +58,7 @@ export interface RFQLineItem {
   reviewed_by?: string | null;
   reviewed_at?: string | null;
   reviewer_notes?: string | null;
+  version: number;
 }
 
 export interface SourceFileMetadata {
