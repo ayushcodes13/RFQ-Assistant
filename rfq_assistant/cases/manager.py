@@ -28,6 +28,7 @@ from rfq_assistant.ingestion.ai_extraction import (
     LLM_VALIDATOR_VERSION,
 )
 from rfq_assistant.ingestion.parsers.base import ParsedDocumentResult, ParsedLineDraft
+from rfq_assistant.ingestion.parsers.spreadsheet_parser import identify_columns
 from rfq_assistant.ingestion.source_segments import source_segments
 from rfq_assistant.matching import CatalogRepository, ExactMatchEngine
 from rfq_assistant.quotation.line_rules import blocking_line_issues
@@ -507,7 +508,7 @@ class CaseManager:
         customer_label: Optional[str] = None, actor: str = "Inside Sales",
     ) -> RFQCase:
         """Durably store pasted email text as a case-scoped source before queueing it."""
-        content = raw_text.encode("utf-8")
+        content = self._preflight_text_input(raw_text)
         case = self.enqueue_case_from_upload(
             "pasted_inquiry.txt", content, title=title or "RFQ Intake - Pasted Email",
             customer_label=customer_label, actor=actor,
@@ -709,9 +710,7 @@ class CaseManager:
         actor: str = "Inside Sales",
     ) -> RFQCase:
         """Parses and matches plain pasted email or inquiry text."""
-        if not raw_text.strip():
-            raise DocumentParserError("Pasted RFQ text is empty. Add non-whitespace content before creating a case.")
-        content = raw_text.encode("utf-8")
+        content = self._preflight_text_input(raw_text)
         case = self.create_case_from_upload(
             filename="pasted_inquiry.txt",
             content=content,
@@ -723,6 +722,35 @@ class CaseManager:
         case.raw_text = raw_text
         self._persist_case(case.case_id)
         return case
+
+    @staticmethod
+    def _preflight_text_input(raw_text: str) -> bytes:
+        """Reject empty, oversized, or header-only pasted input before persistence."""
+        content = raw_text.encode("utf-8")
+        if not raw_text.strip():
+            raise DocumentParserError("Pasted RFQ text is empty. Add inquiry text or line items before creating a case.")
+        validate_file_upload("pasted_inquiry.txt", content)
+        parsed = get_parser(SourceType.EMAIL_TEXT).parse(content, "pasted_inquiry.txt")
+        nonempty_regions = [line for line in raw_text.splitlines() if line.strip()]
+        if len(nonempty_regions) > MAX_TEXT_INTAKE_REGIONS:
+            raise DocumentParserError(
+                f"This RFQ contains more than {MAX_TEXT_INTAKE_REGIONS} non-empty text regions. Split it into smaller requests."
+            )
+        if parsed.lines or not parsed.candidate_segments:
+            return content
+
+        def looks_like_header(text: str) -> bool:
+            normalized = text.strip()
+            for delimiter in ("|", ",", ";", "\t"):
+                if delimiter in normalized:
+                    mapping = identify_columns([part.strip() for part in normalized.split(delimiter)])
+                    if "mpn" in mapping and len(mapping) >= 2:
+                        return True
+            return False
+
+        if all(looks_like_header(segment.text) for segment in parsed.candidate_segments):
+            raise DocumentParserError("The pasted text contains only table headers. Add at least one item row.")
+        return content
 
     @staticmethod
     def _validate_intake_regions(filename: str, source_type: SourceType, content: bytes) -> None:
@@ -953,7 +981,11 @@ class CaseManager:
                 )
         updated = 0
         for lid in request.line_ids:
+            line = next((item for item in self.get_lines(case_id) if item.line_id == lid), None)
+            if line is None:
+                continue
             upd = RFQLineItemUpdate(
+                expected_version=line.version,
                 review_decision=request.decision,
                 actor=request.actor,
                 reviewer_notes=request.notes,
