@@ -270,6 +270,8 @@ export function WorkbenchView({
         return;
       }
       update.quantity = quantity;
+    } else if (editingCell.field === "unit") {
+      update.unit = editValue.trim();
     } else if (editingCell.field === "requested_manufacturer") {
       update.requested_manufacturer = editValue.trim() || null;
     } else if (editingCell.field === "requested_mpn") {
@@ -628,7 +630,7 @@ export function WorkbenchView({
                     borderBottom: "1px solid var(--color-sand-200)",
                   }}
                 >
-                  {["#", "Qty", "Manufacturer", "MPN", "Description", "Match", "Status", ""].map(
+                  {["#", "Qty", "UOM", "Manufacturer", "MPN", "Description", "Match", "Status", ""].map(
                     (h) => (
                       <th
                         key={h}
@@ -734,6 +736,45 @@ export function WorkbenchView({
                           >
                             —
                           </span>
+                        )}
+                      </td>
+
+                      {/* Unit of measure */}
+                      <td className="px-3 sm:px-4 py-2.5 whitespace-nowrap">
+                        {editingCell?.lineId === line.line_id &&
+                        editingCell.field === "unit" ? (
+                          <input
+                            className="w-20 px-2 py-1 rounded text-sm border outline-none"
+                            style={{
+                              borderColor: "var(--color-amber-400)",
+                              backgroundColor: "white",
+                            }}
+                            aria-label={`Unit of measure for line ${line.line_number}`}
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            onBlur={handleSaveEdit}
+                            onClick={(e) => e.stopPropagation()}
+                            autoFocus
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            aria-label={`${line.unit?.trim() ? "Edit" : "Set"} unit of measure for line ${line.line_number}`}
+                            title="Edit unit of measure"
+                            className="rounded px-1.5 py-1 text-left text-sm underline decoration-dotted underline-offset-2 hover:bg-[var(--color-sand-50)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-amber-500)]"
+                            style={{
+                              color: line.unit?.trim()
+                                ? "var(--color-brown-700)"
+                                : "var(--color-warning-700)",
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStartEdit(line.line_id, "unit", line.unit ?? "");
+                            }}
+                          >
+                            {line.unit?.trim() || "Missing"}
+                          </button>
                         )}
                       </td>
 
