@@ -9,6 +9,7 @@ import time
 from typing import List, Optional
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from decimal import Decimal
 from rfq_assistant.agents.tools import ApprovalGateError, QuotationCommercialService
 from rfq_assistant.auth import PilotUser, get_current_user, require_role
@@ -45,6 +46,10 @@ from rfq_assistant.schemas.models import (
 ROOT = Path(__file__).resolve().parent.parent.parent
 log = logging.getLogger(__name__)
 DEFAULT_CATALOG_PATH = ROOT / "fixtures" / "catalogs" / "industrial_components_sample_catalog.csv"
+
+
+class PNGResponse(Response):
+    media_type = "image/png"
 
 # Global repositories and services
 _storage_root = Path(os.environ.get("RFQ_ASSISTANT_STORAGE_DIR", "storage"))
@@ -336,6 +341,56 @@ def get_original_source(
         content_disposition_type="inline" if ext in {".pdf", ".txt", ".csv"} else "attachment",
         headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
     )
+
+
+@app.get(
+    "/api/rfqs/{case_id}/source/pages/{page_number}",
+    response_class=PNGResponse,
+    responses={200: {"content": {"image/png": {"schema": {"type": "string", "format": "binary"}}}}},
+)
+def get_pdf_source_page(
+    case_id: str,
+    page_number: int,
+    current_user: PilotUser = Depends(get_current_user),
+):
+    """Render one bounded PDF page as a safe image for source verification."""
+    import math
+    import pymupdf
+    if page_number < 1:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Page number must be positive.")
+    case = case_manager.get_case(case_id)
+    if not case or not case.source_file:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ source not found.")
+    source = case_manager.storage.uploads_dir / case.case_id / case.source_file.file_name
+    if not source.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original source file is missing.")
+    if source.suffix.lower() != ".pdf":
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Source page previews are available for PDF documents.")
+
+    document = None
+    try:
+        document = pymupdf.open(source)
+        if page_number > document.page_count:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF page not found.")
+        page = document.load_page(page_number - 1)
+        width, height = page.rect.width, page.rect.height
+        if not math.isfinite(width) or not math.isfinite(height) or width <= 0 or height <= 0:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="PDF page dimensions are invalid.")
+        scale = min(1.0, 1600 / max(width, height))
+        pixmap = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False, annots=False)
+        return Response(
+            content=pixmap.tobytes("png"),
+            media_type="image/png",
+            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.warning("[rfq_pdf_page_preview] failed case=%s page=%d error=%s", case_id, page_number, type(exc).__name__)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="PDF page could not be previewed safely.") from exc
+    finally:
+        if document is not None:
+            document.close()
 
 
 @app.get(

@@ -2,6 +2,7 @@
 
 import importlib
 from io import BytesIO
+from pathlib import Path
 
 import openpyxl
 from fastapi.testclient import TestClient
@@ -108,3 +109,21 @@ def test_spreadsheet_preview_bounds_rows_and_rejects_unknown_sheets(tmp_path, mo
         base_url,
         params={"sheet_name": "RFQ", "row_number": 1, "target_cells": "A1;DROP"},
     ).status_code == 422
+
+
+def test_pdf_page_preview_renders_only_the_case_scoped_page(tmp_path, monkeypatch):
+    api = importlib.import_module("rfq_assistant.api.app")
+    manager = CaseManager(catalog=CatalogRepository(), storage=DocumentStorage(tmp_path / "source"))
+    monkeypatch.setattr(api, "case_manager", manager)
+    monkeypatch.delenv("REQUIRE_AUTH", raising=False)
+    fixture = Path(__file__).resolve().parent.parent / "fixtures" / "rfq_samples" / "formal_rfq_native.pdf"
+    case = manager.create_case_from_upload(filename="source.pdf", content=fixture.read_bytes())
+
+    client = TestClient(api.app)
+    response = client.get(f"/api/rfqs/{case.case_id}/source/pages/1")
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "image/png"
+    assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+    assert response.headers["cache-control"] == "private, no-store"
+    assert client.get(f"/api/rfqs/{case.case_id}/source/pages/999").status_code == 404
+    assert client.get("/api/rfqs/RFQ-NOT-EXIST/source/pages/1").status_code == 404

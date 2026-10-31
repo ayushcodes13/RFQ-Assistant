@@ -16,6 +16,7 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { MotionWrapper } from "@/components/ui/MotionWrapper";
 import { SourcePreviewDialog } from "@/components/SourcePreviewDialog";
+import { PdfSourcePreviewDialog } from "@/components/PdfSourcePreviewDialog";
 import {
   approveRemainingValidatedLines,
   batchReviewLines,
@@ -113,7 +114,9 @@ export function WorkbenchView({
   const [selectedLine, setSelectedLine] = useState<RFQLineItem | null>(null);
   const [showDetail, setShowDetail] = useState(false);
   const [showSourcePreview, setShowSourcePreview] = useState(false);
+  const [showPdfSourcePreview, setShowPdfSourcePreview] = useState(false);
   const closeSourcePreview = useCallback(() => setShowSourcePreview(false), []);
+  const closePdfSourcePreview = useCallback(() => setShowPdfSourcePreview(false), []);
 
   const fetchLines = useCallback(async () => {
     setLoading(true);
@@ -925,6 +928,10 @@ export function WorkbenchView({
                       <button type="button" onClick={() => setShowSourcePreview(true)} className="rfq-secondary">
                         Open source row and cells
                       </button>
+                    ) : caseData.source_file?.file_name.toLowerCase().endsWith(".pdf") && selectedLine.source_locator.page_number ? (
+                      <button type="button" onClick={() => setShowPdfSourcePreview(true)} className="rfq-secondary">
+                        View original page
+                      </button>
                     ) : (
                       <a
                         href={`/api/proxy/api/rfqs/${encodeURIComponent(caseData.case_id)}/source${selectedLine.source_locator.page_number ? `#page=${selectedLine.source_locator.page_number}` : ""}`}
@@ -1042,6 +1049,13 @@ export function WorkbenchView({
           rowNumber={selectedLine.source_locator.row_number}
           targetCells={Object.values(selectedLine.source_locator.field_source_cells ?? {})}
           onClose={closeSourcePreview}
+        />
+      )}
+      {showPdfSourcePreview && selectedLine?.source_locator.page_number && (
+        <PdfSourcePreviewDialog
+          caseId={caseData.case_id}
+          locator={selectedLine.source_locator}
+          onClose={closePdfSourcePreview}
         />
       )}
     </div>
