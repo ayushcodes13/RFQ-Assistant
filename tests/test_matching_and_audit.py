@@ -145,8 +145,7 @@ class TestAPIEndpoints:
         assert data["catalog_size"] >= 20
 
     def test_create_rfq_from_pasted_text(self, client):
-        text = "10 pcs Schneider Electric LC1D09BD
-5 pcs Siemens 6ES7214-1AG40-0XB0"
+        text = "10 pcs Schneider Electric LC1D09BD\n5 pcs Siemens 6ES7214-1AG40-0XB0"
         resp = client.post(
             "/api/rfqs",
             data={"pasted_text": text, "title": "API Test RFQ", "actor": "Test User"},

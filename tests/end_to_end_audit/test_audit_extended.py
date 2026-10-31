@@ -460,16 +460,11 @@ class TestSpreadsheetLayoutDiversity:
     def test_csv_with_various_quantity_formats(self, ext_services):
         """CSV with quantities like '10 pcs', '5 units', '20x', '15.5'."""
         csv_content = (
-            b"MPN,Manufacturer,Quantity,Unit
-"
-            b"LC1D09BD,Schneider Electric,10 pcs,EA
-"
-            b"6ES7214-1AG40-0XB0,Siemens,5 units,EA
-"
-            b"MY4N-D2-DC24,Omron,20x,EA
-"
-            b"FAZ-C10/1,Eaton,15.5,EA
-"
+            b"MPN,Manufacturer,Quantity,Unit\n"
+            b"LC1D09BD,Schneider Electric,10 pcs,EA\n"
+            b"6ES7214-1AG40-0XB0,Siemens,5 units,EA\n"
+            b"MY4N-D2-DC24,Omron,20x,EA\n"
+            b"FAZ-C10/1,Eaton,15.5,EA\n"
         )
         manager, _, catalog, _ = ext_services
         case = manager.create_case_from_upload(
@@ -487,12 +482,9 @@ class TestSpreadsheetLayoutDiversity:
     def test_csv_with_extra_unmapped_columns(self, ext_services):
         """CSV with extra columns not in the standard mapping should still parse."""
         csv_content = (
-            b"MPN,Manufacturer,Qty,Description,Custom_Field,Notes
-"
-            b"LC1D09BD,Schneider Electric,10,Contactor,CustomValue1,Note1
-"
-            b"6ES7214-1AG40-0XB0,Siemens,5,CPU,CustomValue2,Note2
-"
+            b"MPN,Manufacturer,Qty,Description,Custom_Field,Notes\n"
+            b"LC1D09BD,Schneider Electric,10,Contactor,CustomValue1,Note1\n"
+            b"6ES7214-1AG40-0XB0,Siemens,5,CPU,CustomValue2,Note2\n"
         )
         manager, _, catalog, _ = ext_services
         case = manager.create_case_from_upload(
@@ -506,12 +498,9 @@ class TestSpreadsheetLayoutDiversity:
     def test_csv_with_quoted_quantity_specs(self, ext_services):
         """CSV with quoted quantity specs like '10 pcs (min order qty=10)')."""
         csv_content = (
-            b"MPN,OEM,Qty,Notes
-"
-            b"LC1D09BD,Schneider Electric,\"10 pcs (min order qty=10)\",Need 10
-"
-            b"6ES7214-1AG40-0XB0,Siemens,5,Standard qty
-"
+            b"MPN,OEM,Qty,Notes\n"
+            b"LC1D09BD,Schneider Electric,\"10 pcs (min order qty=10)\",Need 10\n"
+            b"6ES7214-1AG40-0XB0,Siemens,5,Standard qty\n"
         )
         manager, _, catalog, _ = ext_services
         case = manager.create_case_from_upload(
@@ -973,12 +962,9 @@ class TestApiExportDownloadAndPersistence:
         case = manager1.create_case_from_upload(
             filename="workflow.csv",
             content=(
-                b"MPN,Manufacturer,Qty,Description
-"
-                b"LC1D09BD,Schneider Electric,10,Contactor
-"
-                b"6ES7214-1AG40-0XB0,Siemens,5,CPU
-"
+                b"MPN,Manufacturer,Qty,Description\n"
+                b"LC1D09BD,Schneider Electric,10,Contactor\n"
+                b"6ES7214-1AG40-0XB0,Siemens,5,CPU\n"
             ),
             customer_label="SYN-TEST", actor="Auditor",
             title="Persistence Full Workflow",
@@ -1358,9 +1344,7 @@ class TestAuthAndSecurityExtended:
 
     def test_path_traversal_in_filename_blocked(self):
         """Filename sanitization must prevent path traversal."""
-        safe_name, _, _ = validate_file_upload("../../../etc/passwd.csv", b"a,b
-1,2
-")
+        safe_name, _, _ = validate_file_upload("../../../etc/passwd.csv", b"a,b\n1,2\n")
         assert ".." not in safe_name
         assert "etc" not in safe_name
         assert safe_name.endswith(".csv")
@@ -1378,9 +1362,7 @@ class TestAuthAndSecurityExtended:
     def test_xlsm_disguised_as_csv_not_treated_as_macro(self):
         """Files with .csv extension are never treated as macro files (no macro vector)."""
         # A .csv file is never macro-enabled, regardless of name
-        name, _, _ = validate_file_upload("report.xlsm.csv", b"PartNumber,Qty
-LC1D09BD,10
-")
+        name, _, _ = validate_file_upload("report.xlsm.csv", b"PartNumber,Qty\nLC1D09BD,10\n")
         assert name.endswith(".csv")
 
     def test_csv_formula_injection_in_export(self, ext_services):
@@ -1721,32 +1703,18 @@ class TestAuditFindingsReport:
         results_dir.mkdir(exist_ok=True)
         findings_path = results_dir / "audit_findings_extended.txt"
         with open(findings_path, "w") as f:
-            f.write("Extended RFQ-Assistant Audit — Findings Summary
-")
-            f.write(f"Generated: 2026-10-31
-")
-            f.write("=" * 80 + "
-
-")
+            f.write("Extended RFQ-Assistant Audit — Findings Summary\n")
+            f.write(f"Generated: 2026-10-31\n")
+            f.write("=" * 80 + "\n\n")
             if not FINDINGS:
-                f.write("No findings recorded via record_finding().
-")
-                f.write("See test output for pass/fail status.
-")
+                f.write("No findings recorded via record_finding().\n")
+                f.write("See test output for pass/fail status.\n")
             else:
                 for i, finding in enumerate(FINDINGS, 1):
-                    f.write(f"Finding #{i}: {finding.title}
-")
-                    f.write(f"  Severity: {finding.severity}
-")
-                    f.write(f"  Category: {finding.category}
-")
-                    f.write(f"  Type: {finding.defect_type}
-")
-                    f.write(f"  Expected: {finding.expected}
-")
-                    f.write(f"  Observed: {finding.observed}
-")
-                    f.write(f"  Evidence: {finding.evidence}
-
-")
+                    f.write(f"Finding #{i}: {finding.title}\n")
+                    f.write(f"  Severity: {finding.severity}\n")
+                    f.write(f"  Category: {finding.category}\n")
+                    f.write(f"  Type: {finding.defect_type}\n")
+                    f.write(f"  Expected: {finding.expected}\n")
+                    f.write(f"  Observed: {finding.observed}\n")
+                    f.write(f"  Evidence: {finding.evidence}\n\n")
