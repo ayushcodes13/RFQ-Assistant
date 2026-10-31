@@ -86,7 +86,16 @@ The initial product must function with a fixture catalog and without an LLM for 
 - GET /api/rfqs/{id}/exports/{export_id} — download authorized artifact.
 - DELETE /api/rfqs/{id} — delete case and uploaded artifacts subject to agreed retention policy.
 
-These are interface proposals, not endpoints already available.
+These endpoints are implemented in the prototype backend. The FastAPI OpenAPI
+schema is checked in as `frontend/openapi.json`; `frontend/src/types/api.generated.ts`
+is generated from it with `openapi-typescript`, and
+`tests/test_openapi_contract.py` fails if the checked-in schema drifts from the
+live app. Regenerate with:
+
+```bash
+python -m rfq_assistant.scripts.export_openapi
+cd frontend && npm run gen:types
+```
 
 ## Security and reliability boundaries
 

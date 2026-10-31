@@ -1,115 +1,69 @@
-export type CaseStatus = "NEW" | "PROCESSING" | "NEEDS_REVIEW" | "READY_TO_EXPORT" | "EXPORTED" | "FAILED";
-export type SourceType = "EMAIL_TEXT" | "CSV" | "XLSX" | "PDF_NATIVE" | "PDF_SCANNED";
-export type ExtractionStatus = "EXTRACTED" | "NEEDS_CORRECTION" | "UNRESOLVED";
-export type MatchStatus = "EXACT_MATCH" | "COLLISION" | "NO_MATCH" | "MANUAL_OVERRIDE";
-export type ReviewDecision = "PENDING" | "APPROVED" | "NEEDS_CLARIFICATION" | "REJECTED";
-export type AuditAction = "CASE_CREATED" | "PARSED" | "LINE_EDITED" | "LINE_APPROVED" | "LINE_REJECTED" | "LINE_FLAGGED" | "CATALOG_IMPORTED" | "EXPORTED";
+/**
+ * Frontend domain types derived from the backend OpenAPI schema.
+ *
+ * The generated file (`api.generated.ts`) is the source of truth for wire
+ * shapes. Regenerate both files with:
+ *
+ *   python -m rfq_assistant.scripts.export_openapi
+ *   cd frontend && npm run gen:types
+ *
+ * Only UI-only helpers (catalog import summary, optimistic edit payload)
+ * are declared by hand below.
+ */
+import type { components } from "./api.generated";
 
-export interface SourceLocator {
-  file_name: string;
-  page_number?: number | null;
-  sheet_name?: string | null;
-  row_number?: number | null;
-  text_snippet?: string | null;
-}
+type Schemas = components["schemas"];
 
-export interface ExtractionWarning {
-  code: string;
-  message: string;
-  severity: string;
-}
+// Enum unions straight from the backend schema.
+export type CaseStatus = Schemas["CaseStatus"];
+export type SourceType = Schemas["SourceType"];
+export type ExtractionStatus = Schemas["ExtractionStatus"];
+export type MatchStatus = Schemas["MatchStatus"];
+export type ReviewDecision = Schemas["ReviewDecision"];
+export type AuditAction = Schemas["AuditAction"];
 
-export interface CatalogItem {
-  internal_sku: string;
-  manufacturer: string;
-  manufacturer_part_number: string;
-  description: string;
-  list_price?: number | null;
-  stock_qty?: number | null;
-  catalog_version?: string | null;
-}
+export type SourceLocator = Schemas["SourceLocator"];
+export type ExtractionWarning = Schemas["ExtractionWarning"];
+export type CatalogItem = Schemas["CatalogItem"];
+export type MatchCandidate = Schemas["MatchCandidate"];
+export type SourceFileMetadata = Schemas["SourceFileMetadata"];
 
-export interface MatchCandidate {
-  catalog_item: CatalogItem;
-  match_type: MatchStatus;
-  explanation: string;
-  confidence_note: string;
-}
-
-export interface RFQLineItem {
-  line_id: string;
-  case_id: string;
-  line_number: number;
-  raw_text: string;
-  source_locator: SourceLocator;
-  requested_manufacturer?: string | null;
-  requested_mpn?: string | null;
-  description?: string | null;
-  quantity?: number | null;
-  unit?: string | null;
-  required_by?: string | null;
-  notes?: string | null;
-  extraction_status: ExtractionStatus;
+/**
+ * The backend always serialises defaulted collections, so require them here
+ * instead of making every render guard against `undefined`.
+ */
+export type RFQLineItem = Schemas["RFQLineItem"] & {
   extraction_warnings: ExtractionWarning[];
-  match_status: MatchStatus;
-  selected_catalog_sku?: string | null;
   candidates: MatchCandidate[];
-  review_decision: ReviewDecision;
-  reviewed_by?: string | null;
-  reviewed_at?: string | null;
-  reviewer_notes?: string | null;
-}
+};
 
-export interface SourceFileMetadata {
-  file_id: string;
-  file_name: string;
-  source_type: SourceType;
-  mime_type: string;
-  size_bytes: number;
-  sha256_digest: string;
-  uploaded_at: string;
-}
-
-export interface RFQCase {
-  case_id: string;
-  title: string;
-  customer_label?: string | null;
-  status: CaseStatus;
-  source_type: SourceType;
-  source_file?: SourceFileMetadata | null;
-  raw_text?: string | null;
+export type RFQCase = Schemas["RFQCase"] & {
   created_at: string;
   updated_at: string;
-  line_count: number;
-  unresolved_count: number;
-  parser_version: string;
-  catalog_id?: string | null;
-}
+};
 
-export interface AuditEvent {
-  event_id: string;
-  case_id: string;
-  line_id?: string | null;
-  actor: string;
-  action: AuditAction;
-  field_name?: string | null;
-  old_value?: string | null;
-  new_value?: string | null;
+export type AuditEvent = Schemas["AuditEvent"] & {
   recorded_at: string;
-  notes?: string | null;
+};
+
+export type ExportManifest = Schemas["ExportManifest"] & {
+  generated_at: string;
+};
+
+// Request payloads.
+export type RFQLineItemUpdate = Schemas["RFQLineItemUpdate"];
+export type BatchReviewRequest = Schemas["BatchReviewRequest"];
+export type ExportRequest = Schemas["ExportRequest"];
+
+/** Response from `POST /api/catalogs/import` (no response_model on backend). */
+export interface CatalogImportSummary {
+  imported: number;
+  duplicates: number;
+  collisions: number;
+  total_catalog_size: number;
 }
 
-export interface ExportManifest {
-  export_id: string;
-  case_id: string;
-  file_name: string;
-  format: string;
-  is_draft: boolean;
-  total_lines: number;
-  approved_lines: number;
-  unresolved_lines_omitted: number;
-  generated_at: string;
-  reviewer_name: string;
-  unsent_email_draft: string;
-  download_url: string;
+export interface CatalogImportResponse {
+  status: string;
+  summary: CatalogImportSummary;
 }
