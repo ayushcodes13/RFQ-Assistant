@@ -457,8 +457,8 @@ class TestPDFParser:
 
         monkeypatch.setattr(
             pdf_parser,
-            "recognize_page",
-            lambda _content, _page_number: "1 Siemens 6ES7214-1AG40-0XB0 PLC 2 EA",
+            "recognize_rendered_page",
+            lambda _rendered: "1 Siemens 6ES7214-1AG40-0XB0 PLC 2 EA",
         )
         result = get_parser(SourceType.PDF_NATIVE, allow_ocr=True).parse(content, "scan.pdf")
 
@@ -472,6 +472,43 @@ class TestPDFParser:
         page_evidence = next(segment for segment in result.evidence_segments if segment.locator.page_number == 1)
         assert "Siemens" in page_evidence.text
         assert any(w.code == "OCR_TEXT_REVIEW" for w in page_evidence.warnings)
+
+    def test_multi_page_ocr_opens_pdf_once_for_all_page_renders(self, monkeypatch):
+        """Selected pages reuse one decoded PDF and keep OCR work per page."""
+        import io
+        import fitz
+        from PIL import Image
+        import pymupdf
+        from rfq_assistant.ingestion.parsers import pdf_parser
+
+        image_buffer = io.BytesIO()
+        Image.new("RGB", (300, 400), "white").save(image_buffer, format="PNG")
+        pdf = fitz.open()
+        for _ in range(3):
+            page = pdf.new_page(width=595, height=842)
+            page.insert_image(page.rect, stream=image_buffer.getvalue())
+        content = pdf.tobytes()
+        pdf.close()
+
+        original_open = pymupdf.open
+        opens = []
+        monkeypatch.setattr(
+            pymupdf, "open",
+            lambda *args, **kwargs: (opens.append(1), original_open(*args, **kwargs))[1],
+        )
+        recognized = []
+
+        def fake_recognize(_rendered):
+            recognized.append(1)
+            return "1 Siemens 6ES7214-1AG40-0XB0 PLC 2 EA"
+
+        monkeypatch.setattr(pdf_parser, "recognize_rendered_page", fake_recognize)
+        result = pdf_parser.PDFParser(allow_ocr=True).parse(content, "three-page-scan.pdf")
+
+        # One open is used for visual triage and one for every selected OCR render.
+        assert len(opens) == 2
+        assert len(recognized) == 3
+        assert len(result.lines) == 3
 
     def test_page_triage_failure_sends_every_page_to_ocr(self, monkeypatch):
         """An unknown page classification must not silently trust native text alone."""
@@ -488,12 +525,13 @@ class TestPDFParser:
         def fail_triage(_page, _text):
             raise RuntimeError("synthetic triage failure")
 
-        def fake_ocr(_content, page_number):
+        def fake_ocr(_rendered):
+            page_number = len(calls) + 1
             calls.append(page_number)
             return "1 Siemens 6ES7214-1AG40-0XB0 PLC 2 EA"
 
         monkeypatch.setattr(pdf_parser, "page_needs_ocr", fail_triage)
-        monkeypatch.setattr(pdf_parser, "recognize_page", fake_ocr)
+        monkeypatch.setattr(pdf_parser, "recognize_rendered_page", fake_ocr)
         result = pdf_parser.PDFParser(allow_ocr=True).parse(content, "triage-fallback.pdf")
 
         assert calls == [1]

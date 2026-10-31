@@ -35,6 +35,13 @@ class OCRPageResult:
     lines: Tuple[OCRTextLine, ...]
 
 
+@dataclass(frozen=True)
+class RenderedOCRPage:
+    png: bytes
+    width: int
+    height: int
+
+
 @lru_cache(maxsize=1)
 def engine_profile() -> str:
     """Return a bounded, content-free identity for the installed OCR binary."""
@@ -83,23 +90,15 @@ def page_needs_ocr(
     return image_coverage(page) >= min_image_coverage
 
 
-def recognize_page(
-    pdf_bytes: bytes,
+def render_page(
+    document: Any,
     page_number: int,
     *,
     dpi: int = 180,
-    timeout_seconds: float = 15.0,
     max_pixels: int = 20_000_000,
     max_png_bytes: int = 32 * 1024 * 1024,
-) -> OCRPageResult:
-    """Rasterize/OCR one page and retain bounded, normalized line geometry."""
-    executable = shutil.which("tesseract")
-    if not executable:
-        raise LocalOCRError("Tesseract is not installed; local OCR is unavailable.")
-    try:
-        document = pymupdf.open(stream=pdf_bytes, filetype="pdf")
-    except Exception as exc:
-        raise LocalOCRError("PDF could not be opened for OCR rendering.") from exc
+) -> RenderedOCRPage:
+    """Render one page from an already-open document under strict size bounds."""
     try:
         if page_number < 1 or page_number > len(document):
             raise LocalOCRError("Requested OCR page is outside the document.")
@@ -115,15 +114,22 @@ def recognize_page(
         raise
     except Exception as exc:
         raise LocalOCRError("PDF page could not be rendered for OCR.") from exc
-    finally:
-        document.close()
-
     if len(png) > max_png_bytes:
         raise LocalOCRError("Rendered page exceeds the OCR image size limit.")
+    return RenderedOCRPage(png, rendered_width, rendered_height)
+
+
+def recognize_rendered_page(
+    rendered: RenderedOCRPage, *, timeout_seconds: float = 15.0
+) -> OCRPageResult:
+    """OCR a pre-rendered page and retain bounded normalized line geometry."""
+    executable = shutil.which("tesseract")
+    if not executable:
+        raise LocalOCRError("Tesseract is not installed; local OCR is unavailable.")
     try:
         completed = subprocess.run(
             [executable, "stdin", "stdout", "--psm", "6", "tsv"],
-            input=png,
+            input=rendered.png,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=timeout_seconds,
@@ -180,10 +186,10 @@ def recognize_page(
             OCRTextLine(
                 text=" ".join(group["words"]),
                 bbox=(
-                    max(0.0, min(1.0, min(box[0] for box in bounds) / rendered_width)),
-                    max(0.0, min(1.0, min(box[1] for box in bounds) / rendered_height)),
-                    max(0.0, min(1.0, max(box[2] for box in bounds) / rendered_width)),
-                    max(0.0, min(1.0, max(box[3] for box in bounds) / rendered_height)),
+                    max(0.0, min(1.0, min(box[0] for box in bounds) / rendered.width)),
+                    max(0.0, min(1.0, min(box[1] for box in bounds) / rendered.height)),
+                    max(0.0, min(1.0, max(box[2] for box in bounds) / rendered.width)),
+                    max(0.0, min(1.0, max(box[3] for box in bounds) / rendered.height)),
                 ),
                 confidence=(sum(confidence_values) / len(confidence_values))
                 if confidence_values
@@ -193,3 +199,32 @@ def recognize_page(
     return OCRPageResult(
         text="\n".join(line.text for line in lines), lines=tuple(lines)
     )
+
+
+def recognize_page(
+    pdf_bytes: bytes,
+    page_number: int,
+    *,
+    dpi: int = 180,
+    timeout_seconds: float = 15.0,
+    max_pixels: int = 20_000_000,
+    max_png_bytes: int = 32 * 1024 * 1024,
+) -> OCRPageResult:
+    """Convenience API that renders and recognizes one PDF page."""
+    if not shutil.which("tesseract"):
+        raise LocalOCRError("Tesseract is not installed; local OCR is unavailable.")
+    try:
+        document = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as exc:
+        raise LocalOCRError("PDF could not be opened for OCR rendering.") from exc
+    try:
+        rendered = render_page(
+            document,
+            page_number,
+            dpi=dpi,
+            max_pixels=max_pixels,
+            max_png_bytes=max_png_bytes,
+        )
+    finally:
+        document.close()
+    return recognize_rendered_page(rendered, timeout_seconds=timeout_seconds)

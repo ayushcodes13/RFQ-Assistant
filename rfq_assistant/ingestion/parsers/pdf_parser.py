@@ -4,7 +4,7 @@ import io
 import logging
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from typing import List, Optional, Tuple
 import pypdf
 
@@ -20,7 +20,8 @@ from rfq_assistant.ingestion.parsers.base import (
 )
 from rfq_assistant.schemas.models import ExtractionWarning, SourceLocator
 from rfq_assistant.ingestion.ocr.local_tesseract import (
-    LocalOCRError, OCRPageResult, engine_profile, page_needs_ocr, recognize_page,
+    LocalOCRError, OCRPageResult, engine_profile, page_needs_ocr,
+    recognize_rendered_page, render_page,
 )
 
 MAX_OCR_PAGES_PER_DOCUMENT = 10
@@ -46,7 +47,7 @@ KNOWN_OEMS = [
 class PDFParser(BaseDocumentParser):
     """Deterministic parser for native PDFs. Safely detects scanned PDFs and rejects them when OCR is disabled."""
 
-    artifact_version = "rfq-pdf-v4"
+    artifact_version = "rfq-pdf-v5"
 
     def __init__(self, allow_ocr: bool = False):
         self.allow_ocr = allow_ocr
@@ -57,7 +58,7 @@ class PDFParser(BaseDocumentParser):
         return {
             **super().cache_profile(),
             "allow_ocr": self.allow_ocr,
-            "ocr_profile": "pymupdf-triage+tesseract-psm6-tsv-180dpi-v2",
+            "ocr_profile": "pymupdf-triage+tesseract-psm6-tsv-180dpi-v3",
             "ocr_engine": engine_profile() if self.allow_ocr else "disabled",
             "max_ocr_pages": MAX_OCR_PAGES_PER_DOCUMENT,
             "max_concurrent_ocr_pages": MAX_CONCURRENT_OCR_PAGES,
@@ -176,71 +177,83 @@ class PDFParser(BaseDocumentParser):
                         "OCR_PAGE_LIMIT_EXCEEDED",
                     ))
             else:
-                # Render/OCR a small number of selected pages concurrently to
-                # reduce scan latency without unbounded CPU or memory use.
-                with ThreadPoolExecutor(
-                    max_workers=min(MAX_CONCURRENT_OCR_PAGES, len(pages_needing_ocr))
-                ) as pool:
-                    future_pages = {
-                        pool.submit(recognize_page, content, page_number): (
-                            page_number, time.perf_counter()
-                        )
-                        for page_number in pages_needing_ocr
-                    }
-                    for future in as_completed(future_pages):
-                        page_number, submitted_at = future_pages[future]
-                        try:
-                            ocr_result = future.result()
-                            ocr_text = (
-                                ocr_result.text
-                                if isinstance(ocr_result, OCRPageResult)
-                                else str(ocr_result).strip()
-                            )
-                            if not ocr_text:
-                                raise LocalOCRError("OCR returned no readable text for this page.")
-                            # The page was selected because its native text is
-                            # incomplete or the classifier failed. Prefer OCR
-                            # for the whole page instead of discarding it solely
-                            # because its text happens to be shorter.
-                            ocr_text_by_page[page_number] = ocr_text
-                            if isinstance(ocr_result, OCRPageResult):
-                                ocr_result_by_page[page_number] = ocr_result
-                        except LocalOCRError as exc:
-                            warnings.append(ExtractionWarning(
-                                code="OCR_PAGE_FAILED",
-                                message=f"OCR could not safely read PDF page {page_number}: {exc}",
-                                severity="error",
-                            ))
-                            source_coverage.append(make_coverage_entry(
-                                f"pdf-page-{page_number}-ocr",
-                                SourceLocator(file_name=filename, page_number=page_number),
-                                page_texts[page_number - 1][1],
-                                "ocr_error",
-                                "OCR_PAGE_FAILED",
-                            ))
-                        except Exception as exc:
-                            # A bad page must be visible and must not discard
-                            # usable OCR text from the other selected pages.
-                            log.warning(
-                                "[rfq_pdf] page_ocr=failed page=%d error=%s",
-                                page_number, type(exc).__name__,
-                            )
-                            warnings.append(ExtractionWarning(
-                                code="OCR_PAGE_FAILED",
-                                message=f"OCR could not safely read PDF page {page_number} because of an unexpected processing error. The original page needs manual review.",
-                                severity="error",
-                            ))
-                            source_coverage.append(make_coverage_entry(
-                                f"pdf-page-{page_number}-ocr",
-                                SourceLocator(file_name=filename, page_number=page_number),
-                                page_texts[page_number - 1][1],
-                                "ocr_error",
-                                "OCR_PAGE_FAILED_UNEXPECTED",
-                            ))
-                        finally:
-                            ocr_duration_by_page_ms[page_number] = round(
-                                (time.perf_counter() - submitted_at) * 1000, 1
-                            )
+                # Decode the PDF once for OCR and render in bounded batches.
+                # Tesseract runs concurrently, while only two page images can
+                # be resident at a time regardless of the document size.
+                import pymupdf
+
+                ocr_document = pymupdf.open(stream=content, filetype="pdf")
+                try:
+                    with ThreadPoolExecutor(
+                        max_workers=min(MAX_CONCURRENT_OCR_PAGES, len(pages_needing_ocr))
+                    ) as pool:
+                        for offset in range(0, len(pages_needing_ocr), MAX_CONCURRENT_OCR_PAGES):
+                            future_pages = {}
+                            for page_number in pages_needing_ocr[offset:offset + MAX_CONCURRENT_OCR_PAGES]:
+                                submitted_at = time.perf_counter()
+                                try:
+                                    rendered_page = render_page(ocr_document, page_number)
+                                    future = pool.submit(recognize_rendered_page, rendered_page)
+                                except Exception as exc:
+                                    future = Future()
+                                    future.set_exception(exc)
+                                future_pages[future] = (page_number, submitted_at)
+                            for future in as_completed(future_pages):
+                                page_number, submitted_at = future_pages[future]
+                                try:
+                                    ocr_result = future.result()
+                                    ocr_text = (
+                                        ocr_result.text
+                                        if isinstance(ocr_result, OCRPageResult)
+                                        else str(ocr_result).strip()
+                                    )
+                                    if not ocr_text:
+                                        raise LocalOCRError("OCR returned no readable text for this page.")
+                                    # The page was selected because its native text is
+                                    # incomplete or the classifier failed. Prefer OCR
+                                    # for the whole page instead of discarding it solely
+                                    # because its text happens to be shorter.
+                                    ocr_text_by_page[page_number] = ocr_text
+                                    if isinstance(ocr_result, OCRPageResult):
+                                        ocr_result_by_page[page_number] = ocr_result
+                                except LocalOCRError as exc:
+                                    warnings.append(ExtractionWarning(
+                                        code="OCR_PAGE_FAILED",
+                                        message=f"OCR could not safely read PDF page {page_number}: {exc}",
+                                        severity="error",
+                                    ))
+                                    source_coverage.append(make_coverage_entry(
+                                        f"pdf-page-{page_number}-ocr",
+                                        SourceLocator(file_name=filename, page_number=page_number),
+                                        page_texts[page_number - 1][1],
+                                        "ocr_error",
+                                        "OCR_PAGE_FAILED",
+                                    ))
+                                except Exception as exc:
+                                    # A bad page must be visible and must not discard
+                                    # usable OCR text from the other selected pages.
+                                    log.warning(
+                                        "[rfq_pdf] page_ocr=failed page=%d error=%s",
+                                        page_number, type(exc).__name__,
+                                    )
+                                    warnings.append(ExtractionWarning(
+                                        code="OCR_PAGE_FAILED",
+                                        message=f"OCR could not safely read PDF page {page_number} because of an unexpected processing error. The original page needs manual review.",
+                                        severity="error",
+                                    ))
+                                    source_coverage.append(make_coverage_entry(
+                                        f"pdf-page-{page_number}-ocr",
+                                        SourceLocator(file_name=filename, page_number=page_number),
+                                        page_texts[page_number - 1][1],
+                                        "ocr_error",
+                                        "OCR_PAGE_FAILED_UNEXPECTED",
+                                    ))
+                                finally:
+                                    ocr_duration_by_page_ms[page_number] = round(
+                                        (time.perf_counter() - submitted_at) * 1000, 1
+                                    )
+                finally:
+                    ocr_document.close()
                 for page_number, ocr_text in ocr_text_by_page.items():
                     page_texts[page_number - 1] = (page_number, ocr_text)
                 if ocr_text_by_page:
