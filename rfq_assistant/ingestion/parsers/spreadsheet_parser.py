@@ -84,6 +84,8 @@ def identify_columns(headers: List[str]) -> Dict[str, int]:
 class SpreadsheetParser(BaseDocumentParser):
     """Parses CSV and multi-sheet XLSX documents into structured line drafts."""
 
+    artifact_version = "rfq-spreadsheet-v3"
+
     cache_dependencies = ("openpyxl",)
 
     def parse(self, content: bytes, filename: str) -> ParsedDocumentResult:

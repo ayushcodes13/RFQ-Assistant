@@ -50,6 +50,15 @@ function formatLocator(locator: SourceLocator): string {
   const parts = [locator.file_name];
   if (locator.sheet_name) parts.push(`sheet ${locator.sheet_name}`);
   if (locator.page_number != null) parts.push(`page ${locator.page_number}`);
+  if (locator.page_bbox) {
+    const [x0, y0, x1, y1] = locator.page_bbox;
+    parts.push(
+      `OCR area ${Math.round(x0 * 100)}%,${Math.round(y0 * 100)}%–${Math.round(x1 * 100)}%,${Math.round(y1 * 100)}%`,
+    );
+  }
+  if (locator.ocr_confidence != null) {
+    parts.push(`OCR ${Math.round(locator.ocr_confidence)}% confidence`);
+  }
   if (locator.row_number != null) parts.push(`row ${locator.row_number}`);
   return parts.join(" · ");
 }
@@ -399,6 +408,7 @@ export function WorkbenchView({
                   {unit.unit_id}: {unit.nonempty_regions} regions · {unit.structured_regions} parsed · {unit.review_regions} review · {unit.filtered_regions} filtered
                   {unit.ocr_failures > 0 && ` · ${unit.ocr_failures} OCR failures`}
                   {unit.ocr_status && unit.ocr_status !== "not_needed" && ` · OCR ${unit.ocr_status}`}
+                  {unit.ocr_duration_ms != null && ` · ${Math.round(unit.ocr_duration_ms)} ms`}
                   {unit.is_empty && " · no readable content"}
                   {unit.sheet_visibility === "hidden" && " · hidden sheet"}
                   {(unit.hidden_row_count ?? 0) > 0 && ` · ${unit.hidden_row_count} hidden rows`}

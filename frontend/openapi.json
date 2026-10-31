@@ -1253,6 +1253,17 @@
             "title": "Nonempty Regions",
             "type": "integer"
           },
+          "ocr_duration_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr Duration Ms"
+          },
           "ocr_failures": {
             "default": 0,
             "title": "Ocr Failures",
@@ -1377,6 +1388,44 @@
           "file_name": {
             "title": "File Name",
             "type": "string"
+          },
+          "ocr_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr Confidence"
+          },
+          "page_bbox": {
+            "anyOf": [
+              {
+                "maxItems": 4,
+                "minItems": 4,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Bbox"
           },
           "page_number": {
             "anyOf": [

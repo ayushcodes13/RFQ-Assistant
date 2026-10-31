@@ -91,6 +91,7 @@ class SourceCoverageAccumulator:
         truncated: bool = False,
         error_code: Optional[str] = None,
         ocr_status: Optional[str] = None,
+        ocr_duration_ms: Optional[float] = None,
         sheet_visibility: Optional[str] = None,
         header_row_number: Optional[int] = None,
         hidden_row_count: Optional[int] = None,
@@ -100,7 +101,12 @@ class SourceCoverageAccumulator:
     ) -> None:
         """Record source units even when they contain no extractable text."""
         group = self._groups.setdefault(unit_id, {
-            "locator": locator.model_copy(update={"row_number": None, "text_snippet": None}),
+            "locator": locator.model_copy(update={
+                "row_number": None,
+                "text_snippet": None,
+                "page_bbox": None,
+                "ocr_confidence": None,
+            }),
             "digest": hashlib.sha256(),
             "unit_kind": unit_kind,
             "processing_status": processing_status,
@@ -108,6 +114,7 @@ class SourceCoverageAccumulator:
             "truncated": truncated,
             "error_code": error_code,
             "ocr_status": ocr_status,
+            "ocr_duration_ms": None,
             "sheet_visibility": sheet_visibility,
             "header_row_number": header_row_number,
             "hidden_row_count": 0,
@@ -127,6 +134,7 @@ class SourceCoverageAccumulator:
             "truncated": truncated,
             "error_code": error_code,
             "ocr_status": ocr_status,
+            "ocr_duration_ms": ocr_duration_ms,
             "sheet_visibility": sheet_visibility,
             "header_row_number": header_row_number,
             "hidden_row_count": hidden_row_count,
@@ -149,7 +157,12 @@ class SourceCoverageAccumulator:
         else:
             unit_id = "document"
         group = self._groups.setdefault(unit_id, {
-            "locator": locator.model_copy(update={"row_number": None, "text_snippet": None}),
+            "locator": locator.model_copy(update={
+                "row_number": None,
+                "text_snippet": None,
+                "page_bbox": None,
+                "ocr_confidence": None,
+            }),
             "digest": hashlib.sha256(),
             "nonempty_regions": 0,
             "structured_regions": 0,
@@ -162,6 +175,7 @@ class SourceCoverageAccumulator:
             "truncated": False,
             "error_code": None,
             "ocr_status": None,
+            "ocr_duration_ms": None,
             "sheet_visibility": None,
             "header_row_number": None,
             "hidden_row_count": 0,
@@ -196,6 +210,7 @@ class SourceCoverageAccumulator:
                 truncated=group["truncated"],
                 error_code=group["error_code"],
                 ocr_status=group["ocr_status"],
+                ocr_duration_ms=group["ocr_duration_ms"],
                 sheet_visibility=group["sheet_visibility"],
                 header_row_number=group["header_row_number"],
                 hidden_row_count=group["hidden_row_count"],

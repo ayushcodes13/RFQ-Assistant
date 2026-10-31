@@ -934,6 +934,8 @@ export interface components {
              * @default 0
              */
             nonempty_regions: number;
+            /** Ocr Duration Ms */
+            ocr_duration_ms?: number | null;
             /**
              * Ocr Failures
              * @default 0
@@ -1002,6 +1004,15 @@ export interface components {
         SourceLocator: {
             /** File Name */
             file_name: string;
+            /** Ocr Confidence */
+            ocr_confidence?: number | null;
+            /** Page Bbox */
+            page_bbox?: [
+                number,
+                number,
+                number,
+                number
+            ] | null;
             /** Page Number */
             page_number?: number | null;
             /** Row Number */

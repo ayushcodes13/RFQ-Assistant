@@ -1,8 +1,9 @@
 """Pydantic schemas and models for RFQ cases, line items, catalogs, matches, and audit."""
 
 from datetime import datetime
-from typing import Dict, List, Optional
-from pydantic import BaseModel, Field
+import math
+from typing import Dict, List, Optional, Tuple
+from pydantic import BaseModel, Field, field_validator
 
 from rfq_assistant.schemas.enums import (
     AuditAction,
@@ -21,6 +22,28 @@ class SourceLocator(BaseModel):
     sheet_name: Optional[str] = None
     row_number: Optional[int] = None
     text_snippet: Optional[str] = None
+    # Normalized 0..1 PDF page coordinates, after applying page rotation.
+    page_bbox: Optional[Tuple[float, float, float, float]] = None
+    ocr_confidence: Optional[float] = None
+
+    @field_validator("page_bbox")
+    @classmethod
+    def page_bbox_is_valid(cls, value):
+        if value is None:
+            return value
+        if any(not math.isfinite(coordinate) or not 0 <= coordinate <= 1 for coordinate in value):
+            raise ValueError("page_bbox coordinates must be finite values from 0 to 1")
+        x0, y0, x1, y1 = value
+        if x0 >= x1 or y0 >= y1:
+            raise ValueError("page_bbox must have positive width and height")
+        return value
+
+    @field_validator("ocr_confidence")
+    @classmethod
+    def ocr_confidence_is_valid(cls, value):
+        if value is not None and (not math.isfinite(value) or not 0 <= value <= 100):
+            raise ValueError("ocr_confidence must be between 0 and 100")
+        return value
 
 
 class SourceCoverageUnit(BaseModel):
@@ -34,6 +57,7 @@ class SourceCoverageUnit(BaseModel):
     truncated: bool = False
     error_code: Optional[str] = None
     ocr_status: Optional[str] = None
+    ocr_duration_ms: Optional[float] = None
     sheet_visibility: Optional[str] = None
     header_row_number: Optional[int] = None
     hidden_row_count: int = 0

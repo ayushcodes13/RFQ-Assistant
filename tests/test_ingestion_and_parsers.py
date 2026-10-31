@@ -1,6 +1,7 @@
 """Unit and integration tests for document validation, storage, and deterministic parsers."""
 
 from pathlib import Path
+import shutil
 import pytest
 
 from rfq_assistant.ingestion import (
@@ -467,6 +468,82 @@ class TestPDFParser:
         assert any(w.code == "PDF_PAGE_TRIAGE_UNAVAILABLE" for w in result.warnings)
         assert any(w.code == "LOCAL_OCR_USED" for w in result.warnings)
         assert any(w.code == "OCR_TEXT_REVIEW" for w in result.lines[0].extraction_warnings)
+
+    @pytest.mark.skipif(
+        shutil.which("tesseract") is None,
+        reason="local OCR integration requires the Tesseract binary",
+    )
+    @pytest.mark.parametrize("rotation", [90, 270])
+    def test_rotated_scan_is_ocrd_in_reading_orientation_with_timing(self, rotation):
+        """A rotated image-only page keeps readable OCR and rotation provenance."""
+        import io
+        import fitz
+        from PIL import Image
+        from rfq_assistant.matching import ExactMatchEngine
+        from rfq_assistant.matching.catalog import CatalogRepository
+        from rfq_assistant.ingestion.parsers.pdf_parser import PDFParser
+        from rfq_assistant.schemas.enums import MatchStatus
+        from rfq_assistant.schemas.models import CatalogItem
+
+        source = fitz.open()
+        source_page = source.new_page(width=1400, height=400)
+        source_page.insert_text(
+            (40, 210), "1 Siemens 6ES7214-1AG40-0XB0 PLC 2 EA",
+            fontsize=56, fontname="helv",
+        )
+        upright_png = source_page.get_pixmap(
+            matrix=fitz.Matrix(2, 2), alpha=False
+        ).tobytes("png")
+        source.close()
+
+        sideways = Image.open(io.BytesIO(upright_png)).rotate(
+            90 if rotation == 90 else 270, expand=True
+        )
+        image_buffer = io.BytesIO()
+        sideways.save(image_buffer, format="PNG")
+        pdf = fitz.open()
+        page = pdf.new_page(width=400, height=1400)
+        page.insert_image(page.rect, stream=image_buffer.getvalue())
+        page.set_rotation(rotation)
+        content = pdf.tobytes()
+        pdf.close()
+
+        parsed = PDFParser(allow_ocr=True).parse(content, "rotated_scan.pdf")
+        page_coverage = next(
+            unit for unit in parsed.source_coverage
+            if unit.unit_kind == "pdf_page"
+        )
+
+        assert page_coverage.page_rotation_degrees == rotation
+        assert page_coverage.ocr_status == "succeeded"
+        assert page_coverage.ocr_duration_ms is not None
+        assert page_coverage.ocr_duration_ms > 0
+        assert page_coverage.locator.page_bbox is None
+        assert len(parsed.lines) == 1
+        assert parsed.lines[0].requested_manufacturer == "Siemens"
+        assert parsed.lines[0].quantity == 2
+        bbox = parsed.lines[0].source_locator.page_bbox
+        assert bbox is not None
+        assert parsed.lines[0].source_locator.row_number == 1
+        assert 0 <= bbox[0] < bbox[2] <= 1
+        assert 0 <= bbox[1] < bbox[3] <= 1
+        assert parsed.lines[0].source_locator.ocr_confidence is not None
+        catalog = CatalogRepository()
+        catalog.add_item(CatalogItem(
+            internal_sku="SIEMENS-PLC-1",
+            manufacturer="Siemens",
+            manufacturer_part_number="6ES7214-1AG40-0XB0",
+            description="Synthetic PLC",
+        ))
+        match = ExactMatchEngine(catalog).match_line(
+            parsed.lines[0].requested_mpn,
+            parsed.lines[0].requested_manufacturer,
+        )
+        assert match.match_status == MatchStatus.NO_MATCH
+        assert any(
+            warning.code == "OCR_TEXT_REVIEW"
+            for warning in parsed.lines[0].extraction_warnings
+        )
 
     def test_image_heavy_page_is_blocked_when_ocr_disabled(self):
         import io

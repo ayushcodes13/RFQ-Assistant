@@ -20,7 +20,7 @@ from rfq_assistant.ingestion.parsers.base import (
 )
 from rfq_assistant.schemas.models import ExtractionWarning, SourceLocator
 from rfq_assistant.ingestion.ocr.local_tesseract import (
-    LocalOCRError, engine_profile, page_needs_ocr, recognize_page,
+    LocalOCRError, OCRPageResult, engine_profile, page_needs_ocr, recognize_page,
 )
 
 MAX_OCR_PAGES_PER_DOCUMENT = 10
@@ -46,6 +46,8 @@ KNOWN_OEMS = [
 class PDFParser(BaseDocumentParser):
     """Deterministic parser for native PDFs. Safely detects scanned PDFs and rejects them when OCR is disabled."""
 
+    artifact_version = "rfq-pdf-v4"
+
     def __init__(self, allow_ocr: bool = False):
         self.allow_ocr = allow_ocr
 
@@ -55,7 +57,7 @@ class PDFParser(BaseDocumentParser):
         return {
             **super().cache_profile(),
             "allow_ocr": self.allow_ocr,
-            "ocr_profile": "pymupdf-triage+tesseract-psm6-180dpi-v1",
+            "ocr_profile": "pymupdf-triage+tesseract-psm6-tsv-180dpi-v2",
             "ocr_engine": engine_profile() if self.allow_ocr else "disabled",
             "max_ocr_pages": MAX_OCR_PAGES_PER_DOCUMENT,
             "max_concurrent_ocr_pages": MAX_CONCURRENT_OCR_PAGES,
@@ -112,6 +114,8 @@ class PDFParser(BaseDocumentParser):
             page_texts.append((idx, text))
 
         ocr_text_by_page: dict[int, str] = {}
+        ocr_result_by_page: dict[int, OCRPageResult] = {}
+        ocr_duration_by_page_ms: dict[int, float] = {}
         pages_needing_ocr: List[int] = []
         page_rotations: dict[int, int] = {}
         triage_unavailable = False
@@ -178,13 +182,20 @@ class PDFParser(BaseDocumentParser):
                     max_workers=min(MAX_CONCURRENT_OCR_PAGES, len(pages_needing_ocr))
                 ) as pool:
                     future_pages = {
-                        pool.submit(recognize_page, content, page_number): page_number
+                        pool.submit(recognize_page, content, page_number): (
+                            page_number, time.perf_counter()
+                        )
                         for page_number in pages_needing_ocr
                     }
                     for future in as_completed(future_pages):
-                        page_number = future_pages[future]
+                        page_number, submitted_at = future_pages[future]
                         try:
-                            ocr_text = future.result()
+                            ocr_result = future.result()
+                            ocr_text = (
+                                ocr_result.text
+                                if isinstance(ocr_result, OCRPageResult)
+                                else str(ocr_result).strip()
+                            )
                             if not ocr_text:
                                 raise LocalOCRError("OCR returned no readable text for this page.")
                             # The page was selected because its native text is
@@ -192,6 +203,8 @@ class PDFParser(BaseDocumentParser):
                             # for the whole page instead of discarding it solely
                             # because its text happens to be shorter.
                             ocr_text_by_page[page_number] = ocr_text
+                            if isinstance(ocr_result, OCRPageResult):
+                                ocr_result_by_page[page_number] = ocr_result
                         except LocalOCRError as exc:
                             warnings.append(ExtractionWarning(
                                 code="OCR_PAGE_FAILED",
@@ -224,6 +237,10 @@ class PDFParser(BaseDocumentParser):
                                 "ocr_error",
                                 "OCR_PAGE_FAILED_UNEXPECTED",
                             ))
+                        finally:
+                            ocr_duration_by_page_ms[page_number] = round(
+                                (time.perf_counter() - submitted_at) * 1000, 1
+                            )
                 for page_number, ocr_text in ocr_text_by_page.items():
                     page_texts[page_number - 1] = (page_number, ocr_text)
                 if ocr_text_by_page:
@@ -253,6 +270,7 @@ class PDFParser(BaseDocumentParser):
                     else None
                 ),
                 ocr_status=ocr_status,
+                ocr_duration_ms=ocr_duration_by_page_ms.get(page_number),
                 page_rotation_degrees=page_rotations.get(page_number),
             )
 
@@ -276,8 +294,12 @@ class PDFParser(BaseDocumentParser):
         line_counter = 1
 
         for page_num, ptext in page_texts:
-            raw_lines = ptext.splitlines()
-            for source_line_number, rline in enumerate(raw_lines, start=1):
+            ocr_lines = ocr_result_by_page.get(page_num)
+            raw_lines = (
+                [(line.text, line.bbox, line.confidence) for line in ocr_lines.lines]
+                if ocr_lines is not None else [(line, None, None) for line in ptext.splitlines()]
+            )
+            for source_line_number, (rline, page_bbox, ocr_confidence) in enumerate(raw_lines, start=1):
                 rline_clean = rline.strip()
                 if not rline_clean:
                     continue
@@ -286,6 +308,8 @@ class PDFParser(BaseDocumentParser):
                     page_number=page_num,
                     row_number=source_line_number,
                     text_snippet=rline_clean[:120],
+                    page_bbox=page_bbox,
+                    ocr_confidence=ocr_confidence,
                 )
                 region_id = f"pdf-page-{page_num}-line-{source_line_number}"
                 if len(rline_clean) < 5:
@@ -308,7 +332,9 @@ class PDFParser(BaseDocumentParser):
                     continue
 
                 # Attempt to extract line item: e.g. "1 Schneider Electric LC1D09BD TeSys D Contactor 9A 24VDC 10 EA"
-                parsed_draft = self._parse_pdf_line(rline_clean, filename, page_num, line_counter)
+                parsed_draft = self._parse_pdf_line(
+                    rline_clean, filename, page_num, line_counter, source_locator=locator
+                )
                 if parsed_draft:
                     if page_num in ocr_text_by_page:
                         parsed_draft.extraction_warnings.append(ExtractionWarning(
@@ -388,7 +414,8 @@ class PDFParser(BaseDocumentParser):
         )
 
     def _parse_pdf_line(
-        self, raw_line: str, filename: str, page_num: int, line_counter: int
+        self, raw_line: str, filename: str, page_num: int, line_counter: int,
+        *, source_locator: Optional[SourceLocator] = None,
     ) -> Optional[ParsedLineDraft]:
         # Check if line contains known OEM
         detected_oem: Optional[str] = None
@@ -454,10 +481,8 @@ class PDFParser(BaseDocumentParser):
         if not detected_oem and not mpn:
             return None
 
-        locator = SourceLocator(
-            file_name=filename,
-            page_number=page_num,
-            text_snippet=raw_line[:120],
+        locator = source_locator or SourceLocator(
+            file_name=filename, page_number=page_num, text_snippet=raw_line[:120]
         )
 
         line_warnings: List[ExtractionWarning] = []

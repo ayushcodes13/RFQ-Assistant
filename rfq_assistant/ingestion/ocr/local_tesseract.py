@@ -6,16 +6,33 @@ by the caller; the Tesseract subprocess has page and output limits.
 
 from __future__ import annotations
 
+import csv
+import io
 import shutil
 import subprocess
+from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any
+from typing import Any, Optional, Tuple
 
 import fitz
 
 
 class LocalOCRError(RuntimeError):
     """Local OCR could not be completed for a page."""
+
+
+@dataclass(frozen=True)
+class OCRTextLine:
+    text: str
+    # Normalized coordinates in the rotated, user-visible PDF page: x0,y0,x1,y1.
+    bbox: Tuple[float, float, float, float]
+    confidence: Optional[float]
+
+
+@dataclass(frozen=True)
+class OCRPageResult:
+    text: str
+    lines: Tuple[OCRTextLine, ...]
 
 
 @lru_cache(maxsize=1)
@@ -26,8 +43,11 @@ def engine_profile() -> str:
         return "unavailable"
     try:
         result = subprocess.run(
-            [executable, "--version"], capture_output=True, text=True,
-            timeout=2.0, check=False,
+            [executable, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=False,
         )
         first_line = (result.stdout or result.stderr).splitlines()[0].strip()
         return first_line[:120] if result.returncode == 0 and first_line else "unknown"
@@ -50,8 +70,13 @@ def image_coverage(page: Any) -> float:
     return min(1.0, image_area / area)
 
 
-def page_needs_ocr(page: Any, native_text: str, *, max_native_chars: int = 180,
-                    min_image_coverage: float = 0.18) -> bool:
+def page_needs_ocr(
+    page: Any,
+    native_text: str,
+    *,
+    max_native_chars: int = 180,
+    min_image_coverage: float = 0.18,
+) -> bool:
     """Flag sparse-text pages only when page imagery suggests rasterized content."""
     if len(native_text.strip()) >= max_native_chars:
         return False
@@ -66,8 +91,8 @@ def recognize_page(
     timeout_seconds: float = 15.0,
     max_pixels: int = 20_000_000,
     max_png_bytes: int = 32 * 1024 * 1024,
-) -> str:
-    """Rasterize and OCR one 1-based PDF page, with strict resource bounds."""
+) -> OCRPageResult:
+    """Rasterize/OCR one page and retain bounded, normalized line geometry."""
     executable = shutil.which("tesseract")
     if not executable:
         raise LocalOCRError("Tesseract is not installed; local OCR is unavailable.")
@@ -85,6 +110,7 @@ def recognize_page(
             scale *= (max_pixels / estimated_pixels) ** 0.5
         pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
         png = pixmap.tobytes("png")
+        rendered_width, rendered_height = pixmap.width, pixmap.height
     except LocalOCRError:
         raise
     except Exception as exc:
@@ -96,7 +122,7 @@ def recognize_page(
         raise LocalOCRError("Rendered page exceeds the OCR image size limit.")
     try:
         completed = subprocess.run(
-            [executable, "stdin", "stdout", "--psm", "6"],
+            [executable, "stdin", "stdout", "--psm", "6", "tsv"],
             input=png,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -109,4 +135,61 @@ def recognize_page(
         raise LocalOCRError("Tesseract could not be started.") from exc
     if completed.returncode != 0:
         raise LocalOCRError("Tesseract could not read the rendered page.")
-    return completed.stdout.decode("utf-8", errors="replace").strip()
+    if len(completed.stdout) > 16 * 1024 * 1024:
+        raise LocalOCRError("OCR output exceeds the per-page text limit.")
+
+    groups: dict[tuple[str, str, str], dict[str, Any]] = {}
+    reader = csv.DictReader(
+        io.StringIO(completed.stdout.decode("utf-8", errors="replace")), delimiter="\t"
+    )
+    for row in reader:
+        if row.get("level") != "5":
+            continue
+        word = (row.get("text") or "").strip()
+        if not word:
+            continue
+        try:
+            left = int(row["left"])
+            top = int(row["top"])
+            width = int(row["width"])
+            height = int(row["height"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if width <= 0 or height <= 0:
+            continue
+        key = (
+            row.get("block_num", ""),
+            row.get("par_num", ""),
+            row.get("line_num", ""),
+        )
+        group = groups.setdefault(key, {"words": [], "bounds": [], "confidences": []})
+        group["words"].append(word)
+        group["bounds"].append((left, top, left + width, top + height))
+        try:
+            confidence = float(row.get("conf", ""))
+        except (TypeError, ValueError):
+            confidence = -1
+        if confidence >= 0:
+            group["confidences"].append(confidence)
+
+    lines = []
+    for group in groups.values():
+        bounds = group["bounds"]
+        confidence_values = group["confidences"]
+        lines.append(
+            OCRTextLine(
+                text=" ".join(group["words"]),
+                bbox=(
+                    max(0.0, min(1.0, min(box[0] for box in bounds) / rendered_width)),
+                    max(0.0, min(1.0, min(box[1] for box in bounds) / rendered_height)),
+                    max(0.0, min(1.0, max(box[2] for box in bounds) / rendered_width)),
+                    max(0.0, min(1.0, max(box[3] for box in bounds) / rendered_height)),
+                ),
+                confidence=(sum(confidence_values) / len(confidence_values))
+                if confidence_values
+                else None,
+            )
+        )
+    return OCRPageResult(
+        text="\n".join(line.text for line in lines), lines=tuple(lines)
+    )
