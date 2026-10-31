@@ -1,0 +1,4 @@
+Notes,Qty,Part Number,Manufacturer
+Note 1,=CMD("calc"),LC1D09BD,Schneider Electric
+Note 2,10,6ES7214-1AG40-0XB0,Siemens
+=HYPERLINK("https://evil.test","click"),5,MY4N-D2-DC24,Omron

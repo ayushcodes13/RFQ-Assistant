@@ -1,0 +1,12 @@
+internal_sku,manufacturer,manufacturer_part_number,description,list_price,stock_qty,catalog_version
+SKU-SYN-001,Schneider Electric,LC1D09BD,Synthetic TeSys D contactor 9A 24VDC,42.50,150,synth-audit
+SKU-SYN-002,Siemens,6ES7214-1AG40-0XB0,Synthetic SIMATIC S7-1200 CPU 1214C,345.00,24,synth-audit
+SKU-SYN-003,Omron,MY4N-D2-DC24,Synthetic miniature relay 4PDT 24VDC,8.75,500,synth-audit
+SKU-SYN-004,Eaton,FAZ-C10/1,Synthetic circuit breaker 1P 10A C-curve,12.30,180,synth-audit
+SKU-SYN-005,Phoenix Contact,2900364,Synthetic PLC relay module 24VDC SPDT,16.20,300,synth-audit
+SKU-SYN-006,Acme Industrial,ABC-12,Synthetic thermal overload relay 10-14A,28.00,50,synth-audit
+SKU-SYN-007,Acme Industrial,ABC-12A,Synthetic thermal overload relay with aux NC,31.50,45,synth-audit
+SKU-SYN-008,Acme Industrial,ABC-12-R2,Synthetic overload relay revision 2,36.00,30,synth-audit
+SKU-SYN-009,Unknown Brand Co,ZZ-99999,Synthetic unknown widget,0.00,0,synth-audit
+SKU-SYN-010,Apex Automation,XG-42,Synthetic temperature switch 4-20mA,89.00,15,synth-audit
+SKU-SYN-011,Delta Electronics,XG-42,Synthetic differential pressure transmitter,115.00,12,synth-audit

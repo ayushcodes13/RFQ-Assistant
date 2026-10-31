@@ -1,0 +1,24 @@
+From: purchasing@synthetic-buyer.com
+To: quotes@synthetic-distributor.com
+Subject: RFQ - Spare Parts for Conveyor Line 2
+Date: 2026-11-01 09:00:00 UTC
+
+Hi Team,
+
+Please find below the list of spare parts needed for the conveyor overhaul.
+Some items may have alternative manufacturers — please confirm availability
+for the exact MPNs listed.
+
+1. 10 pcs of Schneider Electric LC1D09BD contactor (24VDC coil version)
+2. 4 units Siemens 6ES7223-1BL32-0XB0 digital I/O module SM1223
+3. 25x XB4BA31 green pushbuttons assembled by Schneider
+4. Need 5 pcs of MY4N-D2-DC24 relays from Omron
+5. 12 EA of Eaton FAZ-C10/1 breakers
+6. 3 pcs Phoenix Contact 2900364 relay module 24VDC
+
+Please confirm current pricing and lead time ASAP.
+
+Best regards,
+Jane Smith
+Procurement Coordinator
+SYNTHETIC CORP (test data only — no real entities)

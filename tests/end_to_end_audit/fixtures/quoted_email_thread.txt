@@ -1,0 +1,21 @@
+SYNTHETIC RFQ — QUOTED EMAIL THREAD WITH NESTED QUOTES
+From: sales@synthetic-distributor.com
+To: buyer@synthetic-customer.com
+Subject: Re: RFQ for Conveyor Spare Parts
+Date: 2026-11-01 10:00:00 UTC
+
+Hi Jane,
+
+> Please quote the following items:
+> 1. 10 pcs Schneider Electric LC1D09BD contactor 24VDC
+> 2. 5 pcs Siemens 6ES7214-1AG40-0XB0 CPU module
+>
+> Also, our plant manager added:
+> 3. 20 pcs Omron MY4N-D2-DC24 relay 24VDC
+
+I can confirm the above. Please include pricing for all three items.
+Best regards,
+Bob Smith
+Senior Buyer
+
+SYNTHETIC CORP (test data only — no real entities)

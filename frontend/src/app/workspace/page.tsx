@@ -20,6 +20,7 @@ export default function Home() {
   const [casesError, setCasesError] = useState<string | null>(null);
   const [isIngestOpen, setIsIngestOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [exportSession, setExportSession] = useState(0);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const hasLoadedRef = useRef(false);
 
@@ -95,7 +96,10 @@ export default function Home() {
           {currentTab === "workbench" && activeCase && (
             <WorkbenchView
               caseData={activeCase}
-              onOpenExport={() => setIsExportOpen(true)}
+              onOpenExport={() => {
+                setExportSession((session) => session + 1);
+                setIsExportOpen(true);
+              }}
               onCaseUpdated={fetchCases}
             />
           )}
@@ -104,7 +108,17 @@ export default function Home() {
       </div>
 
       <IngestModal isOpen={isIngestOpen} onClose={() => setIsIngestOpen(false)} onCaseCreated={handleCaseCreated} />
-      {activeCase && <ExportModal isOpen={isExportOpen} caseData={activeCase} onClose={() => { setIsExportOpen(false); void fetchCases(); }} />}
+      {activeCase && (
+        <ExportModal
+          key={`${activeCase.case_id}-${exportSession}`}
+          isOpen={isExportOpen}
+          caseData={activeCase}
+          onClose={() => {
+            setIsExportOpen(false);
+            void fetchCases();
+          }}
+        />
+      )}
       <ShortcutsModal isOpen={isShortcutsOpen} onClose={() => setIsShortcutsOpen(false)} />
     </div>
   );

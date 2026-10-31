@@ -1,0 +1,5 @@
+SYNTHETIC FIXTURE — Description-only lines without part numbers
+Please quote:
+1. 10 pcs 24VDC contactor, 9A, 3-pole, Schneider Electric
+2. 4 units Siemens S7-1200 CPU 1214C digital
+3. 50 pcs Omron miniature relay 4PDT 24VDC

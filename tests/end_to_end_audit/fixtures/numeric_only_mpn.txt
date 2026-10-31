@@ -1,0 +1,5 @@
+SYNTHETIC FIXTURE — Numeric-only MPN
+Please quote the following:
+1. 10 pcs Schneider Electric 2900364 relay module
+2. 5 pcs Phoenix Contact 2966171 relay module
+3. 3 pcs Schneider Electric LC1D09BD contactor
