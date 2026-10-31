@@ -72,6 +72,27 @@ class SourceCoverageUnit(BaseModel):
     ocr_failures: int = 0
 
 
+class SourcePreviewCell(BaseModel):
+    coordinate: str
+    value: str
+    is_formula: bool = False
+    selected: bool = False
+
+
+class SourcePreviewRow(BaseModel):
+    row_number: int
+    is_target: bool = False
+    cells: List[SourcePreviewCell] = Field(default_factory=list)
+
+
+class SpreadsheetSourcePreview(BaseModel):
+    file_name: str
+    sheet_name: str
+    target_row: int
+    target_cells: List[str] = Field(default_factory=list)
+    rows: List[SourcePreviewRow] = Field(default_factory=list)
+
+
 class ExtractionWarning(BaseModel):
     """Specific warning regarding missing, ambiguous, or contradictory extracted values."""
     code: str

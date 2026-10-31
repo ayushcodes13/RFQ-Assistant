@@ -1485,6 +1485,59 @@
         "title": "SourceLocator",
         "type": "object"
       },
+      "SourcePreviewCell": {
+        "properties": {
+          "coordinate": {
+            "title": "Coordinate",
+            "type": "string"
+          },
+          "is_formula": {
+            "default": false,
+            "title": "Is Formula",
+            "type": "boolean"
+          },
+          "selected": {
+            "default": false,
+            "title": "Selected",
+            "type": "boolean"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "coordinate",
+          "value"
+        ],
+        "title": "SourcePreviewCell",
+        "type": "object"
+      },
+      "SourcePreviewRow": {
+        "properties": {
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/SourcePreviewCell"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "is_target": {
+            "default": false,
+            "title": "Is Target",
+            "type": "boolean"
+          },
+          "row_number": {
+            "title": "Row Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row_number"
+        ],
+        "title": "SourcePreviewRow",
+        "type": "object"
+      },
       "SourceType": {
         "enum": [
           "EMAIL_TEXT",
@@ -1495,6 +1548,43 @@
         ],
         "title": "SourceType",
         "type": "string"
+      },
+      "SpreadsheetSourcePreview": {
+        "properties": {
+          "file_name": {
+            "title": "File Name",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/SourcePreviewRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "sheet_name": {
+            "title": "Sheet Name",
+            "type": "string"
+          },
+          "target_cells": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Target Cells",
+            "type": "array"
+          },
+          "target_row": {
+            "title": "Target Row",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "file_name",
+          "sheet_name",
+          "target_row"
+        ],
+        "title": "SpreadsheetSourcePreview",
+        "type": "object"
       },
       "ValidationError": {
         "properties": {
@@ -2733,6 +2823,127 @@
           }
         },
         "summary": "Get Original Source"
+      }
+    },
+    "/api/rfqs/{case_id}/source/preview": {
+      "get": {
+        "description": "Return a small read-only worksheet window centered on source evidence.",
+        "operationId": "get_spreadsheet_source_preview_api_rfqs__case_id__source_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sheet_name",
+            "required": true,
+            "schema": {
+              "title": "Sheet Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "row_number",
+            "required": true,
+            "schema": {
+              "title": "Row Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_cells",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target Cells"
+            }
+          },
+          {
+            "in": "query",
+            "name": "radius",
+            "required": false,
+            "schema": {
+              "default": 4,
+              "maximum": 10,
+              "minimum": 0,
+              "title": "Radius",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpreadsheetSourcePreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Spreadsheet Source Preview"
       }
     },
     "/v1/approved-quotes/{quote_id}/send": {

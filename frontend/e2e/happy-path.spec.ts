@@ -81,3 +81,27 @@ test("paste RFQ, approve every line, export and download a draft worksheet", asy
   expect(response.headers()["content-type"]).toContain("spreadsheetml");
   expect((await response.body()).byteLength).toBeGreaterThan(1_000);
 });
+
+test("open an extracted XLSX line at its source row and field cells", async ({ page }) => {
+  await page.goto("/workspace");
+  await expect(page.getByRole("button", { name: /New RFQ/i }).first()).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: /New RFQ/i }).first().click();
+
+  const ingestDialog = page.getByRole("dialog", { name: "New RFQ" });
+  await ingestDialog.locator('input[type="file"]').setInputFiles("../fixtures/rfq_samples/industrial_control_bom_20lines.xlsx");
+  await ingestDialog.getByPlaceholder("Optional case title").fill("Source navigation E2E");
+  await ingestDialog.getByRole("button", { name: /Extract line items/i }).click();
+
+  await expect(ingestDialog).toBeHidden({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "Source navigation E2E" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("row").nth(1)).toBeVisible();
+  await page.getByRole("row").nth(1).click();
+  await page.getByRole("button", { name: "Open source row and cells" }).click();
+
+  const sourceDialog = page.getByRole("dialog", { name: /· row \d+/i });
+  await expect(sourceDialog).toBeVisible();
+  await expect(sourceDialog.getByText(/Selected row:/)).toBeVisible();
+  await expect(sourceDialog.locator("td[aria-label*='selected source cell']").first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(sourceDialog).toBeHidden();
+});

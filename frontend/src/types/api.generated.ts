@@ -292,6 +292,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/rfqs/{case_id}/source/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Spreadsheet Source Preview
+         * @description Return a small read-only worksheet window centered on source evidence.
+         */
+        get: operations["get_spreadsheet_source_preview_api_rfqs__case_id__source_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/approved-quotes/{quote_id}/send": {
         parameters: {
             query?: never;
@@ -1026,11 +1046,53 @@ export interface components {
             /** Text Snippet */
             text_snippet?: string | null;
         };
+        /** SourcePreviewCell */
+        SourcePreviewCell: {
+            /** Coordinate */
+            coordinate: string;
+            /**
+             * Is Formula
+             * @default false
+             */
+            is_formula: boolean;
+            /**
+             * Selected
+             * @default false
+             */
+            selected: boolean;
+            /** Value */
+            value: string;
+        };
+        /** SourcePreviewRow */
+        SourcePreviewRow: {
+            /** Cells */
+            cells?: components["schemas"]["SourcePreviewCell"][];
+            /**
+             * Is Target
+             * @default false
+             */
+            is_target: boolean;
+            /** Row Number */
+            row_number: number;
+        };
         /**
          * SourceType
          * @enum {string}
          */
         SourceType: "EMAIL_TEXT" | "CSV" | "XLSX" | "PDF_NATIVE" | "PDF_SCANNED";
+        /** SpreadsheetSourcePreview */
+        SpreadsheetSourcePreview: {
+            /** File Name */
+            file_name: string;
+            /** Rows */
+            rows?: components["schemas"]["SourcePreviewRow"][];
+            /** Sheet Name */
+            sheet_name: string;
+            /** Target Cells */
+            target_cells?: string[];
+            /** Target Row */
+            target_row: number;
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -1618,6 +1680,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_spreadsheet_source_preview_api_rfqs__case_id__source_preview_get: {
+        parameters: {
+            query: {
+                sheet_name: string;
+                row_number: number;
+                target_cells?: string[] | null;
+                radius?: number;
+            };
+            header?: {
+                "X-API-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpreadsheetSourcePreview"];
                 };
             };
             /** @description Validation Error */

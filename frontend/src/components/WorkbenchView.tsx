@@ -15,6 +15,7 @@ import {
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { MotionWrapper } from "@/components/ui/MotionWrapper";
+import { SourcePreviewDialog } from "@/components/SourcePreviewDialog";
 import {
   approveRemainingValidatedLines,
   batchReviewLines,
@@ -111,6 +112,8 @@ export function WorkbenchView({
   const [editValue, setEditValue] = useState("");
   const [selectedLine, setSelectedLine] = useState<RFQLineItem | null>(null);
   const [showDetail, setShowDetail] = useState(false);
+  const [showSourcePreview, setShowSourcePreview] = useState(false);
+  const closeSourcePreview = useCallback(() => setShowSourcePreview(false), []);
 
   const fetchLines = useCallback(async () => {
     setLoading(true);
@@ -916,6 +919,23 @@ export function WorkbenchView({
                 </dt>
                 <dd style={{ color: "var(--color-brown-700)" }}>
                   {formatLocator(selectedLine.source_locator)}
+                  <div className="mt-2">
+                    {caseData.source_file?.file_name.toLowerCase().endsWith(".xlsx") &&
+                    selectedLine.source_locator.sheet_name && selectedLine.source_locator.row_number ? (
+                      <button type="button" onClick={() => setShowSourcePreview(true)} className="rfq-secondary">
+                        Open source row and cells
+                      </button>
+                    ) : (
+                      <a
+                        href={`/api/proxy/api/rfqs/${encodeURIComponent(caseData.case_id)}/source${selectedLine.source_locator.page_number ? `#page=${selectedLine.source_locator.page_number}` : ""}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rfq-secondary inline-flex"
+                      >
+                        Open original source{selectedLine.source_locator.page_number ? ` · page ${selectedLine.source_locator.page_number}` : ""}
+                      </a>
+                    )}
+                  </div>
                 </dd>
               </div>
               <div>
@@ -1015,6 +1035,15 @@ export function WorkbenchView({
           </motion.div>
         )}
       </AnimatePresence>
+      {showSourcePreview && selectedLine?.source_locator.sheet_name && selectedLine.source_locator.row_number && (
+        <SourcePreviewDialog
+          caseId={caseData.case_id}
+          sheetName={selectedLine.source_locator.sheet_name}
+          rowNumber={selectedLine.source_locator.row_number}
+          targetCells={Object.values(selectedLine.source_locator.field_source_cells ?? {})}
+          onClose={closeSourcePreview}
+        />
+      )}
     </div>
   );
 }

@@ -1,7 +1,9 @@
 """Synthetic source-file access tests for the reviewer workbench."""
 
 import importlib
+from io import BytesIO
 
+import openpyxl
 from fastapi.testclient import TestClient
 
 from rfq_assistant.cases.manager import CaseManager
@@ -47,3 +49,62 @@ def test_protected_source_rejects_anonymous_and_allows_viewer(tmp_path, monkeypa
     )
     assert response.status_code == 200
     assert b"LC1D09BD" in response.content
+
+
+def test_spreadsheet_preview_navigates_to_row_and_merged_anchor_cell(tmp_path, monkeypatch):
+    api = importlib.import_module("rfq_assistant.api.app")
+    manager = CaseManager(catalog=CatalogRepository(), storage=DocumentStorage(tmp_path / "source"))
+    monkeypatch.setattr(api, "case_manager", manager)
+    monkeypatch.delenv("REQUIRE_AUTH", raising=False)
+
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "RFQ"
+    sheet.append(["Manufacturer", "MPN", "Quantity"])
+    sheet.append(["Phoenix Contact", "2900364", 2])
+    sheet.append([None, "2900365", 4])
+    sheet["D3"] = "=1+1"
+    sheet.merge_cells("A2:A3")
+    output = BytesIO()
+    workbook.save(output)
+    case = manager.create_case_from_upload(filename="source.xlsx", content=output.getvalue())
+
+    response = TestClient(api.app).get(
+        f"/api/rfqs/{case.case_id}/source/preview",
+        params={"sheet_name": "RFQ", "row_number": 3, "target_cells": ["A2", "B3"]},
+    )
+    assert response.status_code == 200, response.text
+    preview = response.json()
+    assert preview["sheet_name"] == "RFQ"
+    assert preview["target_row"] == 3
+    assert preview["target_cells"] == ["A2", "B3"]
+    target = next(row for row in preview["rows"] if row["row_number"] == 3)
+    assert target["is_target"] is True
+    cells = {cell["coordinate"]: cell for cell in target["cells"]}
+    assert cells["B3"]["value"] == "2900365"
+    assert cells["B3"]["selected"] is True
+    assert cells["D3"]["is_formula"] is True
+    assert cells["D3"]["value"] == "=1+1"
+    anchor = next(row for row in preview["rows"] if row["row_number"] == 2)
+    assert next(cell for cell in anchor["cells"] if cell["coordinate"] == "A2")["selected"] is True
+
+
+def test_spreadsheet_preview_bounds_rows_and_rejects_unknown_sheets(tmp_path, monkeypatch):
+    api = importlib.import_module("rfq_assistant.api.app")
+    manager = CaseManager(catalog=CatalogRepository(), storage=DocumentStorage(tmp_path / "source"))
+    monkeypatch.setattr(api, "case_manager", manager)
+    monkeypatch.delenv("REQUIRE_AUTH", raising=False)
+    workbook = openpyxl.Workbook()
+    workbook.active.title = "RFQ"
+    output = BytesIO()
+    workbook.save(output)
+    case = manager.create_case_from_upload(filename="source.xlsx", content=output.getvalue())
+    client = TestClient(api.app)
+
+    base_url = f"/api/rfqs/{case.case_id}/source/preview"
+    assert client.get(base_url, params={"sheet_name": "Missing", "row_number": 1}).status_code == 404
+    assert client.get(base_url, params={"sheet_name": "RFQ", "row_number": 5001}).status_code == 422
+    assert client.get(
+        base_url,
+        params={"sheet_name": "RFQ", "row_number": 1, "target_cells": "A1;DROP"},
+    ).status_code == 422
