@@ -8,7 +8,11 @@ Enforces:
 - No built-in pilot API keys: deployment operators must configure their own long, secret keys.
 """
 
+import hashlib
+import hmac
+import logging
 import os
+from functools import lru_cache
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 from fastapi import Depends, Header, HTTPException, status
@@ -22,18 +26,34 @@ class PilotUser:
     role: str  # "admin", "reviewer", "viewer"
 
 
+log = logging.getLogger(__name__)
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+_FALSE_VALUES = {"0", "false", "no", "off"}
+
+
+def env_flag(name: str, default: bool = False) -> bool:
+    """Parse a boolean environment variable consistently and reject typos."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    value = raw.strip().casefold()
+    if value in _TRUE_VALUES:
+        return True
+    if value in _FALSE_VALUES or not value:
+        return False
+    raise ValueError(
+        f"Invalid boolean value for {name}; use one of 1/true/yes/on or 0/false/no/off."
+    )
+
+
 def is_auth_required() -> bool:
     """Returns True if authentication is strictly enforced."""
-    return os.environ.get("REQUIRE_AUTH", "").lower() in ("1", "true")
+    return env_flag("REQUIRE_AUTH", default=False)
 
 
-def load_configured_keys() -> Dict[str, PilotUser]:
-    """Load explicitly configured pilot credentials; never ship usable default keys.
-
-    PILOT_API_KEYS consists of comma-separated key:role:display_name entries.
-    An invalid configuration is rejected in full rather than being partially applied.
-    """
-    env_keys = os.environ.get("PILOT_API_KEYS", "").strip()
+@lru_cache(maxsize=16)
+def _parse_configured_keys(env_keys: str) -> Dict[str, PilotUser]:
+    """Parse one immutable environment value once and cache its credentials."""
     if not env_keys:
         return {}
 
@@ -43,11 +63,42 @@ def load_configured_keys() -> Dict[str, PilotUser]:
         if len(parts) != 3:
             raise ValueError("Malformed PILOT_API_KEYS entry.")
         key, role, name = parts
-        if len(key) < 16 or role not in {"admin", "reviewer", "viewer"} or not name or key in users:
+        if (
+            len(key) < 16
+            or not key.isascii()
+            or role not in {"admin", "reviewer", "viewer"}
+            or not name
+            or key in users
+        ):
             raise ValueError("Invalid PILOT_API_KEYS entry: use unique keys of at least 16 characters, a valid role, and a name.")
         user_id = f"usr-{name.lower().replace(' ', '-')}"
         users[key] = PilotUser(user_id=user_id, name=name, role=role)
     return users
+
+
+def load_configured_keys() -> Dict[str, PilotUser]:
+    """Load configured pilot credentials from the cached startup environment.
+
+    PILOT_API_KEYS consists of comma-separated key:role:display_name entries.
+    An invalid configuration is rejected in full rather than being partially applied.
+    """
+    env_keys = os.environ.get("PILOT_API_KEYS", "").strip()
+    return _parse_configured_keys(env_keys)
+
+
+def initialize_authentication() -> None:
+    """Validate credentials during application startup without logging secrets."""
+    try:
+        configured_keys = load_configured_keys()
+        auth_required = is_auth_required()
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid pilot authentication configuration: {exc}") from exc
+
+    if configured_keys and not auth_required:
+        log.warning(
+            "PILOT_API_KEYS are configured while REQUIRE_AUTH is disabled; "
+            "the local anonymous fallback remains active."
+        )
 
 
 def get_current_user(
@@ -66,20 +117,28 @@ def get_current_user(
 
     try:
         valid_keys = load_configured_keys()
+        auth_required = is_auth_required()
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Pilot authentication configuration is invalid.",
         )
 
-    if is_auth_required() and not valid_keys:
+    if auth_required and not valid_keys:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Pilot authentication is enabled but PILOT_API_KEYS is not configured.",
         )
 
     if token:
-        user = valid_keys.get(token)
+        token_digest = hashlib.sha256(token.encode("utf-8")).digest()
+        user = None
+        # Hash to a fixed length before constant-time comparison. Compare every
+        # configured key so list position cannot control first-match timing.
+        for configured_key, configured_user in valid_keys.items():
+            configured_digest = hashlib.sha256(configured_key.encode("ascii")).digest()
+            if hmac.compare_digest(token_digest, configured_digest):
+                user = configured_user
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -88,7 +147,7 @@ def get_current_user(
             )
         return user
 
-    if is_auth_required():
+    if auth_required:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required. Please provide a valid pilot API key via X-API-Key or Authorization header.",
