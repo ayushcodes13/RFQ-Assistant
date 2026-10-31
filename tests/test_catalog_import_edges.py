@@ -103,11 +103,15 @@ def test_replace_csv_publishes_one_versioned_snapshot_and_persists_it(tmp_path):
     assert repo.count() == 1
     assert repo.get_by_sku("SKU-2") is None
     assert repo.get_by_sku("SKU-1").description == "Updated relay"
-    restored = CatalogRepository(state_store=SQLiteStateStore(tmp_path / "catalog.sqlite3"))
+    restored = CatalogRepository(
+        state_store=SQLiteStateStore(tmp_path / "catalog.sqlite3")
+    )
     assert restored.list_all() == repo.list_all()
 
 
-def test_failed_catalog_replacement_leaves_previous_snapshot_intact(tmp_path, monkeypatch):
+def test_failed_catalog_replacement_leaves_previous_snapshot_intact(
+    tmp_path, monkeypatch
+):
     store = SQLiteStateStore(tmp_path / "catalog.sqlite3")
     repo = CatalogRepository(state_store=store)
     old_csv = (HEADER + "SKU-1,Schneider Electric,PN-1,Relay,1.25,3\n").encode()
