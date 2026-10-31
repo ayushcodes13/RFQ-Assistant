@@ -55,12 +55,52 @@ def _document(kind: str, number: int) -> tuple[str | None, bytes | None, str | N
     if kind == "xlsx":
         workbook = Workbook()
         sheet = workbook.active
-        sheet.title = "BOM"
-        sheet.append(["Part Number", "Manufacturer", "Qty", "Description", "UOM"])
-        for (manufacturer, mpn, description), quantity in rows:
-            sheet.append([mpn, manufacturer, quantity, description, "EA"])
+        layout_id = number % 7
+        layouts = [
+            (["Part Number", "Manufacturer", "Qty", "Description", "UOM"],
+             {"mpn": 0, "manufacturer": 1, "quantity": 2, "description": 3, "unit": 4}),
+            (["Part Number", "OEM", "Quantity", "Details", "Unit"],
+             {"mpn": 0, "manufacturer": 1, "quantity": 2, "description": 3, "unit": 4}),
+            (["Model", "Brand", "Count", "Specification", "Unit of Measure"],
+             {"mpn": 0, "manufacturer": 1, "quantity": 2, "description": 3, "unit": 4}),
+            (["Description", "Qty", "Mfr", "P/N", "UOM"],
+             {"mpn": 3, "manufacturer": 2, "quantity": 1, "description": 0, "unit": 4}),
+            (["Line No", "Make", "Item Code", "Notes", "Unit of Measure", "Quantity", "Item Description"],
+             {"mpn": 2, "manufacturer": 1, "quantity": 5, "description": 6, "unit": 4}),
+            (["Manufacturer", "Part #", "Qty", "Description", "UOM"],
+             {"mpn": 1, "manufacturer": 0, "quantity": 2, "description": 3, "unit": 4}),
+            (["MPN", "Vendor", "Amount", "Item Description", "Unit"],
+             {"mpn": 0, "manufacturer": 1, "quantity": 2, "description": 3, "unit": 4}),
+        ]
+        header, columns = layouts[layout_id]
+        if layout_id == 5:
+            sheet.title = "Panel A"
+            other_sheet = workbook.create_sheet("Panel B")
+            target_sheets = [(sheet, rows[:1]), (other_sheet, rows[1:])]
+        else:
+            sheet.title = "BOM"
+            target_sheets = [(sheet, rows)]
+        for target, target_rows in target_sheets:
+            if layout_id in {1, 6}:
+                target.append([f"SYNTHETIC RFQ {number:02d} - layout {layout_id}"])
+            if layout_id == 6:
+                target.append([])
+            target.append(header)
+            for (manufacturer, mpn, description), quantity in target_rows:
+                values = {
+                    "mpn": mpn,
+                    "manufacturer": manufacturer,
+                    "quantity": quantity,
+                    "description": description,
+                    "unit": "EA",
+                }
+                row_values = [None] * len(header)
+                for field, column_index in columns.items():
+                    row_values[column_index] = values[field]
+                target.append(row_values)
         buffer = io.BytesIO()
         workbook.save(buffer)
+        workbook.close()
         return f"synthetic-{number}.xlsx", buffer.getvalue(), None
     if kind == "pdf":
         # Generate distinct native-text PDF layouts instead of timing the same
@@ -222,6 +262,9 @@ def _check_document(client: TestClient, number: int, kind: str) -> dict[str, Any
             "orientation": "landscape" if number % 2 else "portrait",
             "split_across_pages": number % 3 == 0,
         }
+    if kind == "xlsx":
+        result["source_sha256"] = source_hash
+        result["xlsx_layout"] = number % 7
     return result
 
 
@@ -263,9 +306,12 @@ def main() -> int:
                 "max_ms": max(ordered),
             }
 
-    pdf_source_hashes = {result["source_sha256"] for result in results if result.get("source_sha256")}
+    pdf_source_hashes = {result["source_sha256"] for result in results if result.get("pdf_layout")}
     pdf_layout_variants = {result["pdf_layout"]["variant"] for result in results if result.get("pdf_layout")}
     pdf_diversity_passed = len(pdf_source_hashes) == formats.count("pdf") and len(pdf_layout_variants) == 4
+    xlsx_source_hashes = {result["source_sha256"] for result in results if result.get("xlsx_layout") is not None}
+    xlsx_layout_variants = {result["xlsx_layout"] for result in results if result.get("xlsx_layout") is not None}
+    xlsx_diversity_passed = len(xlsx_source_hashes) == formats.count("xlsx") and len(xlsx_layout_variants) == 7
 
     concurrency_started = time.perf_counter()
     concurrent_request_count = 128
@@ -284,6 +330,9 @@ def main() -> int:
             "pdf_layouts": sorted(
                 {json.dumps(r["pdf_layout"], sort_keys=True) for r in results if r.get("pdf_layout")}
             ),
+            "xlsx_unique_sources": len(xlsx_source_hashes),
+            "xlsx_layout_variants": len(xlsx_layout_variants),
+            "xlsx_diversity_passed": xlsx_diversity_passed,
             "successful_full_flows": len(results) - len(failures),
             "failures": failures,
             "elapsed_seconds": round(time.perf_counter() - started, 2),
@@ -300,7 +349,7 @@ def main() -> int:
         },
     }
     print(json.dumps(report, indent=2))
-    return 1 if failures or not pdf_diversity_passed or len(concurrent_ids) != len(concurrent) or len(set(concurrent_ids)) != len(concurrent_ids) else 0
+    return 1 if failures or not pdf_diversity_passed or not xlsx_diversity_passed or len(concurrent_ids) != len(concurrent) or len(set(concurrent_ids)) != len(concurrent_ids) else 0
 
 
 if __name__ == "__main__":
