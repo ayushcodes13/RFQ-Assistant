@@ -8,7 +8,6 @@ Enforces:
 - No built-in pilot API keys: deployment operators must configure their own long, secret keys.
 """
 
-import hashlib
 import hmac
 import logging
 import os
@@ -29,6 +28,9 @@ class PilotUser:
 log = logging.getLogger(__name__)
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _FALSE_VALUES = {"0", "false", "no", "off"}
+# Domain-separated HMAC fingerprints keep comparisons fixed-length without
+# treating API credentials as password hashes.
+_KEY_FINGERPRINT_SECRET = b"rfq-assistant-api-key-fingerprint-v1"
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -131,12 +133,16 @@ def get_current_user(
         )
 
     if token:
-        token_digest = hashlib.sha256(token.encode("utf-8")).digest()
+        token_digest = hmac.digest(
+            _KEY_FINGERPRINT_SECRET, token.encode("utf-8"), "sha256"
+        )
         user = None
-        # Hash to a fixed length before constant-time comparison. Compare every
+        # HMAC to a fixed length before constant-time comparison. Compare every
         # configured key so list position cannot control first-match timing.
         for configured_key, configured_user in valid_keys.items():
-            configured_digest = hashlib.sha256(configured_key.encode("ascii")).digest()
+            configured_digest = hmac.digest(
+                _KEY_FINGERPRINT_SECRET, configured_key.encode("ascii"), "sha256"
+            )
             if hmac.compare_digest(token_digest, configured_digest):
                 user = configured_user
         if not user:
