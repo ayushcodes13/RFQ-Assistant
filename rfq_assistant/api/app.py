@@ -41,7 +41,9 @@ from rfq_assistant.schemas.models import (
     CatalogItem,
     ExportManifest,
     ExportRequest,
+    HealthResponse,
     RFQCase,
+    RFQCaseSummary,
     RFQLineItem,
     RFQLineItemUpdateRequest,
     RematchLineRequest,
@@ -167,13 +169,10 @@ app.add_middleware(
 )
 
 
-@app.get("/api/health")
+@app.get("/api/health", response_model=HealthResponse)
 def health_check():
-    return {
-        "status": "healthy",
-        "catalog_size": catalog_repo.count(),
-        "total_cases": len(case_manager.list_cases()),
-    }
+    """Public liveness probe; expose no catalog or customer activity counts."""
+    return {"status": "healthy"}
 
 
 # ---------------------------------------------------------------------------
@@ -296,11 +295,15 @@ async def create_rfq(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception as exc:
+        log.exception("Unexpected RFQ intake failure")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Unable to process this RFQ. Verify the file and try again.",
+        ) from exc
 
 
-@app.get("/api/rfqs", response_model=List[RFQCase])
+@app.get("/api/rfqs", response_model=List[RFQCaseSummary])
 def list_rfqs(current_user: PilotUser = Depends(get_current_user)):
     """Returns all RFQ cases sorted by date."""
     return case_manager.list_cases()

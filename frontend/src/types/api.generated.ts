@@ -51,7 +51,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Health Check */
+        /**
+         * Health Check
+         * @description Public liveness probe; expose no catalog or customer activity counts.
+         */
         get: operations["health_check_api_health_get"];
         put?: never;
         post?: never;
@@ -767,6 +770,17 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
+         * HealthResponse
+         * @description Minimal public liveness response for local and hosted health probes.
+         */
+        HealthResponse: {
+            /**
+             * Status
+             * @constant
+             */
+            status: "healthy";
+        };
+        /**
          * MatchCandidate
          * @description Proposed catalog match backed by exact OEM and MPN evidence.
          */
@@ -791,7 +805,7 @@ export interface components {
         ProcessingStage: "QUEUED" | "VALIDATING" | "EXTRACTING" | "CHECKING_FIELDS" | "MATCHING" | "READY_FOR_REVIEW" | "FAILED";
         /**
          * RFQCase
-         * @description An RFQ quotation case containing metadata and processing status.
+         * @description An RFQ quotation case, including source text on the case-detail route.
          */
         RFQCase: {
             /** Case Id */
@@ -866,6 +880,104 @@ export interface components {
             processing_stage?: components["schemas"]["ProcessingStage"] | null;
             /** Raw Text */
             raw_text?: string | null;
+            /** Source Coverage */
+            source_coverage?: components["schemas"]["SourceCoverageUnit"][];
+            source_file?: components["schemas"]["SourceFileMetadata"] | null;
+            source_type: components["schemas"]["SourceType"];
+            /** Stage Timings Ms */
+            stage_timings_ms?: {
+                [key: string]: number;
+            };
+            /** @default NEW */
+            status: components["schemas"]["CaseStatus"];
+            /** Title */
+            title: string;
+            /**
+             * Unresolved Count
+             * @default 0
+             */
+            unresolved_count: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at?: string;
+        };
+        /**
+         * RFQCaseSummary
+         * @description Case-list projection without customer RFQ text.
+         */
+        RFQCaseSummary: {
+            /** Case Id */
+            case_id: string;
+            /**
+             * Catalog Id
+             * @default default
+             */
+            catalog_id: string | null;
+            /** Catalog Version */
+            catalog_version?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at?: string;
+            /** Customer Label */
+            customer_label?: string | null;
+            /** Document Warnings */
+            document_warnings?: components["schemas"]["ExtractionWarning"][];
+            /**
+             * Line Count
+             * @default 0
+             */
+            line_count: number;
+            /**
+             * Llm Cache Hit
+             * @default false
+             */
+            llm_cache_hit: boolean;
+            /**
+             * Llm Call Count
+             * @default 0
+             */
+            llm_call_count: number;
+            /** Llm Deployment Version */
+            llm_deployment_version?: string | null;
+            /** Llm Input Tokens */
+            llm_input_tokens?: number | null;
+            /** Llm Model */
+            llm_model?: string | null;
+            /** Llm Output Tokens */
+            llm_output_tokens?: number | null;
+            /** Llm Prompt Sha256 */
+            llm_prompt_sha256?: string | null;
+            /**
+             * Llm Repair Call Count
+             * @default 0
+             */
+            llm_repair_call_count: number;
+            /**
+             * Llm Review Call Count
+             * @default 0
+             */
+            llm_review_call_count: number;
+            /** Llm Schema Version */
+            llm_schema_version?: string | null;
+            /** Llm Validator Version */
+            llm_validator_version?: string | null;
+            /**
+             * Parse Cache Hit
+             * @default false
+             */
+            parse_cache_hit: boolean;
+            /**
+             * Parser Version
+             * @default v1-deterministic
+             */
+            parser_version: string;
+            /** Processing Profile Sha256 */
+            processing_profile_sha256?: string | null;
+            processing_stage?: components["schemas"]["ProcessingStage"] | null;
             /** Source Coverage */
             source_coverage?: components["schemas"]["SourceCoverageUnit"][];
             source_file?: components["schemas"]["SourceFileMetadata"] | null;
@@ -1320,7 +1432,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["HealthResponse"];
                 };
             };
         };
@@ -1343,7 +1455,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RFQCase"][];
+                    "application/json": components["schemas"]["RFQCaseSummary"][];
                 };
             };
             /** @description Validation Error */

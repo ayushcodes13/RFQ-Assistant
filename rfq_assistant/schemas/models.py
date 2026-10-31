@@ -2,7 +2,7 @@
 
 from datetime import datetime
 import math
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
 from pydantic import BaseModel, Field, computed_field, field_validator
 
 from rfq_assistant.schemas.enums import (
@@ -237,8 +237,8 @@ class SourceFileMetadata(BaseModel):
     uploaded_at: datetime = Field(default_factory=datetime.utcnow)
 
 
-class RFQCase(BaseModel):
-    """An RFQ quotation case containing metadata and processing status."""
+class RFQCaseSummary(BaseModel):
+    """Case-list projection without customer RFQ text."""
     case_id: str
     title: str
     customer_label: Optional[str] = None
@@ -248,7 +248,6 @@ class RFQCase(BaseModel):
     source_file: Optional[SourceFileMetadata] = None
     source_coverage: List[SourceCoverageUnit] = Field(default_factory=list)
     document_warnings: List[ExtractionWarning] = Field(default_factory=list)
-    raw_text: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     line_count: int = 0
@@ -270,6 +269,16 @@ class RFQCase(BaseModel):
     llm_output_tokens: Optional[int] = None
     catalog_id: Optional[str] = "default"
     catalog_version: Optional[str] = None
+
+
+class RFQCase(RFQCaseSummary):
+    """An RFQ quotation case, including source text on the case-detail route."""
+    raw_text: Optional[str] = None
+
+
+class HealthResponse(BaseModel):
+    """Minimal public liveness response for local and hosted health probes."""
+    status: Literal["healthy"]
 
 
 class AuditEvent(BaseModel):

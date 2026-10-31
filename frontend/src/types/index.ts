@@ -22,6 +22,10 @@ export type RFQCase = Schemas["RFQCase"] & {
   created_at: string;
   updated_at: string;
 };
+export type RFQCaseSummary = Schemas["RFQCaseSummary"] & {
+  created_at: string;
+  updated_at: string;
+};
 export type AuditEvent = Schemas["AuditEvent"] & { recorded_at: string };
 export type ExportManifest = Schemas["ExportManifest"] & { generated_at: string };
 export type RFQLineItemUpdate = Schemas["RFQLineItemUpdateRequest"];
