@@ -53,7 +53,7 @@ if port_in_use "$FRONTEND_PORT"; then
   exit 1
 fi
 
-rm -rf "$RUNTIME"
+rm -rf "$RUNTIME/storage" "$RUNTIME/logs"
 mkdir -p "$RUNTIME/storage" "$RUNTIME/logs"
 PYTHON="$ROOT/.venv/bin/python"
 [[ -x "$PYTHON" ]] || PYTHON="$(command -v python3)"
