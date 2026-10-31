@@ -1022,6 +1022,11 @@ export interface components {
         SourceCoverageUnit: {
             /** Content Sha256 */
             content_sha256?: string | null;
+            /**
+             * Coverage Basis
+             * @description Distinguish deterministic spreadsheet scanning from heuristic text regions.
+             */
+            readonly coverage_basis: string;
             /** Error Code */
             error_code?: string | null;
             /**

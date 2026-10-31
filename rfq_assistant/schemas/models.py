@@ -3,7 +3,7 @@
 from datetime import datetime
 import math
 from typing import Dict, List, Optional, Tuple
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator
 
 from rfq_assistant.schemas.enums import (
     AuditAction,
@@ -72,6 +72,14 @@ class SourceCoverageUnit(BaseModel):
     review_regions: int = 0
     filtered_regions: int = 0
     ocr_failures: int = 0
+
+    @computed_field
+    @property
+    def coverage_basis(self) -> str:
+        """Distinguish deterministic spreadsheet scanning from heuristic text regions."""
+        if self.unit_kind in {"csv_document", "workbook_sheet"}:
+            return "structured_rows"
+        return "heuristic_regions"
 
 
 class SourcePreviewCell(BaseModel):
