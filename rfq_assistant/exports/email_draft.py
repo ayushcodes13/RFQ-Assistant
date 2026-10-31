@@ -23,6 +23,25 @@ def _needs_customer_clarification(line: RFQLineItem) -> bool:
     )
 
 
+def _source_excerpt(text: str, line_number: int, limit: int = 60) -> str:
+    """Return a compact excerpt without repeating the row number or cutting a word."""
+    normalized = " ".join(text.split())
+    if "|" in normalized:
+        source_number, remaining = normalized.split("|", 1)
+        if source_number.strip() == str(line_number):
+            normalized = remaining.strip()
+    if len(normalized) <= limit:
+        return normalized
+
+    words = []
+    for word in normalized.split(" "):
+        candidate = " ".join((*words, word))
+        if len(candidate) + 1 > limit:  # Reserve one character for the ellipsis.
+            break
+        words.append(word)
+    return f"{' '.join(words)}…" if words else "…"
+
+
 def generate_unsent_email_draft(case: RFQCase, lines: List[RFQLineItem]) -> str:
     """Create a human-editable draft, without approval or outbound email effects.
 
@@ -61,10 +80,10 @@ def generate_unsent_email_draft(case: RFQCase, lines: List[RFQLineItem]) -> str:
 
     if approved:
         body.append("Our team has reviewed the following requested items for quote preparation:")
-        for idx, line in enumerate(approved, start=1):
+        for line in approved:
             quantity = f"{line.quantity:g} {line.unit or 'EA'}"
             oem = line.requested_manufacturer or "Manufacturer not specified"
-            body.append(f"  {idx}. {quantity} - {oem} (Part: {line.requested_mpn})")
+            body.append(f"  {line.line_number}. {quantity} - {oem} (Part: {line.requested_mpn})")
         body.append("")
 
     if clarification:
@@ -120,8 +139,9 @@ def generate_unsent_email_draft(case: RFQCase, lines: List[RFQLineItem]) -> str:
                 questions.append(line.reviewer_notes)
 
             question_text = "; ".join(questions) or "Please confirm the requested specifications."
-            original = line.raw_text.replace("\r", " ").replace("\n", " ")[:60]
-            body.append(f"  * Line {line.line_number} ({original}...): {question_text}")
+            original = _source_excerpt(line.raw_text, line.line_number)
+            source_context = f" — {original}" if original else ""
+            body.append(f"  * Line {line.line_number}{source_context}: {question_text}")
         body.append("")
 
     if internally_pending:
