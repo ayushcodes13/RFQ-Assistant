@@ -154,7 +154,9 @@ def test_worker_processes_distinct_cases_with_bounded_concurrency(tmp_path):
         try:
             time.sleep(0.05)
             return original(
-                case_id, job_id=job_id, worker_id=worker_id,
+                case_id,
+                job_id=job_id,
+                worker_id=worker_id,
                 queue_wait_ms=queue_wait_ms,
             )
         finally:

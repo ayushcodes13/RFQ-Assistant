@@ -157,7 +157,9 @@ def test_http_client_stops_retrying_when_breaker_opens_and_resumes_after_probe()
         return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
 
     client = OpenAICompatibleClient(
-        "synthetic-secret", "gpt-6-luna", "https://example.invalid",
+        "synthetic-secret",
+        "gpt-6-luna",
+        "https://example.invalid",
         transport=httpx.MockTransport(respond),
         call_gate=gate,
         max_attempts=3,
