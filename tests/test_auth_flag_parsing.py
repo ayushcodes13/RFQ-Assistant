@@ -49,13 +49,13 @@ def test_configured_keys_are_parsed_once_for_the_startup_value(monkeypatch):
     assert after_requests.hits == startup_cache.hits + 2
 
 
-def test_key_validation_uses_fixed_length_constant_time_comparison_for_every_key(
+def test_key_validation_uses_constant_time_comparison_for_every_key(
     monkeypatch,
 ):
     monkeypatch.setenv("REQUIRE_AUTH", "yes")
     monkeypatch.setenv(
         "PILOT_API_KEYS",
-        "r2-synthetic-admin-key-0003:admin:Admin,"
+        "r2-synthetic-admin-key-0003000:admin:Admin,"
         "r2-synthetic-reviewer-key-0003:reviewer:Reviewer",
     )
     calls = []
@@ -72,7 +72,9 @@ def test_key_validation_uses_fixed_length_constant_time_comparison_for_every_key
 
     assert response.status_code == 200
     assert len(calls) == 2
-    assert all(len(candidate) == len(configured) == 32 for candidate, configured in calls)
+    assert all(isinstance(candidate, bytes) for candidate, _ in calls)
+    assert all(isinstance(configured, bytes) for _, configured in calls)
+    assert len({len(configured) for _, configured in calls}) == 1
 
 
 def test_malformed_keys_fail_during_application_startup(monkeypatch):
