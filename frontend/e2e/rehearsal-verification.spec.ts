@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 /**
  * Verification tests for the audit demo rehearsal.
@@ -14,20 +14,46 @@ const KNOWN_GOOD_RFQ_TEXT = `Please quote the following spare parts:
 1. 10 pcs of Schneider Electric LC1D09BD contactors (24VDC coil)
 2. 4 units Siemens 6ES7223-1BL32-0XB0 digital I/O modules`;
 
-const RFQ_WITH_UNKNOWN_PART = `Please quote the following spare parts:
+const RFQ_WITH_MISSING_QUANTITY = `Please quote the following spare parts:
 1. 5 units of Schneider Electric LC1D09BD contactors
 2. 3 units of Omron E2E-X7D1-N sensors
-3. 2 units of some unknown-brand SUPER-UNKNOWN-9999 parts`;
+3. Schneider Electric LC1D09BD contactor`;
+
+type ApiCase = { case_id: string; title: string };
+type ApiLine = {
+  line_id: string;
+  line_number: number;
+  version: number;
+  match_status: string;
+  quantity: number | null;
+  unit: string | null;
+  requested_mpn: string | null;
+  requested_manufacturer: string | null;
+  selected_catalog_sku: string | null;
+  review_decision: string;
+};
+type ApiAuditEvent = { action: string };
+type ApiCatalogItem = { manufacturer_part_number: string };
+type LineReviewUpdate = {
+  quantity: number | null;
+  unit: string;
+  requested_mpn: string | null;
+  requested_manufacturer: string | null;
+  selected_catalog_sku: string | null;
+  match_status: string;
+  review_decision: string;
+};
 
 /**
  * Helper: list cases via the API and find one by title substring.
  */
-async function findCaseByTitle(page: any, titleSubstring: string) {
+async function findCaseByTitle(page: Page, titleSubstring: string): Promise<ApiCase> {
   const casesResp = await page.request.get("/api/proxy/api/rfqs");
   expect(casesResp.status()).toBe(200);
-  const cases = await casesResp.json();
-  const ourCase = cases.find((c: any) => c.title.includes(titleSubstring));
+  const cases = (await casesResp.json()) as ApiCase[];
+  const ourCase = cases.find((item) => item.title.includes(titleSubstring));
   expect(ourCase).toBeDefined();
+  if (!ourCase) throw new Error(`No case found for title: ${titleSubstring}`);
   return ourCase;
 }
 
@@ -116,9 +142,9 @@ test("Rehearsal A — happy path: create, extract, approve, export, download", a
 });
 
 /**
- * Test B: Blocked workflow — an unresolved line (NO_MATCH, no SKU) must prevent
- * full export. After resolving the line via manual SKU override, export
- * succeeds and the downloaded worksheet contains the override SKU.
+ * Test B: A missing quantity blocks export even when the requested part has an
+ * exact catalog match. Correct the quantity in the UI, review the line, then
+ * export. No substitute SKU is assigned.
  */
 test("Rehearsal B — blocked export on unresolved line, then resolve", async ({
   page,
@@ -132,7 +158,7 @@ test("Rehearsal B — blocked export on unresolved line, then resolve", async ({
   await ingestDialog.getByRole("button", { name: /Paste text/i }).click();
   await ingestDialog
     .getByPlaceholder(/Paste email or RFQ text here/i)
-    .fill(RFQ_WITH_UNKNOWN_PART);
+    .fill(RFQ_WITH_MISSING_QUANTITY);
   await ingestDialog
     .getByPlaceholder("Optional case title")
     .fill("Rehearsal B blocked");
@@ -147,7 +173,7 @@ test("Rehearsal B — blocked export on unresolved line, then resolve", async ({
   const ourCase = await findCaseByTitle(page, "Rehearsal B blocked");
   const caseId = ourCase.case_id;
 
-  // --- Export is BLOCKED when lines are unapproved ---
+  // --- Export is blocked before the required human review. ---
   const blockedExport = await page.request.post(
     `/api/proxy/api/rfqs/${caseId}/exports`,
     {
@@ -164,7 +190,7 @@ test("Rehearsal B — blocked export on unresolved line, then resolve", async ({
   const blockedBody = await blockedExport.json();
   expect(blockedBody.detail).toMatch(/unresolved|blocked|validation|not approved/i);
 
-  // --- Approve the two known-good lines via UI ---
+  // --- Approve two complete exact-match lines via the UI. ---
   const approveButtons = page.getByRole("button", { name: /^Approve line \d+$/ });
   await expect(approveButtons).toHaveCount(3);
   await approveButtons.first().click();
@@ -172,7 +198,7 @@ test("Rehearsal B — blocked export on unresolved line, then resolve", async ({
   await page.getByRole("button", { name: /^Approve line \d+$/ }).first().click();
   await expect(page.getByText("Approved", { exact: true })).toHaveCount(2);
 
-  // --- Export still blocked (3rd line has NO_MATCH, no selected_catalog_sku) ---
+  // --- Export remains blocked because line 3 is missing its quantity. ---
   const stillBlockedExport = await page.request.post(
     `/api/proxy/api/rfqs/${caseId}/exports`,
     {
@@ -187,32 +213,27 @@ test("Rehearsal B — blocked export on unresolved line, then resolve", async ({
   );
   expect(stillBlockedExport.status()).toBe(400);
 
-  // --- Resolve the 3rd line via API: set selected_catalog_sku + approve ---
+  // Correct the missing quantity in the UI. Do not assign a different SKU to
+  // an unknown MPN or imply that an unverified substitute is acceptable.
   const linesResp = await page.request.get(
     `/api/proxy/api/rfqs/${caseId}/lines`
   );
-  const lines = await linesResp.json();
-  const unknownLine = lines.find(
-    (l: any) => l.match_status === "NO_MATCH"
-  );
-  expect(unknownLine).toBeDefined();
+  const lines = (await linesResp.json()) as ApiLine[];
+  const lineNeedingQuantity = lines.find((line) => line.line_number === 3);
+  expect(lineNeedingQuantity?.quantity).toBeNull();
+  expect(lineNeedingQuantity?.match_status).toBe("EXACT_MATCH");
 
-  const overrideResp = await page.request.patch(
-    `/api/proxy/api/rfqs/${caseId}/lines/${unknownLine.line_id}`,
-    {
-      data: JSON.stringify({
-        actor: "Demo Operator",
-        expected_version: unknownLine.version,
-        selected_catalog_sku: "SKU-OMR-001",
-        review_decision: "APPROVED",
-      }),
-      headers: { "Content-Type": "application/json" },
-    }
-  );
-  expect(overrideResp.status()).toBe(200);
-  const overriddenLine = await overrideResp.json();
-  expect(overriddenLine.match_status).toBe("MANUAL_OVERRIDE");
-  expect(overriddenLine.selected_catalog_sku).toBe("SKU-OMR-001");
+  const lineItems = page.getByRole("region", { name: "Line items" });
+  const thirdRow = lineItems.locator("tbody tr").nth(2);
+  const quantityCell = thirdRow.locator("td").nth(1);
+  await quantityCell.dblclick();
+  const quantityInput = quantityCell.locator("input");
+  await quantityInput.fill("2");
+  await quantityInput.press("Enter");
+  await expect(quantityCell.getByText("2", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Approve line 3" }).click();
+  await expect(approveButtons).toHaveCount(0);
+  await expect(page.getByText(/3 lines · 0 need review/i)).toBeVisible();
 
   // --- Export should now succeed ---
   const successExport = await page.request.post(
@@ -232,7 +253,7 @@ test("Rehearsal B — blocked export on unresolved line, then resolve", async ({
   expect(manifest.is_draft).toBe(true);
   expect(manifest.approved_lines).toBe(3);
 
-  // --- Download the exported worksheet and verify content ---
+  // --- Download the draft worksheet and verify its generated payload. ---
   const downloadHref = `/api/proxy/api/rfqs/${caseId}/exports/${manifest.export_id}`;
   const downloadResp = await page.request.get(downloadHref);
   expect(downloadResp.status()).toBe(200);
@@ -300,18 +321,18 @@ test("Rehearsal C — persistence across browser refresh", async ({
     `/api/proxy/api/rfqs/${caseId}/audit`
   );
   expect(auditResp.status()).toBe(200);
-  const audit = await auditResp.json();
+  const audit = (await auditResp.json()) as ApiAuditEvent[];
   expect(audit.length).toBeGreaterThanOrEqual(2);
-  expect(audit.some((e: any) => e.action === "CASE_CREATED")).toBe(true);
-  expect(audit.some((e: any) => e.action === "LINE_APPROVED")).toBe(true);
+  expect(audit.some((event) => event.action === "CASE_CREATED")).toBe(true);
+  expect(audit.some((event) => event.action === "LINE_APPROVED")).toBe(true);
 
   // --- Verify catalog is still loaded ---
   const catalogResp = await page.request.get("/api/proxy/api/catalogs");
   expect(catalogResp.status()).toBe(200);
-  const catalog = await catalogResp.json();
+  const catalog = (await catalogResp.json()) as ApiCatalogItem[];
   expect(catalog.length).toBeGreaterThan(0);
   expect(
-    catalog.some((item: any) => item.manufacturer_part_number === "LC1D09BD")
+    catalog.some((item) => item.manufacturer_part_number === "LC1D09BD")
   ).toBe(true);
 });
 
@@ -348,7 +369,7 @@ test("Rehearsal D — send route is simulated-only (no external transport)", asy
     return { status: res.status, body: await res.text() };
   });
   expect(createResult.status).toBe(200);
-  const createdCase = JSON.parse(createResult.body);
+  const createdCase = JSON.parse(createResult.body) as ApiCase;
 
   // Step 2: Approve all lines via browser-side fetch.
   const linesResult = await page.evaluate(
@@ -359,11 +380,15 @@ test("Rehearsal D — send route is simulated-only (no external transport)", asy
     createdCase.case_id
   );
   expect(linesResult.status).toBe(200);
-  const lines = JSON.parse(linesResult.body);
+  const lines = JSON.parse(linesResult.body) as ApiLine[];
 
   for (const line of lines) {
     const patchResult = await page.evaluate(
-      async (params: { caseId: string; lineId: string; update: any }) => {
+      async (params: {
+        caseId: string;
+        lineId: string;
+        update: LineReviewUpdate;
+      }) => {
         const res = await fetch(
           window.location.origin + `/api/proxy/api/rfqs/${params.caseId}/lines/${params.lineId}`,
           {
@@ -413,7 +438,7 @@ test("Rehearsal D — send route is simulated-only (no external transport)", asy
     quoteId
   );
   expect(getDraftResult.status).toBe(200);
-  const draft = JSON.parse(getDraftResult.body);
+  const draft = JSON.parse(getDraftResult.body) as { draft_hash: string };
 
   // Step 5: Approve the quote draft.
   const approveResult = await page.evaluate(
@@ -446,7 +471,14 @@ test("Rehearsal D — send route is simulated-only (no external transport)", asy
     { quoteId, hash: draft.draft_hash }
   );
   expect(sendResult.status).toBe(200);
-  const sendResultBody = JSON.parse(sendResult.body);
+  const sendResultBody = JSON.parse(sendResult.body) as {
+    transmission: {
+      transport: string;
+      outbound_transport_invoked: boolean;
+      is_simulated: boolean;
+      transport_notes: string;
+    };
+  };
 
   // CRITICAL VERIFICATION: No external transport was invoked.
   expect(sendResultBody.transmission.transport).toBe("simulated_local");
@@ -465,6 +497,11 @@ test("Rehearsal E — failure recovery on unsupported file type", async ({
   page,
 }) => {
   await page.goto("/workspace");
+  const casesBefore = await page.request.get("/api/proxy/api/rfqs");
+  expect(casesBefore.status()).toBe(200);
+  const initialCases = (await casesBefore.json()) as ApiCase[];
+  const recoveryTitle = "Rejected upload recovery";
+  expect(initialCases.some((item) => item.title === recoveryTitle)).toBe(false);
 
   await page.getByRole("button", { name: /New RFQ/i }).first().click();
 
@@ -485,6 +522,23 @@ test("Rehearsal E — failure recovery on unsupported file type", async ({
     timeout: 10_000,
   });
 
-  // The modal should still be open (case was not created).
+  // Confirm no case was created and the modal remains usable after the error.
   await expect(ingestDialog).toBeVisible();
+  const casesAfter = await page.request.get("/api/proxy/api/rfqs");
+  expect(casesAfter.status()).toBe(200);
+  const cases = (await casesAfter.json()) as ApiCase[];
+  expect(cases.some((item) => item.title === recoveryTitle)).toBe(false);
+
+  await ingestDialog.getByRole("button", { name: /Paste text/i }).click();
+  await ingestDialog
+    .getByPlaceholder(/Paste email or RFQ text here/i)
+    .fill(KNOWN_GOOD_RFQ_TEXT);
+  await ingestDialog
+    .getByPlaceholder("Optional case title")
+    .fill(recoveryTitle);
+  await ingestDialog.getByRole("button", { name: /Extract line items/i }).click();
+  await expect(ingestDialog).toBeHidden({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: recoveryTitle })).toBeVisible({
+    timeout: 30_000,
+  });
 });

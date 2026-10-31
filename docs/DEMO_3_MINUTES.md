@@ -9,22 +9,17 @@ Show the proposed **pre-ERP quotation preparation step**: incoming RFQ file or e
 ### Preflight, 10-15 minutes before the meeting
 
 1. Clone and open this repository on an isolated machine. **No real customer, employer or personal production data**.
-2. Start backend from repository root:
+2. Start backend from repository root (use isolated storage so an existing local database is not reused):
    ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -e .
-   pytest -v
-   uvicorn rfq_assistant.api.app:app --host 127.0.0.1 --port 8000
+   export RFQ_ASSISTANT_DB_PATH="$PWD/storage/demo-rehearsal.sqlite3"
+   .venv/bin/python -m uvicorn rfq_assistant.api.app:app --host 127.0.0.1 --port 8001
    ```
-3. Start frontend in a separate terminal:
+3. Start frontend in a separate terminal, pointing it at the matching backend:
    ```bash
    cd frontend
-   npm install
-   npm run build
-   npm run dev
+   RFQ_ASSISTANT_API_URL=http://127.0.0.1:8001 npm run dev -- --port 3001
    ```
-4. Open `http://localhost:3000`. Confirm the **Cases Inbox**, **New RFQ Intake**, review workbench, **Audit Log** and **Export Quotation Worksheet** work.
+4. Open `http://localhost:3001/workspace`. Confirm the **Cases Inbox**, **New RFQ Intake**, review workbench, **Audit Log** and **Export Quotation Worksheet** work.
 5. Confirm the sample catalog is available at `fixtures/catalogs/industrial_components_sample_catalog.csv` (the README says the backend loads it locally).
 6. Stage **two or three separate synthetic cases** before recording:
    - Upload `fixtures/rfq_samples/industrial_control_bom_20lines.xlsx` to demonstrate **file upload and parsing**.
@@ -110,4 +105,4 @@ Stop or narrow scope if unflagged critical mistakes occur. No invented ROI perce
 
 ### Run verification
 
-This runbook was written after reading the repository README, `AGENTS.md`, `docs/SCENARIOS.md`, `docs/TESTING.md`, and UI source components (`IngestModal`, `WorkbenchView`, `ExportModal`). **The application and tests were not executed in this documentation PR** because the connected environment does not provide the repository checkout or a working local browser. The presenter must execute the preflight and record actual results before representing the demo as tested.
+The isolated local demo rehearsal recorded in `tests/end_to_end_audit/results/DEMO_REHEARSAL.md` passed the backend suite, synthetic fixture evaluation, and six browser checks on three clean database runs. A separate clean-start browser walkthrough created and reviewed a synthetic case, opened source provenance, generated a draft, and downloaded the XLSX; its OOXML package and contents were inspected. It did not verify a hosted deployment, customer data, a process restart through the browser, or opening the downloaded workbook in a desktop spreadsheet application. Repeat the preflight on the machine and browser used for the meeting.
