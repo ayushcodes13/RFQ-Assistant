@@ -22,7 +22,6 @@ dependencies = [
     "fpdf2>=2.8.0",
     "rapidfuzz>=3.0.0",
     "defusedxml>=0.7.1",
-    "pydantic-ai>=0.0.1",
 ]
 
 [project.optional-dependencies]
