@@ -169,11 +169,12 @@ class TestAllProductScenarios:
             )
 
         corrupt_path = SAMPLES_DIR / "corrupt_file.pdf"
-        with pytest.raises(Exception, match="Corrupted or invalid PDF"):
-            case_manager.create_case_from_upload(
-                filename="corrupt_file.pdf",
-                content=corrupt_path.read_bytes(),
-            )
+        case = case_manager.create_case_from_upload(
+            filename="corrupt_file.pdf",
+            content=corrupt_path.read_bytes(),
+        )
+        assert case.status.value == "FAILED"
+        assert "Corrupted or invalid PDF" in case.document_warnings[0].message
 
     def test_scenario_7_export_without_prices(self):
         """

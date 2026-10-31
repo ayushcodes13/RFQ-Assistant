@@ -2,8 +2,10 @@
 
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
+import time
 from typing import List, Optional
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +16,9 @@ from rfq_assistant.cases.manager import CaseManager
 from rfq_assistant.exports import ExportGenerator, ExportValidationError
 from rfq_assistant.ingestion.excel import ExcelBOMInspector
 from rfq_assistant.ingestion.malware import ClamAVScanner
+from rfq_assistant.ingestion.storage import DocumentStorage
+from rfq_assistant.ingestion.ai_extraction import GroundedLLMExtractor
+from rfq_assistant.ingestion.worker import RFQIngestionWorker
 from rfq_assistant.ingestion.parsers.base import DocumentParserError
 from rfq_assistant.ingestion.validator import UploadValidationError
 from rfq_assistant.matching.catalog import CatalogImportError, CatalogRepository
@@ -30,20 +35,38 @@ from rfq_assistant.schemas.models import (
     RFQCase,
     RFQLineItem,
     RFQLineItemUpdate,
+    ReviewPlan,
 )
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+log = logging.getLogger(__name__)
 DEFAULT_CATALOG_PATH = ROOT / "fixtures" / "catalogs" / "industrial_components_sample_catalog.csv"
 
 # Global repositories and services
-_database_path = Path(os.environ.get("RFQ_ASSISTANT_DB_PATH", "storage/rfq_assistant.sqlite3"))
+_storage_root = Path(os.environ.get("RFQ_ASSISTANT_STORAGE_DIR", "storage"))
+_database_path = Path(os.environ.get("RFQ_ASSISTANT_DB_PATH", str(_storage_root / "rfq_assistant.sqlite3")))
 state_store = SQLiteStateStore(_database_path)
 catalog_repo = CatalogRepository(state_store=state_store)
-case_manager = CaseManager(catalog=catalog_repo, state_store=state_store)
-export_generator = ExportGenerator(catalog=catalog_repo)
+case_manager = CaseManager(
+    catalog=catalog_repo,
+    storage=DocumentStorage(base_dir=_storage_root),
+    state_store=state_store,
+    llm_extractor=GroundedLLMExtractor.from_environment(),
+)
+export_generator = ExportGenerator(catalog=catalog_repo, base_export_dir=_storage_root / "exports")
 clamav_scanner = ClamAVScanner()
 rapidfuzz_engine = RapidFuzzCandidateEngine()
 commercial_service = QuotationCommercialService()
+ASYNC_INGEST_ENABLED = os.getenv("RFQ_ASYNC_INGEST_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
+try:
+    INGEST_WORKER_CONCURRENCY = max(1, min(4, int(os.getenv("RFQ_INGEST_WORKER_CONCURRENCY", "2"))))
+except ValueError:
+    INGEST_WORKER_CONCURRENCY = 2
+    log.warning("Invalid RFQ_INGEST_WORKER_CONCURRENCY; using the safe default of 2.")
+ingestion_worker = (
+    RFQIngestionWorker(case_manager, state_store, max_concurrent_jobs=INGEST_WORKER_CONCURRENCY)
+    if ASYNC_INGEST_ENABLED else None
+)
 
 # Pre-load default synthetic catalog if available
 if DEFAULT_CATALOG_PATH.exists() and catalog_repo.count() == 0:
@@ -98,11 +121,27 @@ app = FastAPI(
     description="Human-reviewed RFQ intake and quotation preparation assistant with OSS stack",
 )
 
+if case_manager.llm_extractor:
+    app.add_event_handler("shutdown", case_manager.llm_extractor.close)
+if ingestion_worker:
+    app.add_event_handler("startup", ingestion_worker.start)
+    app.add_event_handler("shutdown", ingestion_worker.stop)
+
 
 # Enable CORS for Next.js frontend
+# In production, restrict to the actual frontend origin(s). The wildcard
+# "*" is used here for local development convenience but is incompatible
+# with allow_credentials=True per the CORS spec. We explicitly enumerate
+# localhost origins to keep development working while remaining safe.
+_cors_origins = [
+    "http://localhost",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:8000",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -162,43 +201,69 @@ async def create_rfq(
             detail="Must provide either an uploaded file or pasted text.",
         )
 
-    effective_actor = current_user.name if current_user.user_id != "usr-local-demo" else actor
+    # Audit identity always comes from the auth dependency. The local demo
+    # principal is explicit; client form fields must not create fake actors.
+    effective_actor = current_user.name
 
     try:
         if file:
+            read_started = time.perf_counter()
             content = await file.read()
+            upload_read_ms = (time.perf_counter() - read_started) * 1000
             filename = file.filename or "upload.xlsx"
             # 1. Attachment security scan
+            scan_started = time.perf_counter()
             scan = clamav_scanner.scan_bytes(content, filename=filename)
+            log.info(
+                "[rfq_timing] stage=upload_security bytes=%d upload_read_ms=%.1f scanner_ms=%.1f clean=%s",
+                len(content), upload_read_ms, (time.perf_counter() - scan_started) * 1000, scan.is_clean,
+            )
             if not scan.is_clean:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Security alert: Malicious attachment quarantined ({scan.threat_name}). Processing blocked.",
                 )
 
-            case = case_manager.create_case_from_upload(
-                filename=filename,
-                content=content,
-                title=title,
-                customer_label=customer_label,
-                actor=effective_actor,
-            )
+            if ASYNC_INGEST_ENABLED:
+                case = case_manager.enqueue_case_from_upload(
+                    filename=filename, content=content, title=title,
+                    customer_label=customer_label, actor=effective_actor,
+                )
+            else:
+                case = case_manager.create_case_from_upload(
+                    filename=filename,
+                    content=content,
+                    title=title,
+                    customer_label=customer_label,
+                    actor=effective_actor,
+                )
             return case
         else:
             raw_text = pasted_text or ""
+            scan_started = time.perf_counter()
             scan = clamav_scanner.scan_bytes(raw_text.encode("utf-8"), filename="pasted_text.txt")
+            log.info(
+                "[rfq_timing] stage=pasted_text_security scanner_ms=%.1f clean=%s",
+                (time.perf_counter() - scan_started) * 1000, scan.is_clean,
+            )
             if not scan.is_clean:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Security alert: Malicious content quarantined ({scan.threat_name}).",
                 )
 
-            case = case_manager.create_case_from_text(
-                raw_text=raw_text,
-                title=title,
-                customer_label=customer_label,
-                actor=effective_actor,
-            )
+            if ASYNC_INGEST_ENABLED:
+                case = case_manager.enqueue_case_from_text(
+                    raw_text=raw_text, title=title,
+                    customer_label=customer_label, actor=effective_actor,
+                )
+            else:
+                case = case_manager.create_case_from_text(
+                    raw_text=raw_text,
+                    title=title,
+                    customer_label=customer_label,
+                    actor=effective_actor,
+                )
             return case
     except (UploadValidationError, DocumentParserError) as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -256,6 +321,7 @@ def get_original_source(
         ".pdf": "application/pdf",
         ".csv": "text/csv",
         ".txt": "text/plain",
+        ".xls": "application/vnd.ms-excel",
         ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     }.get(ext, "application/octet-stream")
 
@@ -275,8 +341,7 @@ def update_rfq_line(
     update: RFQLineItemUpdate,
     current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
-    if current_user.user_id != "usr-local-demo":
-        update.actor = current_user.name
+    update.actor = current_user.name
     try:
         updated = case_manager.update_line(case_id, line_id, update)
     except ValueError as e:
@@ -297,9 +362,37 @@ def batch_review_lines(
     case = case_manager.get_case(case_id)
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ case not found.")
-    if current_user.user_id != "usr-local-demo":
-        request.actor = current_user.name
-    count = case_manager.batch_review(case_id, request)
+    request.actor = current_user.name
+    try:
+        count = case_manager.batch_review(case_id, request)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {"status": "success", "updated_count": count}
+
+
+@app.get("/api/rfqs/{case_id}/review-plan", response_model=ReviewPlan)
+def get_rfq_review_plan(
+    case_id: str,
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
+):
+    try:
+        return case_manager.get_review_plan(case_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@app.post("/api/rfqs/{case_id}/review-plan/approve-remaining")
+def approve_remaining_validated_lines(
+    case_id: str,
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
+):
+    case = case_manager.get_case(case_id)
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ case not found.")
+    try:
+        count = case_manager.approve_remaining_clean(case_id, current_user.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return {"status": "success", "updated_count": count}
 
 
@@ -339,8 +432,7 @@ def export_rfq_worksheet(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ case not found.")
 
     lines = case_manager.get_lines(case_id)
-    if current_user.user_id != "usr-local-demo":
-        request.actor = current_user.name
+    request.actor = current_user.name
     try:
         manifest = export_generator.generate_export(case, lines, request)
         # Record audit event
@@ -362,7 +454,11 @@ def download_export(
     current_user: PilotUser = Depends(get_current_user),
 ):
     """Downloads the generated export artifact with strict case-scoping verification."""
-    export_dir = Path("storage/exports") / export_id
+    # Validate export_id format to prevent path traversal via URL path
+    import re as _re
+    if not _re.fullmatch(r"EXP-[A-F0-9]{8}", export_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export not found.")
+    export_dir = Path(export_generator.base_export_dir) / export_id
     if not export_dir.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export not found.")
 
@@ -609,7 +705,7 @@ def v1_approve_quote_draft(
 ):
     """Version-bound human approval of a quotation draft."""
     _require_fresh_quote_source(quote_id)
-    effective_approver = current_user.name if current_user.user_id != "usr-local-demo" else approver_name
+    effective_approver = current_user.name
     try:
         record = commercial_service.approve_draft(
             quote_id=quote_id,
@@ -629,7 +725,7 @@ def v1_reject_quote_draft(
     current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     """Rejects quotation draft with explicit reason."""
-    effective_approver = current_user.name if current_user.user_id != "usr-local-demo" else approver_name
+    effective_approver = current_user.name
     try:
         record = commercial_service.reject_draft(
             quote_id=quote_id,
@@ -650,7 +746,7 @@ def v1_send_approved_quote(
 ):
     """Transmits quote strictly after human approval verification and hash validation."""
     _require_fresh_quote_source(quote_id)
-    effective_sender = current_user.name if current_user.user_id != "usr-local-demo" else sender_name
+    effective_sender = current_user.name
     try:
         result = commercial_service.send_approved_quote(
             quote_id=quote_id,

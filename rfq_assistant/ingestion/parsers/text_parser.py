@@ -5,6 +5,8 @@ from typing import List, Optional, Tuple
 
 from rfq_assistant.ingestion.parsers.base import (
     BaseDocumentParser,
+    enforce_candidate_region_limit,
+    EvidenceSegment,
     ParsedDocumentResult,
     ParsedLineDraft,
 )
@@ -34,12 +36,18 @@ class TextParser(BaseDocumentParser):
 
         lines: List[ParsedLineDraft] = []
         warnings: List[ExtractionWarning] = []
+        candidate_segments: List[EvidenceSegment] = []
         line_counter = 1
+        in_signature = False
 
         for row_idx, rline in enumerate(raw_lines, start=1):
             clean = rline.strip()
             if not clean or len(clean) < 4:
                 continue
+
+            # Unwrap quoted email lines before classifying them so forwarded
+            # item rows retain their numbered-list structure.
+            clean = re.sub(r"^(?:>\s*)+", "", clean).strip()
 
             # Strip common email inquiry prefixes like 'Please quote:' or 'Urgent:'
             stripped = re.sub(
@@ -51,6 +59,18 @@ class TextParser(BaseDocumentParser):
             if stripped:
                 clean = stripped
 
+            if re.match(
+                r"^(?:from:|to:|cc:|subject:|date:|hi\b|hello\b|dear\b|thanks\b|best regards\b|sincerely\b|confidential\b|synthetic notice\b)",
+                clean,
+                re.IGNORECASE,
+            ):
+                if re.match(r"^(?:thanks|best regards|sincerely)\b", clean, re.IGNORECASE):
+                    in_signature = True
+                continue
+
+            if in_signature or self._is_known_non_item_text(clean):
+                continue
+
             # Check if this line contains component, quantity, or item clues
             has_item_indicator = bool(
                 re.match(r"^(?:\d+[\.\)]|\-|\*|\•)\s*", clean)
@@ -61,13 +81,14 @@ class TextParser(BaseDocumentParser):
             )
 
             if not has_item_indicator:
-                # Discard conversational email headers/salutations/closings without items
-                if re.match(
-                    r"^(?:from:|to:|subject:|date:|hi\b|hello\b|dear\b|thanks\b|best regards\b|sincerely\b|confidential\b|synthetic notice\b|please\b|urgent\b)",
-                    clean,
-                    re.IGNORECASE,
-                ):
-                    continue
+                # Narrow email metadata/salutations were filtered above. Keep
+                # every other non-empty region so unfamiliar wording reaches
+                # grounded fallback or the explicit manual-review path.
+                candidate_segments.append(EvidenceSegment(
+                    segment_id=f"candidate-text-{row_idx}",
+                    locator=SourceLocator(file_name=filename, row_number=row_idx, text_snippet=clean[:120]),
+                    text=clean,
+                ))
                 continue
 
 
@@ -106,6 +127,12 @@ class TextParser(BaseDocumentParser):
             if parsed:
                 lines.append(parsed)
                 line_counter += 1
+            else:
+                candidate_segments.append(EvidenceSegment(
+                    segment_id=f"candidate-text-{row_idx}",
+                    locator=SourceLocator(file_name=filename, row_number=row_idx, text_snippet=clean[:120]),
+                    text=clean,
+                ))
 
         if not lines:
             warnings.append(
@@ -116,7 +143,14 @@ class TextParser(BaseDocumentParser):
                 )
             )
 
-        return ParsedDocumentResult(lines=lines, warnings=warnings, total_lines_detected=len(lines))
+        enforce_candidate_region_limit(candidate_segments)
+
+        return ParsedDocumentResult(
+            lines=lines,
+            warnings=warnings,
+            total_lines_detected=len(lines),
+            candidate_segments=candidate_segments,
+        )
 
     def _parse_item_line(
         self, raw_line: str, filename: str, row_idx: int, line_counter: int
@@ -169,6 +203,19 @@ class TextParser(BaseDocumentParser):
         )
 
     @staticmethod
+    def _is_known_non_item_text(text: str) -> bool:
+        """Discard narrow email context patterns while retaining unknown prose."""
+        return bool(re.match(
+            r"^(?:synthetic\b|could you please quote .*following items|please quote the following items:?|"
+            r"also,? our .* added:?|i can confirm the above\b|please include pricing\b|"
+            r"the following(?::| items:)?|find below the list\b|some items may have alternative manufacturers\b|"
+            r"for the exact mpns listed\b|please confirm (?:current )?pricing\b|confirm current pricing\b|please let us know\b|"
+            r"please provide pricing and lead time\b|[-_ ]{3,})",
+            text,
+            re.IGNORECASE,
+        ))
+
+    @staticmethod
     def _extract_quantity_unit(text: str) -> Tuple[Optional[float], Optional[str]]:
         # Pattern 1: "10 pcs of", "4 units", "5 pcs", "12 EA of", "25x"
         m = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:x|pcs|units?|ea|m|ft|set)\b", text, re.IGNORECASE)
@@ -200,11 +247,26 @@ class TextParser(BaseDocumentParser):
         tokens = text.split()
         for t in tokens:
             cleaned = t.strip(".,;:()[]{}'\"")
+            # Exclude document reference numbers (e.g., RFQ-2026-001, PO-12345)
+            if re.match(r"^(?:RFQ|PO|QUO|SO|QUOTE)[\-_]\d", cleaned, re.IGNORECASE):
+                continue
             # Must contain at least one digit and one letter, or uppercase letters and hyphen
             if re.search(r"[A-Za-z]", cleaned) and re.search(r"[0-9]", cleaned) and len(cleaned) >= 4:
                 # Exclude common tokens like "Plant4", "Line3", "24VDC", "4PDT"
                 if cleaned.upper() in ["24VDC", "100-240VAC", "4PDT", "LINE3", "PLANT4", "NET30"]:
                     continue
+                # Exclude voltage/amperage specification tokens (e.g., 24VDC, 100-240VAC)
+                if re.fullmatch(r"\d+(?:V(?:AC|DC)?|A|HZ|W|KW)", cleaned, re.IGNORECASE):
+                    continue
+                # Exclude pole/contact specification tokens (e.g., 3-pole, 2NO, SPST, DPDT)
+                if re.fullmatch(r"\d+-pole|spst|spdt|dpst|dpdt|spsc|npdt", cleaned, re.IGNORECASE):
+                    continue
+                # Exclude decimal quantity+unit specification tokens (e.g., 9A, 100mA, 5VA, 24V)
+                if re.fullmatch(r"\d+(?:\.\d+)?(?:A|VA|V|W|HZ|KW|MA)\d*", cleaned, re.IGNORECASE):
+                    continue
+                return cleaned
+            # Allow numeric-only MPNs (e.g., Phoenix Contact 2900364) when long enough
+            elif cleaned.isdigit() and len(cleaned) >= 5:
                 return cleaned
             elif re.search(r"^[A-Z]{2,}\-[0-9]+[A-Z0-9\-]*$", cleaned):
                 return cleaned

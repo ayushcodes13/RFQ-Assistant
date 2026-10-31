@@ -29,6 +29,7 @@ __pycache__/
 # JavaScript
 node_modules/
 .next/
+.next-e2e/
 dist/
 coverage/
 frontend/AGENTS.md

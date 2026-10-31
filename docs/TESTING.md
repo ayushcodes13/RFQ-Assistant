@@ -64,7 +64,7 @@ available after the original manager objects are discarded.
 
 **Contract:** `frontend/openapi.json` is checked in and verified against the live FastAPI app by `tests/test_openapi_contract.py`. Frontend wire types are generated from that schema with `npm run gen:types`; `npm run check:types` fails CI if the generated file is stale.
 
-**Browser E2E:** one deterministic Playwright happy path (`frontend/e2e/happy-path.spec.ts`) pastes a synthetic RFQ, extracts exact-match lines, approves every line, confirms the case status changes from needs-review to ready, confirms the export dialog uses the refreshed status, generates a draft worksheet, and downloads it. It runs against a real FastAPI process and the Next.js dev server. It proves the UI/backend contract for that path only; it is not an accuracy benchmark.
+**Browser E2E:** the Playwright suite uses isolated FastAPI and Next.js processes with temporary storage. It covers synthetic intake, review/sample approval, draft export and safety boundaries; these paths prove UI/backend behavior only and are not accuracy benchmarks.
 
 ## Local synthetic verification — 2026-10-31
 
@@ -74,9 +74,9 @@ Run the reproducible API corpus from the repository root with:
 .venv/bin/python -m scripts.run_synthetic_e2e_corpus
 ```
 
-The runner creates isolated temporary SQLite, upload, and export state, then exercises 30 synthetic documents through intake, extraction, source retrieval, exact catalog validation, review, CSV/XLSX export, download, and audit verification. The corpus contains 8 pasted-text RFQs, 8 CSVs, 7 generated XLSX files, and 7 native PDFs. After correcting a PDF MPN extraction defect, all 30 full flows passed in 1.80 seconds (median 32.6 ms per document; maximum 74.3 ms in this run). It then issued 128 concurrent synthetic case-creation requests using 16 workers; all 128 succeeded with unique case IDs in 0.74 seconds. Results are local engineering evidence only, not a representative customer accuracy or production capacity benchmark. The seven PDFs reuse one existing synthetic PDF fixture, and the concurrency phase stresses intake only, not simultaneous review/export or multi-user authorization.
+The runner creates isolated temporary SQLite, upload, and export state, then exercises 30 synthetic documents through intake, extraction, source retrieval, exact catalog validation, review, CSV/XLSX export, download, and audit verification. The corpus contains 8 pasted-text RFQs, 8 CSVs, 7 generated XLSX files, and 7 native PDFs. In the latest run, all 30 full flows passed in 1.39 seconds (median 28.3 ms per document; maximum 47.6 ms). It then issued 128 concurrent synthetic case-creation requests using 16 workers; all 128 succeeded with unique case IDs in 0.50 seconds. Results are local engineering evidence only, not a representative customer accuracy or production capacity benchmark. The seven PDFs reuse one existing synthetic PDF fixture. Separate legacy XLS tests cover conversion controls and upload-to-match flow, with an additional real LibreOffice round-trip on synthetic data. The concurrency phase stresses intake only, not simultaneous review/export or multi-user authorization.
 
-The full Python suite passed (148 tests), and the Playwright happy path passed (1 test). The frontend production build, OpenAPI type check, and ESLint pass. CI now runs all three frontend checks so lint regressions are caught before merge.
+Latest local verification for this work: the full Python suite passed (**319 tests**, 6 dependency deprecation warnings); `npm run lint`, `npx tsc --noEmit`, and the PR CI production build passed; isolated Playwright browser E2E passed **7/7** on synthetic local services. The synthetic API corpus passed **30/30** full flows; its latest timing details are recorded in `docs/EXTRACTION_AND_PERFORMANCE_AUDIT.md`. These synthetic results are not customer accuracy or production load evidence.
 
 **Security:** dangerous uploads, oversized sheets, path traversal, prompt injection, tenant isolation, retention/deletion and leaked logs.
 

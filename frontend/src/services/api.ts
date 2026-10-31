@@ -7,6 +7,7 @@ import {
   RFQCase,
   RFQLineItem,
   RFQLineItemUpdate,
+  ReviewPlan,
 } from "@/types";
 
 const API_BASE = "/api/proxy";
@@ -89,6 +90,21 @@ export async function batchReviewLines(
     "POST",
     request,
     "Batch review failed"
+  );
+}
+
+export async function getReviewPlan(caseId: string): Promise<ReviewPlan> {
+  return getJson<ReviewPlan>(`/api/rfqs/${caseId}/review-plan`, "Failed to load review plan");
+}
+
+export async function approveRemainingValidatedLines(
+  caseId: string
+): Promise<{ status: string; updated_count: number }> {
+  return sendJson<{ status: string; updated_count: number }>(
+    `/api/rfqs/${caseId}/review-plan/approve-remaining`,
+    "POST",
+    {},
+    "Batch approval failed"
   );
 }
 

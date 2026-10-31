@@ -19,6 +19,14 @@ class DocumentStorage:
         case_dir = self.uploads_dir / case_id
         case_dir.mkdir(parents=True, exist_ok=True)
         file_path = case_dir / filename
+        # Defense-in-depth: ensure the resolved path stays within the case directory
+        # to prevent path traversal even if caller forgets to sanitize the filename.
+        resolved = file_path.resolve()
+        resolved_case_dir = case_dir.resolve()
+        try:
+            resolved.relative_to(resolved_case_dir)
+        except ValueError:
+            raise ValueError(f"Path traversal blocked for filename: {filename}")
         file_path.write_bytes(content)
         return file_path
 

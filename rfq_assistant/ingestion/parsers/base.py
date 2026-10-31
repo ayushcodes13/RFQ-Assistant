@@ -6,6 +6,17 @@ from pydantic import BaseModel, Field
 
 from rfq_assistant.schemas.models import ExtractionWarning, SourceLocator
 
+MAX_CANDIDATE_REGIONS = 500
+
+
+class EvidenceSegment(BaseModel):
+    """Bounded source text retained for a later model fallback."""
+
+    segment_id: str
+    locator: SourceLocator
+    text: str
+    warnings: List[ExtractionWarning] = Field(default_factory=list)
+
 
 class ParsedLineDraft(BaseModel):
     """An extracted candidate line draft with source locator and extracted fields."""
@@ -18,6 +29,9 @@ class ParsedLineDraft(BaseModel):
     quantity: Optional[float] = None
     unit: Optional[str] = "EA"
     notes: Optional[str] = None
+    # Internal link used only while merging a grounded model fallback with a
+    # deterministic candidate. It is not copied into the persisted RFQ schema.
+    source_segment_id: Optional[str] = None
     extraction_warnings: List[ExtractionWarning] = Field(default_factory=list)
 
 
@@ -26,11 +40,24 @@ class ParsedDocumentResult(BaseModel):
     lines: List[ParsedLineDraft]
     warnings: List[ExtractionWarning] = Field(default_factory=list)
     total_lines_detected: int = 0
+    evidence_segments: List[EvidenceSegment] = Field(default_factory=list)
+    # Non-empty regions that the deterministic parser could not confidently
+    # classify. They must reach grounded fallback or become explicit review rows.
+    candidate_segments: List[EvidenceSegment] = Field(default_factory=list)
 
 
 class DocumentParserError(Exception):
     """Base exception for parsing failures."""
     pass
+
+
+def enforce_candidate_region_limit(segments: List[EvidenceSegment]) -> None:
+    """Fail explicitly rather than create an unbounded manual-review queue."""
+    if len(segments) > MAX_CANDIDATE_REGIONS:
+        raise DocumentParserError(
+            f"Document contains more than {MAX_CANDIDATE_REGIONS} unresolved non-empty regions. "
+            "Split the source into smaller files or use manual review; the original upload is retained."
+        )
 
 
 class BaseDocumentParser(ABC):

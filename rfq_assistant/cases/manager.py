@@ -1,5 +1,10 @@
 """Case lifecycle manager with audit logging and state tracking."""
 
+import hashlib
+import logging
+import math
+import threading
+import time
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -10,6 +15,12 @@ from rfq_assistant.ingestion import (
     get_parser,
     validate_file_upload,
 )
+from rfq_assistant.ingestion.ai_extraction import (
+    EvidenceSegment,
+    GroundedLLMExtractor,
+)
+from rfq_assistant.ingestion.parsers.base import ParsedDocumentResult, ParsedLineDraft
+from rfq_assistant.ingestion.source_segments import source_segments
 from rfq_assistant.matching import CatalogRepository, ExactMatchEngine
 from rfq_assistant.quotation.line_rules import blocking_line_issues
 from rfq_assistant.persistence import SQLiteStateStore
@@ -29,10 +40,16 @@ from rfq_assistant.schemas.models import (
     RFQCase,
     RFQLineItem,
     RFQLineItemUpdate,
+    ReviewPlan,
     SourceFileMetadata,
     SourceLocator,
 )
 
+log = logging.getLogger(__name__)
+
+
+class IngestionLeaseLostError(RuntimeError):
+    """Raised when a worker no longer owns the processing lease for a case."""
 
 
 class CaseManager:
@@ -43,16 +60,20 @@ class CaseManager:
         catalog: CatalogRepository,
         storage: Optional[DocumentStorage] = None,
         state_store: Optional[SQLiteStateStore] = None,
+        llm_extractor: Optional[GroundedLLMExtractor] = None,
     ):
         self.catalog = catalog
         self.storage = storage or DocumentStorage()
         self.state_store = state_store
+        self.llm_extractor = llm_extractor
         self.matcher = ExactMatchEngine(self.catalog)
 
         # Runtime caches backed by SQLite when persistence is configured.
         self._cases: Dict[str, RFQCase] = {}
         self._lines_by_case: Dict[str, List[RFQLineItem]] = {}
         self._audit_events: Dict[str, List[AuditEvent]] = {}
+        self._processing_locks: Dict[str, threading.Lock] = {}
+        self._processing_locks_guard = threading.Lock()
         if self.state_store:
             for payload in self.state_store.load_cases():
                 case = RFQCase.model_validate(payload)
@@ -83,45 +104,134 @@ class CaseManager:
         title: Optional[str] = None,
         customer_label: Optional[str] = None,
         actor: str = "Inside Sales",
+        _defer_processing: bool = False,
+        _existing_case_id: Optional[str] = None,
+        _job_id: Optional[str] = None,
+        _worker_id: Optional[str] = None,
     ) -> RFQCase:
-        """Validates, stores, parses, and matches an uploaded RFQ document."""
+        """Validates, stores, parses, and matches an uploaded RFQ document.
+
+        The underscored options are internal worker hooks: defer leaves a durable
+        PROCESSING case for the queue; existing_case_id resumes that exact case.
+        """
+        total_started = time.perf_counter()
+        timings = {"validate_ms": 0.0, "store_ms": 0.0, "parse_ms": 0.0, "llm_ms": 0.0, "match_ms": 0.0}
+        if bool(_job_id) != bool(_worker_id):
+            raise ValueError("Both ingestion job ID and worker ID are required for a fenced processing attempt.")
+
+        def require_lease() -> None:
+            if _job_id and self.state_store and not self.state_store.owns_ingestion_job(_job_id, _worker_id):
+                raise IngestionLeaseLostError("This worker no longer owns the RFQ processing lease.")
+
+        stage_started = time.perf_counter()
         clean_name, src_type, digest = validate_file_upload(filename, content)
-        case_id = f"RFQ-{uuid.uuid4().hex[:8].upper()}"
+        timings["validate_ms"] = (time.perf_counter() - stage_started) * 1000
+        if _existing_case_id:
+            case_id = _existing_case_id
+            case = self._cases.get(case_id)
+            if case is None:
+                raise DocumentParserError("The queued RFQ case no longer exists.")
+            if case.status != CaseStatus.PROCESSING:
+                return case
+            if not case.source_file or case.source_file.sha256_digest != digest:
+                raise DocumentParserError("Stored upload digest does not match the queued RFQ source.")
+        else:
+            case_id = f"RFQ-{uuid.uuid4().hex[:8].upper()}"
+            stage_started = time.perf_counter()
+            self.storage.save_file(case_id, clean_name, content)
+            timings["store_ms"] = (time.perf_counter() - stage_started) * 1000
+            file_meta = SourceFileMetadata(
+                file_id=f"file-{uuid.uuid4().hex[:6]}",
+                file_name=clean_name,
+                source_type=src_type,
+                mime_type="application/octet-stream",
+                size_bytes=len(content),
+                sha256_digest=digest,
+            )
+            case = RFQCase(
+                case_id=case_id,
+                title=title or f"RFQ Intake - {clean_name}",
+                customer_label=customer_label,
+                status=CaseStatus.PROCESSING,
+                source_type=src_type,
+                source_file=file_meta,
+            )
+            self._cases[case_id] = case
+            self._audit_events[case_id] = []
+            self._record_audit(
+                case_id=case_id,
+                actor=actor,
+                action=AuditAction.CASE_CREATED,
+                notes=f"Uploaded document '{clean_name}' (SHA256: {digest[:8]}...)",
+            )
 
-        # Persist original document
-        self.storage.save_file(case_id, clean_name, content)
-
-        file_meta = SourceFileMetadata(
-            file_id=f"file-{uuid.uuid4().hex[:6]}",
-            file_name=clean_name,
-            source_type=src_type,
-            mime_type="application/octet-stream",
-            size_bytes=len(content),
-            sha256_digest=digest,
-        )
-
-        case = RFQCase(
-            case_id=case_id,
-            title=title or f"RFQ Intake - {clean_name}",
-            customer_label=customer_label,
-            status=CaseStatus.PROCESSING,
-            source_type=src_type,
-            source_file=file_meta,
-        )
-        self._cases[case_id] = case
-        self._audit_events[case_id] = []
-
-        self._record_audit(
-            case_id=case_id,
-            actor=actor,
-            action=AuditAction.CASE_CREATED,
-            notes=f"Uploaded document '{clean_name}' (SHA256: {digest[:8]}...)",
-        )
+        if _defer_processing:
+            self._persist_case(case_id)
+            return case
 
         try:
+            require_lease()
             # Parse document
             parser = get_parser(src_type)
-            parse_result = parser.parse(content, clean_name)
+            stage_started = time.perf_counter()
+            try:
+                parse_result = parser.parse(content, clean_name)
+            finally:
+                timings["parse_ms"] = (time.perf_counter() - stage_started) * 1000
+            require_lease()
+            if self.llm_extractor and self._needs_llm_fallback(parse_result):
+                stage_started = time.perf_counter()
+                try:
+                    require_lease()
+                    segments = self._llm_segments(
+                        parse_result.lines, content, clean_name, src_type,
+                        parse_result.evidence_segments,
+                        parse_result.candidate_segments,
+                    )
+                    llm_result = self.llm_extractor.extract(segments)
+                    require_lease()
+                    if llm_result.lines or parse_result.candidate_segments:
+                        parse_result = self._merge_llm_proposals(
+                            parse_result, llm_result, parse_result.candidate_segments
+                        )
+                    elif parse_result.lines:
+                        # Preserve deterministic rows and surface the model
+                        # failure on unresolved rows; never silently downgrade.
+                        for draft in parse_result.lines:
+                            if self._draft_needs_llm(draft):
+                                draft.extraction_warnings.extend(llm_result.warnings)
+                    else:
+                        parse_result.warnings.extend(llm_result.warnings)
+                except Exception:
+                    # Provider/network failures do not discard deterministic
+                    # output. Unresolved rows remain flagged for manual work.
+                    warning = ExtractionWarning(
+                        code="LLM_FALLBACK_UNAVAILABLE",
+                        message="The extraction assistant could not be reached. Verify unresolved fields against the original source.",
+                        severity="warning",
+                    )
+                    if parse_result.candidate_segments:
+                        failed = ParsedDocumentResult(lines=[], warnings=[warning])
+                        parse_result = self._merge_llm_proposals(
+                            parse_result, failed, parse_result.candidate_segments
+                        )
+                    else:
+                        for draft in parse_result.lines:
+                            if self._draft_needs_llm(draft):
+                                draft.extraction_warnings.append(warning)
+                    if not parse_result.lines:
+                        parse_result.warnings.append(warning)
+                finally:
+                    timings["llm_ms"] = (time.perf_counter() - stage_started) * 1000
+            elif parse_result.candidate_segments:
+                # Never silently discard a non-empty source region that the
+                # deterministic parser could not classify. Without an enabled
+                # model, preserve it as a human-review exception.
+                parse_result = self._merge_llm_proposals(
+                    parse_result,
+                    ParsedDocumentResult(lines=[]),
+                    parse_result.candidate_segments,
+                )
             # A "successful" empty RFQ is worse than an explicit parse failure:
             # operators might otherwise export an empty worksheet as complete.
             if not parse_result.lines:
@@ -133,16 +243,23 @@ class CaseManager:
                 raise DocumentParserError(
                     "Document extraction failed: " + "; ".join(w.message for w in fatal_warnings)
                 )
+            require_lease()
+            case.document_warnings = parse_result.warnings
 
             # Match lines against catalog
             lines: List[RFQLineItem] = []
+            stage_started = time.perf_counter()
             for draft in parse_result.lines:
                 line_id = f"line-{uuid.uuid4().hex[:8]}"
                 match_res = self.matcher.match_line(draft.requested_mpn, draft.requested_manufacturer)
 
+                reviewable_warnings = [
+                    warning for warning in draft.extraction_warnings
+                    if warning.code != "LLM_PROPOSED_EXTRACTION"
+                ]
                 extract_status = (
                     ExtractionStatus.NEEDS_CORRECTION
-                    if draft.extraction_warnings or draft.quantity is None
+                    if reviewable_warnings or draft.quantity is None
                     else ExtractionStatus.EXTRACTED
                 )
 
@@ -166,6 +283,7 @@ class CaseManager:
                     review_decision=ReviewDecision.PENDING,
                 )
                 lines.append(line_item)
+            timings["match_ms"] = (time.perf_counter() - stage_started) * 1000
 
             self._lines_by_case[case_id] = lines
             self._record_audit(
@@ -175,15 +293,259 @@ class CaseManager:
                 notes=f"Extracted {len(lines)} line items with {len(parse_result.warnings)} document-level warnings.",
             )
 
-            self._refresh_case_metrics(case_id)
+            self._refresh_case_metrics(case_id, job_id=_job_id, worker_id=_worker_id)
+            log.info(
+                "[rfq_timing] source_type=%s outcome=parsed lines=%d validate_ms=%.1f store_ms=%.1f parse_ms=%.1f llm_ms=%.1f match_ms=%.1f total_ms=%.1f",
+                src_type.value, len(lines), timings["validate_ms"], timings["store_ms"],
+                timings["parse_ms"], timings["llm_ms"], timings["match_ms"],
+                (time.perf_counter() - total_started) * 1000,
+            )
             return self._cases[case_id]
+        except DocumentParserError as exc:
+            # Keep the original upload and a failed case so a reviewer can
+            # inspect it or use the manual-entry path after OCR/model/parser
+            # failures. Do not turn a processing failure into a lost upload.
+            failed_case = self._cases[case_id]
+            failed_case.status = CaseStatus.FAILED
+            failed_case.document_warnings.append(ExtractionWarning(
+                code="DOCUMENT_EXTRACTION_FAILED",
+                message=str(exc),
+                severity="error",
+            ))
+            self._lines_by_case[case_id] = []
+            self._record_audit(
+                case_id=case_id,
+                actor=actor,
+                action=AuditAction.PARSED,
+                notes="Document extraction failed; original upload retained for manual review.",
+            )
+            self._persist_case(case_id, job_id=_job_id, worker_id=_worker_id)
+            log.info(
+                "[rfq_timing] source_type=%s outcome=failed validate_ms=%.1f store_ms=%.1f parse_ms=%.1f llm_ms=%.1f total_ms=%.1f",
+                src_type.value, timings["validate_ms"], timings["store_ms"], timings["parse_ms"],
+                timings["llm_ms"], (time.perf_counter() - total_started) * 1000,
+            )
+            return failed_case
         except Exception:
-            # Rollback: Clean up stored files and remove partial case record
-            self.storage.delete_case(case_id)
-            self._cases.pop(case_id, None)
-            self._lines_by_case.pop(case_id, None)
-            self._audit_events.pop(case_id, None)
-            raise
+            # Preserve the original for unexpected parser/provider failures. A
+            # queued attempt may be retried; direct callers receive a visible
+            # failed case rather than losing the RFQ bytes.
+            if _existing_case_id:
+                raise
+            failed_case = self._cases[case_id]
+            failed_case.status = CaseStatus.FAILED
+            failed_case.document_warnings.append(ExtractionWarning(
+                code="PROCESSING_UNEXPECTED_ERROR",
+                message="The document could not be processed safely. The original upload is retained for manual review.",
+                severity="error",
+            ))
+            self._lines_by_case[case_id] = []
+            self._record_audit(case_id, actor, AuditAction.PARSED, notes="Unexpected processing failure; original upload retained.")
+            self._persist_case(case_id, job_id=_job_id, worker_id=_worker_id)
+            log.exception("[rfq_timing] processing failed unexpectedly case_id=%s", case_id)
+            return failed_case
+
+    def enqueue_case_from_upload(
+        self, filename: str, content: bytes, title: Optional[str] = None,
+        customer_label: Optional[str] = None, actor: str = "Inside Sales",
+    ) -> RFQCase:
+        """Persist the source and case immediately, then enqueue durable processing."""
+        if self.state_store is None:
+            raise RuntimeError("Asynchronous RFQ processing requires the SQLite state store.")
+        case = self.create_case_from_upload(
+            filename, content, title=title, customer_label=customer_label,
+            actor=actor, _defer_processing=True,
+        )
+        self.state_store.enqueue_ingestion_job(case.case_id, case.source_file.sha256_digest)
+        return case
+
+    def enqueue_case_from_text(
+        self, raw_text: str, title: Optional[str] = None,
+        customer_label: Optional[str] = None, actor: str = "Inside Sales",
+    ) -> RFQCase:
+        """Durably store pasted email text as a case-scoped source before queueing it."""
+        content = raw_text.encode("utf-8")
+        case = self.enqueue_case_from_upload(
+            "pasted_inquiry.txt", content, title=title or "RFQ Intake - Pasted Email",
+            customer_label=customer_label, actor=actor,
+        )
+        case.source_type = SourceType.EMAIL_TEXT
+        case.raw_text = raw_text
+        self._persist_case(case.case_id)
+        return case
+
+    def process_pending_case(self, case_id: str, *, job_id: str, worker_id: str) -> RFQCase:
+        """Resume a persisted case only while its state is still PROCESSING."""
+        with self._processing_locks_guard:
+            case_lock = self._processing_locks.setdefault(case_id, threading.Lock())
+        # A job can be reclaimed after a lease expires while its old parser is
+        # still unwinding. Serialize the case in memory, then recheck ownership
+        # before starting or committing the second attempt.
+        with case_lock:
+            if self.state_store and not self.state_store.owns_ingestion_job(job_id, worker_id):
+                raise IngestionLeaseLostError("This worker no longer owns the RFQ processing lease.")
+            return self._process_pending_case_locked(case_id, job_id=job_id, worker_id=worker_id)
+
+    def _process_pending_case_locked(self, case_id: str, *, job_id: str, worker_id: str) -> RFQCase:
+        case = self._cases.get(case_id)
+        if case is None or not case.source_file:
+            raise DocumentParserError("Queued RFQ source is missing.")
+        if case.status != CaseStatus.PROCESSING:
+            return case
+        content = self.storage.get_file(case_id, case.source_file.file_name)
+        if content is None:
+            raise DocumentParserError("Queued RFQ upload is missing from local storage.")
+        result = self.create_case_from_upload(
+            filename=case.source_file.file_name,
+            content=content,
+            title=case.title,
+            customer_label=case.customer_label,
+            actor="RFQ ingestion worker",
+            _existing_case_id=case_id,
+            _job_id=job_id,
+            _worker_id=worker_id,
+        )
+        if result.source_type == SourceType.EMAIL_TEXT:
+            result.raw_text = content.decode("utf-8", errors="replace")
+            self._persist_case(case_id, job_id=job_id, worker_id=worker_id)
+        return result
+
+    def mark_case_processing_failed(self, case_id: str, error_code: str = "WORKER_RETRIES_EXHAUSTED") -> None:
+        case = self._cases.get(case_id)
+        if case is None or case.status != CaseStatus.PROCESSING:
+            return
+        case.status = CaseStatus.FAILED
+        case.document_warnings.append(ExtractionWarning(
+            code=error_code,
+            message="Background document processing stopped after its retry limit. The original upload is retained for manual review.",
+            severity="error",
+        ))
+        self._lines_by_case[case_id] = []
+        self._record_audit(case_id, "RFQ ingestion worker", AuditAction.PARSED,
+                           notes="Background processing stopped; source retained for manual review.")
+        self._persist_case(case_id)
+
+    @staticmethod
+    def _draft_needs_llm(draft) -> bool:
+        return not draft.requested_mpn or not draft.requested_manufacturer or draft.quantity is None
+
+    @classmethod
+    def _needs_llm_fallback(cls, parse_result) -> bool:
+        return (
+            not parse_result.lines
+            or bool(parse_result.candidate_segments)
+            or any(cls._draft_needs_llm(draft) for draft in parse_result.lines)
+        )
+
+    @staticmethod
+    def _llm_segments(
+        drafts, content: bytes, filename: str, source_type: SourceType,
+        evidence_segments: Optional[List[EvidenceSegment]] = None,
+        candidate_segments: Optional[List[EvidenceSegment]] = None,
+    ) -> List[EvidenceSegment]:
+        if not drafts:
+            if candidate_segments:
+                return candidate_segments
+            if evidence_segments:
+                return evidence_segments
+            return source_segments(content, filename, source_type)
+        # Send only uncertain rows to the model. This limits latency and data
+        # disclosure while preserving the exact row/page location.
+        unresolved = [
+            EvidenceSegment(
+                segment_id=f"draft-line-{draft.line_number}",
+                locator=draft.source_locator,
+                text=draft.raw_text,
+            )
+            for draft in drafts if CaseManager._draft_needs_llm(draft)
+        ]
+        return [*unresolved, *(candidate_segments or [])]
+
+    @staticmethod
+    def _merge_llm_proposals(parse_result, llm_result, candidate_segments=None):
+        output = []
+        candidate_segments = candidate_segments or []
+        candidates_by_id = {segment.segment_id: segment for segment in candidate_segments}
+        represented_candidates = set()
+        repair_warning = next(
+            (warning for warning in llm_result.warnings if warning.code == "LLM_REPAIR_USED"),
+            None,
+        )
+        drafts_by_segment = {
+            f"draft-line-{draft.line_number}": draft for draft in parse_result.lines
+        }
+        for proposal in llm_result.lines:
+            if repair_warning:
+                proposal.extraction_warnings.append(repair_warning.model_copy(deep=True))
+            target = drafts_by_segment.get(proposal.source_segment_id or "")
+            if target is not None:
+                for field in ("requested_mpn", "requested_manufacturer", "description", "quantity", "unit"):
+                    if getattr(target, field) in (None, "") and getattr(proposal, field) not in (None, ""):
+                        setattr(target, field, getattr(proposal, field))
+                target.extraction_warnings.extend(proposal.extraction_warnings)
+            elif proposal.source_segment_id in candidates_by_id:
+                proposal.line_number = max(
+                    [draft.line_number for draft in parse_result.lines] +
+                    [draft.line_number for draft in output] + [0]
+                ) + 1
+                output.append(proposal)
+                represented_candidates.add(proposal.source_segment_id)
+            elif parse_result.lines:
+                # A focused fallback cannot create a duplicate row when its
+                # evidence quote does not map back to the unresolved source row.
+                continue
+            else:
+                # Whole-document fallback: model lines are accepted only with
+                # verified source quotes and retain the LLM review warning.
+                output.append(proposal)
+        for segment in candidate_segments:
+            if segment.segment_id in represented_candidates:
+                continue
+            next_line_number = max(
+                [draft.line_number for draft in parse_result.lines] +
+                [draft.line_number for draft in output] + [0]
+            ) + 1
+            output.append(ParsedLineDraft(
+                line_number=next_line_number,
+                raw_text=segment.text,
+                source_locator=segment.locator.model_copy(
+                    update={"text_snippet": segment.text[:120]}
+                ),
+                unit="EA",
+                extraction_warnings=[
+                    *[warning.model_copy(deep=True) for warning in segment.warnings],
+                    *[warning.model_copy(deep=True) for warning in llm_result.warnings],
+                    ExtractionWarning(
+                        code="SOURCE_REGION_UNCLASSIFIED",
+                        message="This non-empty source region was not confidently converted into a line item. Review it against the original before exporting.",
+                        severity="warning",
+                    ),
+                ],
+            ))
+            parse_result.warnings.append(ExtractionWarning(
+                code="SOURCE_COVERAGE_REQUIRES_REVIEW",
+                message="One or more non-empty source regions could not be classified automatically and were added to the individual review list.",
+                severity="warning",
+            ))
+        parse_result.lines.extend(output)
+        if parse_result.lines:
+            # Parsers may report that deterministic extraction found no rows
+            # before the grounded fallback has processed candidate regions.
+            # Once those regions are either recovered or retained for review,
+            # that earlier empty-result error is stale.
+            parse_result.warnings = [
+                warning for warning in parse_result.warnings
+                if warning.code != "NO_LINES_EXTRACTED"
+            ]
+        # A failed LLM fallback is attached to unresolved/coverage rows, but it
+        # must not erase structured rows that already passed deterministic
+        # extraction. Whole-document failure remains visible when no rows exist.
+        parse_result.warnings.extend(
+            warning for warning in llm_result.warnings
+            if warning.severity.lower() != "error" or not parse_result.lines
+        )
+        parse_result.total_lines_detected = len(parse_result.lines)
+        return parse_result
 
 
     def create_case_from_text(
@@ -383,7 +745,14 @@ class CaseManager:
 
 
     def batch_review(self, case_id: str, request: BatchReviewRequest) -> int:
-        """Applies batch decision to specified lines."""
+        """Batch decisions are limited to the server-selected clean sample."""
+        if request.decision == ReviewDecision.APPROVED:
+            plan = self.get_review_plan(case_id)
+            allowed = set(plan.sample_line_ids)
+            if not set(request.line_ids) <= allowed:
+                raise ValueError(
+                    "Batch approval may only cover the current review sample. Review exceptions individually."
+                )
         updated = 0
         for lid in request.line_ids:
             upd = RFQLineItemUpdate(
@@ -393,6 +762,143 @@ class CaseManager:
             )
             if self.update_line(case_id, lid, upd):
                 updated += 1
+        return updated
+
+    @staticmethod
+    def _is_sample_eligible(line: RFQLineItem, catalog: CatalogRepository) -> bool:
+        """Rows may enter the sample only after deterministic evidence gates pass."""
+        try:
+            quantity_ok = line.quantity is not None and math.isfinite(float(line.quantity)) and line.quantity > 0
+        except (TypeError, ValueError, OverflowError):
+            quantity_ok = False
+        if not quantity_ok or not line.unit or not line.unit.strip():
+            return False
+        if not line.requested_mpn or not line.requested_manufacturer:
+            return False
+        if line.match_status != MatchStatus.EXACT_MATCH or not line.selected_catalog_sku:
+            return False
+        if catalog.get_by_sku(line.selected_catalog_sku) is None:
+            return False
+        if line.extraction_status != ExtractionStatus.EXTRACTED:
+            return False
+        # A schema- and source-grounded model proposal is eligible for sampling;
+        # OCR, guessed layouts, formulas, and unresolved warnings remain exceptions.
+        return all(w.code == "LLM_PROPOSED_EXTRACTION" for w in line.extraction_warnings)
+
+    @staticmethod
+    def _sample_group(line: RFQLineItem) -> str:
+        locator = line.source_locator
+        location = locator.sheet_name or (f"page-{locator.page_number}" if locator.page_number else "text")
+        extraction_path = (
+            "llm" if any(w.code == "LLM_PROPOSED_EXTRACTION" for w in line.extraction_warnings)
+            else "structured"
+        )
+        return f"{extraction_path}|{location}"
+
+    def get_review_plan(self, case_id: str) -> ReviewPlan:
+        case = self._cases.get(case_id)
+        if case is None:
+            raise ValueError("RFQ case not found.")
+        lines = self._lines_by_case.get(case_id, [])
+        eligible = [line for line in lines if self._is_sample_eligible(line, self.catalog)]
+        eligible_ids = {line.line_id for line in eligible}
+        exceptions = [line.line_id for line in lines if line.line_id not in eligible_ids]
+
+        sample_size = min(5, len(eligible))
+        groups: Dict[str, List[RFQLineItem]] = {}
+        for line in eligible:
+            groups.setdefault(self._sample_group(line), []).append(line)
+        for group_lines in groups.values():
+            # Rank rows by a per-case pseudorandom key. The case ID is freshly
+            # generated for each intake, so separate RFQs get different samples;
+            # the ranking stays fixed while this case is reviewed. This avoids
+            # repeatedly sampling only the middle rows of similarly shaped files.
+            group_lines.sort(key=lambda line: hashlib.sha256(
+                f"{case.case_id}:{line.line_id}".encode("utf-8")
+            ).digest())
+
+        # Allocate at least one sample to every location/path stratum where
+        # possible; distribute remaining picks across larger strata.
+        group_keys = sorted(groups)
+        allocation = {key: 0 for key in group_keys}
+        if len(group_keys) <= sample_size:
+            for key in group_keys:
+                allocation[key] = 1
+            while sum(allocation.values()) < sample_size:
+                available = [key for key in group_keys if allocation[key] < len(groups[key])]
+                if not available:
+                    break
+                key = max(available, key=lambda item: (len(groups[item]) / (allocation[item] + 1), item))
+                allocation[key] += 1
+        elif sample_size:
+            # More strata than slots: spread picks across the stable stratum order.
+            indexes = [min(len(group_keys) - 1, int((slot + 0.5) * len(group_keys) / sample_size))
+                       for slot in range(sample_size)]
+            for index in indexes:
+                allocation[group_keys[index]] = 1
+
+        sample_ids: List[str] = []
+        for key in group_keys:
+            group_lines = groups[key]
+            count = allocation[key]
+            sample_ids.extend(line.line_id for line in group_lines[:count])
+        sample_ids = sample_ids[:sample_size]
+        sampled = set(sample_ids)
+        remaining = [
+            line.line_id for line in eligible
+            if line.line_id not in sampled and line.review_decision != ReviewDecision.APPROVED
+        ]
+        sample_approved = bool(sample_ids) and all(
+            next(line for line in eligible if line.line_id == line_id).review_decision == ReviewDecision.APPROVED
+            for line_id in sample_ids
+        )
+        sample_set = set(sample_ids)
+        sample_correction_found = any(
+            event.line_id in sample_set and event.action == AuditAction.LINE_EDITED
+            for event in self._audit_events.get(case_id, [])
+        )
+        return ReviewPlan(
+            case_id=case_id,
+            total_lines=len(lines),
+            exception_line_ids=exceptions,
+            sample_line_ids=sample_ids,
+            remaining_line_ids=remaining,
+            sample_approved=sample_approved,
+            sample_correction_found=sample_correction_found,
+            can_batch_approve=sample_approved and not sample_correction_found and bool(remaining),
+        )
+
+    def approve_remaining_clean(self, case_id: str, actor: str) -> int:
+        """Approve only clean non-sample rows after every sampled row is approved."""
+        plan = self.get_review_plan(case_id)
+        if plan.sample_correction_found:
+            raise ValueError("A sampled row needed correction. Review the remaining clean rows individually.")
+        if not plan.sample_approved:
+            raise ValueError("Approve every sampled row before batch-approving the remaining validated rows.")
+        now = datetime.utcnow()
+        remaining_ids = set(plan.remaining_line_ids)
+        updated = 0
+        for line in self._lines_by_case.get(case_id, []):
+            if line.line_id not in remaining_ids:
+                continue
+            old_decision = line.review_decision
+            line.review_decision = ReviewDecision.APPROVED
+            line.reviewed_by = actor
+            line.reviewed_at = now
+            line.version += 1
+            self._record_audit(
+                case_id=case_id,
+                line_id=line.line_id,
+                actor=actor,
+                action=AuditAction.LINE_APPROVED,
+                field_name="review_decision",
+                old_value=old_decision.value,
+                new_value=ReviewDecision.APPROVED.value,
+                notes="Batch-approved after the case's risk-based review sample was approved.",
+            )
+            updated += 1
+        if updated:
+            self._refresh_case_metrics(case_id)
         return updated
 
     def delete_case(self, case_id: str) -> bool:
@@ -407,7 +913,9 @@ class CaseManager:
             return True
         return False
 
-    def _refresh_case_metrics(self, case_id: str):
+    def _refresh_case_metrics(
+        self, case_id: str, *, job_id: Optional[str] = None, worker_id: Optional[str] = None
+    ):
         case = self._cases.get(case_id)
         if not case:
             return
@@ -424,15 +932,34 @@ class CaseManager:
             case.status = CaseStatus.READY_TO_EXPORT
         else:
             case.status = CaseStatus.NEEDS_REVIEW
-        self._persist_case(case_id)
+        self._persist_case(case_id, job_id=job_id, worker_id=worker_id)
 
-    def _persist_case(self, case_id: str) -> None:
+    def _persist_case(
+        self, case_id: str, *, job_id: Optional[str] = None, worker_id: Optional[str] = None
+    ) -> None:
         if self.state_store and case_id in self._cases:
-            self.state_store.save_case_snapshot(
-                self._cases[case_id],
-                self._lines_by_case.get(case_id, []),
-                self._audit_events.get(case_id, []),
-            )
+            case = self._cases[case_id]
+            lines = self._lines_by_case.get(case_id, [])
+            events = self._audit_events.get(case_id, [])
+            if job_id and worker_id:
+                saved = self.state_store.save_case_snapshot_if_job_owned(
+                    case, lines, events, job_id, worker_id
+                )
+                if not saved:
+                    snapshot = self.state_store.load_case_snapshot(case_id)
+                    if snapshot:
+                        self._cases[case_id] = RFQCase.model_validate(snapshot["case"])
+                        self._lines_by_case[case_id] = [
+                            RFQLineItem.model_validate(item) for item in snapshot["lines"]
+                        ]
+                        self._audit_events[case_id] = [
+                            AuditEvent.model_validate(item) for item in snapshot["events"]
+                        ]
+                    raise IngestionLeaseLostError(
+                        "This worker lost its RFQ lease before it could commit the result."
+                    )
+            else:
+                self.state_store.save_case_snapshot(case, lines, events)
 
     def _record_audit(
         self,

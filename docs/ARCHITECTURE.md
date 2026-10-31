@@ -1,45 +1,77 @@
-# Lean technical architecture
+# RFQ Assistant technical architecture
 
-This is a **proposed** implementation, not a claim that the app exists.
+This file describes the current local prototype and its safety boundary. Its SQLite worker is single-host prototype infrastructure; production deployment still needs shared durable storage and worker operations.
 
 ## Guiding choices
 
 - Keep a small monolith for v0. No orchestration framework or agent swarm.
-- Use deterministic spreadsheet parsing and part-number matching first.
-- Add PDF text/vision extraction only as needed for real fixtures.
+- Use deterministic structured parsing and part-number matching first, with bounded OCR and LLM fallback for difficult input.
+- Preserve the source and provenance through every extraction path.
 - Every transformation must preserve source provenance and uncertainty.
 - Write outputs only after schema and reviewer-state checks.
 
 ## Suggested stack
 
 - Frontend: Next.js / TypeScript and a compact accessible data grid.
-- Backend: Python / FastAPI with Pydantic schemas and background task queue only when required.
+- Backend: Python / FastAPI with Pydantic schemas and a SQLite-backed background ingestion worker for local use.
 - Storage: SQLite for local prototype; PostgreSQL for customer deployments. The local API persists cases, lines, audit events, and catalog rows in `storage/rfq_assistant.sqlite3`; original files and exports remain in local storage directories. Private file storage with per-workspace keys/paths is still required for customer deployments.
-- Data extraction: openpyxl/CSV parser for spreadsheets, text extraction for native PDFs, OCR/vision behind a single optional provider interface for scans.
+- Data extraction: streaming openpyxl/CSV readers for tables, bounded legacy `.xls` conversion through LibreOffice, pypdf row-shaped native PDF text, PyMuPDF image-page triage/rendering, and bounded local Tesseract OCR when available. A Luna-only optional LLM adapter proposes fields for unresolved/unstructured segments.
 - Match service: canonicalized *exact* part number + manufacturer matching over an imported catalog; possible collisions remain unresolved.
 - Export: deterministic XLSX/CSV, quote-preparation template, plain text **unsent** email draft.
 - Auth: local demo clearly labeled; production pilots require authenticated tenant isolation and access controls before any real data.
 
 ## Components
 
-    Web Intake ----> Upload validation ----> File storage
-          |                                    |
-          v                                    v
-    Case state <---- Extraction adapter <---- File parser
-          |
-          v
-    Normalized line-item schema
-          |
-          v
-    Catalog exact-match engine
-          |
-          v
-    Human review / corrections / audit
-          |
-          v
-    Export validator ----> CSV/XLSX + unsent email
+    Browser upload / paste
+             |
+             v
+    MIME/size/macro/malware checks
+             |
+             +----> retain original bytes + digest
+             |
+             v
+    API validates and stores the source, creates a PROCESSING case,
+    and enqueues a durable SQLite job (when async ingestion is enabled)
+             |
+             |
+             v
+    worker claims job with lease/heartbeat and bounded retries
+             |
+     +-------+------------------------+
+     |                                |
+     v                                v
+  CSV/XLSX                         PDF / text
+  streamed rows                    pypdf native text
+  formulas preserved               PyMuPDF image triage/render
+  header inference                 sparse image-page triage
+     |                                |
+     |                           local Tesseract, bounded
+     +----------------+---------------+
+                      |
+                      v
+       deterministic line candidates + unclassified source-region candidates
+                      |
+       unresolved rows/regions --> Luna proposal (optional)
+       no Luna/invalid output --> visible manual-review exception rows
+                      |
+       strict JSON + numeric + verbatim evidence gates
+                      |
+          second LLM consistency pass
+       (LLM fallback rows only; may flag)
+                      |
+                      v
+         exact manufacturer + MPN catalog matching
+                      |
+       exceptions + stratified clean-row sample + audit
+                      |
+                      v
+        sample passes -> explicit remaining-clean batch approval
+        exceptions remain individual -> export blockers -> draft XLSX/CSV
+                                          + unsent email
 
-The initial product must function with a fixture catalog and without an LLM for well-structured CSV/XLSX. If an LLM is used for PDF parsing, its output is treated as untrusted proposals.
+Deterministic parsing is used where columns and values are already explicit because it is cheaper, repeatable, and easier to validate than asking a model to reinterpret structured cells. The optional Luna LLM fallback handles ambiguous or unstructured input. Non-empty PDF text lines, pasted-text lines, and CSV/XLSX rows that do not map to known fields are retained as candidate regions after narrow document/email metadata filters; candidate creation is capped at 500 per document. If Luna is disabled, fails, or omits a candidate, it becomes a visible individual exception row. This improves candidate recall, but it is not yet a formal page/sheet/row coverage ledger: skipped metadata is not recorded per region, spreadsheet content before recognized headers is not fully reconciled, and image/OCR coverage is not summarized in a machine-verifiable manifest. Luna does not replace exact catalog matching or numeric/evidence gates. Its output remains an untrusted proposal. A second Luna call reviews only LLM-extracted rows after deterministic checks; conflict/uncertain results and review-call failures become individual exceptions. This second pass cannot approve anything and does not add cost to already structured rows. Expensive parsing, OCR, and model work run in a background worker when `RFQ_ASYNC_INGEST_ENABLED` is enabled (default on); API creation returns a processing case and the frontend polls for completion. Set the flag to false for synchronous local/test operation. The SQLite job queue uses leases, heartbeats, bounded retries, and startup reconciliation, but it is suitable only for a single host. A multi-host deployment needs a shared queue and database, worker supervision, and operational monitoring.
+
+The review plan classifies every non-clean row as an exception, selects up to five otherwise clean rows across source locations using a per-case stable pseudorandom rank, and leaves the remaining clean rows eligible for explicit batch approval only after the full sample passes without correction. If any sampled row changes, the batch path is disabled for that case. All remaining exceptions require individual review. The sample is a practical review control, not a statistical guarantee of extraction accuracy; customer pilots still need format-specific labeled validation. The local worker runs a configurable, bounded number of claim loops (default two, maximum four). Each final snapshot is committed only while its worker still owns the live lease, preventing an expired worker from overwriting a newer attempt.
 
 ## Minimal proposed record shapes
 
@@ -110,4 +142,4 @@ cd frontend && npm run gen:types
 
 ## Scaling policy
 
-Do **not** build queue infrastructure, pgvector, semantic search, ERP connectors, background crawlers or enterprise multi-tenant billing without evidence they solve the first pilot's bottleneck. Favor the smallest reliable working slice.
+The prototype's single-host SQLite queue is implemented to keep slow document work out of the request path. Do not treat it as multi-host production infrastructure. Before multi-host deployment, move queue/state to shared durable services and add worker supervision, health monitoring, retention/deletion controls, and load testing. Defer pgvector, semantic search, ERP connectors, background crawlers, and enterprise multi-tenant billing until evidence shows they solve a pilot bottleneck.

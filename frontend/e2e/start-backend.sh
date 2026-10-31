@@ -5,6 +5,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
+mkdir -p "${RFQ_ASSISTANT_STORAGE_DIR:-storage}"
+
 if [[ -x .venv/bin/python ]]; then
   PYTHON=.venv/bin/python
 else
@@ -13,5 +15,5 @@ fi
 
 exec "$PYTHON" -m uvicorn rfq_assistant.api.app:app \
   --host 127.0.0.1 \
-  --port 8000 \
+  --port "${RFQ_E2E_BACKEND_PORT:-8000}" \
   --log-level warning

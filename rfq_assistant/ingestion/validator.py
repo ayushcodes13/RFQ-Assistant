@@ -10,7 +10,7 @@ from typing import Tuple
 from rfq_assistant.schemas.enums import SourceType
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB default limit
-ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".pdf", ".txt"}
+ALLOWED_EXTENSIONS = {".csv", ".xls", ".xlsx", ".pdf", ".txt"}
 
 
 class UploadValidationError(Exception):
@@ -62,6 +62,9 @@ def validate_file_upload(filename: str, content: bytes) -> Tuple[str, SourceType
         )
 
     # Inspect zip contents for XLSX to detect embedded VBA macros or decompression bombs
+    if ext == ".xls" and not content.startswith(bytes.fromhex("D0CF11E0A1B11AE1")):
+        raise UploadValidationError("File does not have a valid legacy Excel (OLE/BIFF) header.")
+
     if ext == ".xlsx":
         try:
             with zipfile.ZipFile(BytesIO(content)) as z:
@@ -87,6 +90,7 @@ def validate_file_upload(filename: str, content: bytes) -> Tuple[str, SourceType
 
     source_type_map = {
         ".csv": SourceType.CSV,
+        ".xls": SourceType.XLSX,
         ".xlsx": SourceType.XLSX,
         ".pdf": SourceType.PDF_NATIVE,
         ".txt": SourceType.EMAIL_TEXT,

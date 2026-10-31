@@ -2,75 +2,11 @@ Extended RFQ-Assistant Audit — Findings Summary
 Generated: 2026-10-31
 ================================================================================
 
-Finding #1: TextParser skips numeric-only MPNs
-  Severity: High
-  Category: Text Extraction
-  Type: defect
-  Expected: MPN '2900364' should be extracted for Phoenix Contact relay
-  Observed: requested_mpn is None; _extract_mpn regex requires [A-Za-z] AND [0-9] in token
-  Evidence: text_parser.py:198-211 — regex at line 204 requires both letter and digit presence
-
-Finding #2: TextParser false-positive MPN extraction
-  Severity: Low
-  Category: Text Extraction
-  Type: defect
-  Expected: Specification tokens like '3-pole' should not be extracted as MPNs
-  Observed: Extracted MPN: '3-pole' from specification token
-  Evidence: text_parser.py:198-211 — _extract_mpn returns first matching token
-
-Finding #3: XLSX parser does not skip hidden sheets
-  Severity: Medium
-  Category: Spreadsheet Extraction
-  Type: limitation
-  Expected: Hidden sheets should be skipped (operator explicitly hid them)
-  Observed: Lines extracted from hidden sheet 'Line Items' with no OEM context
-  Evidence: spreadsheet_parser.py — uses wb.worksheets which includes hidden sheets
-
-Finding #4: XLSX fresh formulas silently become None with no reviewer warning
-  Severity: Medium
-  Category: Spreadsheet Extraction / Transparency
-  Type: limitation
-  Expected: Reviewer should be informed that cells originally contained formulas
-  Observed: Formula cells with no cached value return None; no FORMULA_CELL_DETECTED warning raised
-  Evidence: spreadsheet_parser.py:183 uses data_only=True; no formula cell detection in parser
-
-Finding #5: PDF parser loses quantity when it appears before manufacturer
-  Severity: Medium
-  Category: PDF Extraction
-  Type: defect
-  Expected: Quantity regex should find quantities anywhere in the line, not just at end
-  Observed: 7 of 8 lines have no quantity (qty appears before OEM)
-  Evidence: pdf_parser.py:114 — qty_match regex anchors to end of line: r'\b(\d+(?:\.\d+)?)\s*(EA|PCS|UNITS|M|FT|SET)?\b\s*$'
-
-Finding #6: PDF parser extracts document reference numbers as MPNs
-  Severity: Low
-  Category: PDF Extraction / False Positives
-  Type: defect
-  Expected: RFQ reference numbers like 'RFQ-2026-001' should not be extracted as MPNs
-  Observed: RFQ-2026-001 extracted as requested_mpn with no manufacturer
-  Evidence: pdf_parser.py:130 — token regex matches 'RFQ-2026-001' pattern
-
-Finding #7: Download endpoint hardcodes 'storage/exports' path, ignoring generator config
-  Severity: High
-  Category: Export / Download
-  Type: defect
-  Expected: Download endpoint should use export_generator.base_export_dir
-  Observed: Download returns 404 because app.py:365 hardcodes Path('storage/exports')
-  Evidence: api/app.py:365 — export_dir = Path('storage/exports') / export_id (does not use self.export_generator.base_export_dir)
-
-Finding #8: Quote send route uses simulated local transport (always, never external)
+Finding #1: Quote send route uses simulated local transport (always, never external)
   Severity: Info
   Category: Safety / Transport
   Type: limitation
   Expected: No external transport invoked (safety invariant: no automatic outbound)
   Observed: send_approved_quote returns simulated_local transport with outbound_transport_invoked=False. REQUIRE_REAL_TRANSPORT env var blocks sends when set, but is not set by default.
   Evidence: agents/tools.py:140-159 — send_approved_quote always returns simulated_local; REQUIRE_REAL_TRANSPORT only blocks (fails closed) when explicitly set to true
-
-Finding #9: usr-local-demo bypass trusts client-supplied actor when auth is disabled
-  Severity: Medium
-  Category: Auth / Accountability
-  Type: limitation
-  Expected: All client-supplied actor strings should be overridden by authenticated principal
-  Observed: When REQUIRE_AUTH is unset, get_current_user returns usr-local-demo (admin role) and app.py trusts the client 'actor' Form parameter
-  Evidence: auth.py:99-103 returns PilotUser(user_id='usr-local-demo', role='admin'); app.py:165 conditional trusts actor when user_id == 'usr-local-demo'
 

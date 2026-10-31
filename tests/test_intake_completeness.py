@@ -3,7 +3,7 @@
 import pytest
 
 from rfq_assistant.cases.manager import CaseManager
-from rfq_assistant.ingestion import DocumentParserError, DocumentStorage
+from rfq_assistant.ingestion import DocumentStorage
 from rfq_assistant.ingestion.parsers.spreadsheet_parser import SpreadsheetParser
 from rfq_assistant.matching.catalog import CatalogRepository
 
@@ -38,14 +38,15 @@ def test_csv_missing_part_reference_is_reviewable_instead_of_dropped():
     ("empty_lines.csv", b"MPN,Qty,Description\n"),
     ("no_lines.txt", b"Hello team. Thank you for your time.\n"),
 ])
-def test_no_lines_rejected_without_orphan_case_files(tmp_path, filename, content):
+def test_no_lines_keeps_failed_case_and_original_for_manual_review(tmp_path, filename, content):
     storage = DocumentStorage(base_dir=tmp_path / "files")
     manager = CaseManager(catalog=CatalogRepository(), storage=storage)
-    with pytest.raises(DocumentParserError, match="No RFQ line items"):
-        manager.create_case_from_upload(filename=filename, content=content)
+    case = manager.create_case_from_upload(filename=filename, content=content)
 
-    assert manager.list_cases() == []
-    assert not any(path.is_file() for path in (tmp_path / "files").rglob("*"))
+    assert case.status.value == "FAILED"
+    assert any(w.code == "DOCUMENT_EXTRACTION_FAILED" for w in case.document_warnings)
+    assert manager.storage.get_file(case.case_id, filename) == content
+    assert manager.get_lines(case.case_id) == []
 
 
 def test_csv_parser_surfaces_explicit_error_for_no_items():
