@@ -1,6 +1,6 @@
 # Test strategy: trustworthy over flashy
 
-Tests described here are **planned**, not executed. No performance or accuracy claims are established.
+This document defines the test plan and records the local synthetic verification run below. No customer performance, accuracy, time-savings, or ROI claims are established.
 
 ## Golden fixture pack
 
@@ -65,6 +65,18 @@ available after the original manager objects are discarded.
 **Contract:** `frontend/openapi.json` is checked in and verified against the live FastAPI app by `tests/test_openapi_contract.py`. Frontend wire types are generated from that schema with `npm run gen:types`; `npm run check:types` fails CI if the generated file is stale.
 
 **Browser E2E:** one deterministic Playwright happy path (`frontend/e2e/happy-path.spec.ts`) pastes a synthetic RFQ, extracts exact-match lines, approves every line, generates a draft worksheet and downloads it. It runs against a real FastAPI process and the Next.js dev server. It proves the UI/backend contract for that path only; it is not an accuracy benchmark.
+
+## Local synthetic verification — 2026-10-31
+
+Run the reproducible API corpus from the repository root with:
+
+```bash
+.venv/bin/python -m scripts.run_synthetic_e2e_corpus
+```
+
+The runner creates isolated temporary SQLite, upload, and export state, then exercises 30 synthetic documents through intake, extraction, source retrieval, exact catalog validation, review, CSV/XLSX export, download, and audit verification. The corpus contains 8 pasted-text RFQs, 8 CSVs, 7 generated XLSX files, and 7 native PDFs. After correcting a PDF MPN extraction defect, all 30 full flows passed in 1.23 seconds (median 22.3 ms per document; maximum 55.4 ms in this run). It then issued 128 concurrent synthetic case-creation requests using 16 workers; all 128 succeeded with unique case IDs in 0.48 seconds. Results are local engineering evidence only, not a representative customer accuracy or production capacity benchmark. The seven PDFs reuse one existing synthetic PDF fixture, and the concurrency phase stresses intake only, not simultaneous review/export or multi-user authorization.
+
+The full Python suite passed (148 tests), and the Playwright happy path passed (1 test). The frontend production build and OpenAPI type check passed. `npm run lint` currently fails on a React effect lint error in `WorkbenchView.tsx` and reports six unused imports; this remains an unresolved frontend cleanup item and means the frontend checks are not fully clean.
 
 **Security:** dangerous uploads, oversized sheets, path traversal, prompt injection, tenant isolation, retention/deletion and leaked logs.
 

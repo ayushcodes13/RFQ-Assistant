@@ -116,16 +116,29 @@ class PDFParser(BaseDocumentParser):
             qty = float(qty_match.group(1))
             unit = (qty_match.group(2) or "EA").upper()
 
-        # Look for MPN pattern: alphanumeric with hyphens, underscores, slashes, length 4+
-        # Exclude common English words
-        tokens = raw_line.split()
-        candidate_mpns = []
-        for t in tokens:
-            t_clean = t.strip(".,;:()")
-            if len(t_clean) >= 4 and re.search(r"[A-Z]", t_clean) and re.search(r"[0-9]", t_clean):
-                candidate_mpns.append(t_clean)
+        # Prefer an identifier after the detected manufacturer. This avoids
+        # mistaking later specification tokens (for example, 24VDC) for the
+        # requested part number. Some legitimate MPNs are digits-only, so
+        # allow those when they occur after the manufacturer and are long
+        # enough to be an identifier.
+        search_text = raw_line
+        if detected_oem:
+            manufacturer = re.search(re.escape(detected_oem), raw_line, re.IGNORECASE)
+            if manufacturer:
+                search_text = raw_line[manufacturer.end():]
 
-        mpn = candidate_mpns[0] if candidate_mpns else None
+        tokens = re.findall(r"(?<![A-Za-z0-9])[A-Za-z0-9][A-Za-z0-9._/-]{2,}(?![A-Za-z0-9])", search_text)
+        mpn = None
+        for token in tokens:
+            candidate = token.strip(".,;:()")
+            if not any(char.isdigit() for char in candidate):
+                continue
+            if re.fullmatch(r"\d+(?:V(?:AC|DC)?|A|HZ|W|KW)", candidate, re.IGNORECASE):
+                continue
+            if candidate.isdigit() and len(candidate) < 5:
+                continue
+            mpn = candidate
+            break
 
         if not detected_oem and not mpn:
             return None

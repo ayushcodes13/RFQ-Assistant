@@ -133,6 +133,10 @@ class TestPDFParser:
         mpns = [l.requested_mpn for l in result.lines]
         assert "LC1D09BD" in mpns
         assert "6ES7214-1AG40-0XB0" in mpns
+        # Digit-only component IDs must be kept; trailing electrical
+        # specifications such as 24VDC are not the part number.
+        phoenix_line = next(line for line in result.lines if line.requested_manufacturer == "Phoenix Contact")
+        assert phoenix_line.requested_mpn == "2900364"
         assert all(l.source_locator.page_number == 1 for l in result.lines)
 
     def test_corrupt_pdf_fails_safely(self):
