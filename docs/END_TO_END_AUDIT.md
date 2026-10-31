@@ -1,5 +1,10 @@
 # End-to-End Audit Report: RFQ-Assistant
 
+> **Historical snapshot:** this report describes the pre-hardening audit state and its
+> 269-test result. It is not the current implementation inventory. PDF OCR, streamed
+> spreadsheet parsing, grounded Luna fallback, and current verification evidence are
+> tracked in [EXTRACTION_AND_PERFORMANCE_AUDIT.md](EXTRACTION_AND_PERFORMANCE_AUDIT.md).
+
 ## 1. Executive Summary
 
 This report documents an audit-only end-to-end test of the RFQ-Assistant repository.

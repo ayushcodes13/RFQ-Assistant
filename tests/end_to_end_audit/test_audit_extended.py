@@ -247,55 +247,31 @@ class TestTextExtractionExtended:
             assert line.source_locator.file_name == "quoted_email.txt"
             assert line.source_locator.row_number is not None
 
-    def test_text_parser_skips_numeric_only_mpn(self):
-        """
-        Finding: TextParser._extract_mpn requires at least one letter AND one digit.
-        Numeric-only MPNs like Phoenix Contact '2900364' are silently dropped.
-        """
+    def test_text_parser_extracts_numeric_only_mpn(self):
+        """Numeric-only MPNs like Phoenix Contact '2900364' are now extracted."""
         parser = TextParser()
         content = b"10 pcs Phoenix Contact 2900364 relay module 24VDC"
         result = parser.parse(content, "numeric_mpn.txt")
 
         line = result.lines[0]
-        assert line.requested_mpn is None, \
-            "TextParser should skip numeric-only MPNs (confirmed defect)"
+        assert line.requested_mpn == "2900364", \
+            "TextParser should extract numeric-only MPNs (>= 5 digits)"
         # The line is still created because the OEM 'Phoenix Contact' is detected
         assert line.requested_manufacturer == "Phoenix Contact"
         assert line.quantity == 10.0
 
-        record_finding(
-            title="TextParser skips numeric-only MPNs",
-            severity="High",
-            category="Text Extraction",
-            expected="MPN '2900364' should be extracted for Phoenix Contact relay",
-            observed=f"requested_mpn is None; _extract_mpn regex requires [A-Za-z] AND [0-9] in token",
-            evidence="text_parser.py:198-211 — regex at line 204 requires both letter and digit presence",
-            defect_type="defect",
-        )
-
     def test_text_parser_false_positive_mpn_extraction(self):
         """
-        Finding: TextParser._extract_mpn may extract false-positive MPNs from
-        specification tokens like '3-pole' or 'S7-1200'.
+        Specification tokens like '3-pole', '9A', '24VDC' must not be extracted as MPNs.
         """
         parser = TextParser()
-        # '3-pole' matches the [A-Z]{2,}-[0-9]+[A-Z0-9-]* pattern? No: '3-pole' starts with digit.
-        # 'S7-1200' matches the pattern (S7 starts with single letter, not [A-Z]{2,})
         content = b"10 pcs 24VDC contactor, 9A, 3-pole, Schneider Electric"
         result = parser.parse(content, "false_positive.txt")
         lines = result.lines
-        if lines:
-            mpn = lines[0].requested_mpn
-            if mpn and mpn != "LC1D09BD":  # Only if MPN was wrongly extracted
-                record_finding(
-                    title="TextParser false-positive MPN extraction",
-                    severity="Low",
-                    category="Text Extraction",
-                    expected="Specification tokens like '3-pole' should not be extracted as MPNs",
-                    observed=f"Extracted MPN: '{mpn}' from specification token",
-                    evidence="text_parser.py:198-211 — _extract_mpn returns first matching token",
-                    defect_type="defect",
-                )
+        assert len(lines) >= 1, "Line with OEM should be detected"
+        mpn = lines[0].requested_mpn
+        # No spec token should be extracted as MPN
+        assert mpn is None or mpn == "LC1D09BD", f"Specification token wrongly extracted as MPN: {mpn}"
 
     def test_description_only_lines_retain_warnings(self, ext_services):
         """Lines with no extractable MPN should have appropriate warnings and be reviewable."""
@@ -419,10 +395,7 @@ class TestSpreadsheetLayoutDiversity:
         assert lines[1].requested_mpn == "6ES7214-1AG40-0XB0"
 
     def test_xlsx_hidden_sheets_are_parsed(self, ext_services):
-        """
-        Finding: XLSX parser does NOT skip hidden sheets — data from the hidden
-        'Line Items' sheet leaks into extracted lines.
-        """
+        """Hidden sheet contents are not silently treated as RFQ rows."""
         manager, _, catalog, _ = ext_services
         content = (AUDIT_FIXTURES / "xlsx_hidden_merged_blank.xlsx").read_bytes()
         case = manager.create_case_from_upload(
@@ -430,25 +403,13 @@ class TestSpreadsheetLayoutDiversity:
             customer_label="SYN-TEST", actor="Auditor",
         )
         lines = manager.get_lines(case.case_id)
-        # Expected 3 lines from Main BOM, but hidden 'Line Items' sheet adds a 4th
-        assert len(lines) == 4, "Hidden sheet data leaked into extraction"
-
-        # The 4th line has OEM=None (from the hidden sheet where manufacturer column wasn't mapped)
-        hidden_line = [l for l in lines if l.requested_manufacturer is None]
-        assert len(hidden_line) == 1, "Should have one line from hidden sheet with no OEM"
+        assert len(lines) == 4
 
         sheet_names = {l.source_locator.sheet_name for l in lines}
         assert "Line Items" in sheet_names, "Data from hidden sheet was extracted"
 
-        record_finding(
-            title="XLSX parser does not skip hidden sheets",
-            severity="Medium",
-            category="Spreadsheet Extraction",
-            expected="Hidden sheets should be skipped (operator explicitly hid them)",
-            observed=f"Lines extracted from hidden sheet 'Line Items' with no OEM context",
-            evidence="spreadsheet_parser.py — uses wb.worksheets which includes hidden sheets",
-            defect_type="limitation",
-        )
+        assert "Internal Pricing" not in sheet_names
+        assert any(w.code == "HIDDEN_SHEET_INCLUDED" for w in case.document_warnings)
 
     def test_xlsx_merged_cells_and_blanks(self, ext_services):
         """Merged cells and blank rows should be handled gracefully."""
@@ -481,11 +442,8 @@ class TestSpreadsheetLayoutDiversity:
         assert qtys.get("MY4N-D2-DC24") == 20.0
         assert qtys.get("F2966171") == 15.5
 
-    def test_xlsx_fresh_formulas_no_cache_silently_skipped(self, ext_services):
-        """
-        Finding: XLSX with fresh formulas (no cached values) silently returns None
-        for formula cells. No warning is emitted to reviewer that cells contained formulas.
-        """
+    def test_xlsx_fresh_formulas_no_cache_are_visible_for_review(self, ext_services):
+        """Formula text is retained and the affected row is explicitly marked."""
         manager, _, catalog, _ = ext_services
         content = (AUDIT_FIXTURES / "xlsx_fresh_formulas_no_cache.xlsx").read_bytes()
         case = manager.create_case_from_upload(
@@ -494,24 +452,10 @@ class TestSpreadsheetLayoutDiversity:
         )
         lines = manager.get_lines(case.case_id)
 
-        # Parser sees 2 lines (formula rows become None → skipped)
-        assert len(lines) == 2
-
-        # No warnings about formula cells
-        has_formula_warning = any(
-            w.code == "FORMULA_CELL_DETECTED" for w in lines[0].extraction_warnings
-        )
-        assert not has_formula_warning, "No formula detection warning emitted"
-
-        record_finding(
-            title="XLSX fresh formulas silently become None with no reviewer warning",
-            severity="Medium",
-            category="Spreadsheet Extraction / Transparency",
-            expected="Reviewer should be informed that cells originally contained formulas",
-            observed="Formula cells with no cached value return None; no FORMULA_CELL_DETECTED warning raised",
-            evidence="spreadsheet_parser.py:183 uses data_only=True; no formula cell detection in parser",
-            defect_type="limitation",
-        )
+        assert len(lines) == 3
+        formula_line = next(line for line in lines if "=SUM" in line.raw_text)
+        assert formula_line.quantity is None
+        assert any(w.code == "FORMULA_VALUE_NOT_EVALUATED" for w in formula_line.extraction_warnings)
 
     def test_csv_with_various_quantity_formats(self, ext_services):
         """CSV with quantities like '10 pcs', '5 units', '20x', '15.5'."""
@@ -580,8 +524,8 @@ class TestPdfLayoutDiversity:
     def test_wrapped_description_pdf_extracts_items(self, ext_services):
         """Native PDF with wrapped descriptions and qty-before-OEM should extract items.
 
-        Finding: PDF parser quantity regex requires qty at end of line.
-        Lines like '10 EA Schneider Electric LC1D09BD ...' lose the quantity.
+        Quantity is now found anywhere in the line, and document reference numbers
+        (RFQ-2026-001) are no longer extracted as MPNs.
         """
         manager, _, catalog, _ = ext_services
         content = (AUDIT_FIXTURES / "wrapped_description_pdf.pdf").read_bytes()
@@ -591,41 +535,20 @@ class TestPdfLayoutDiversity:
         )
         lines = manager.get_lines(case.case_id)
 
-        # 8 lines extracted: RFQ-2026-001 header (false positive), 5 real items p1,
-        # 2 real items p2, but qty is lost because it appears before OEM
+        # 7 lines extracted: 5 real items p1, 2 real items p2
         mpns = {l.requested_mpn for l in lines}
         assert "LC1D09BD" in mpns
         assert "6ES7214-1AG40-0XB0" in mpns
         assert "2900364" in mpns  # Numeric MPN IS extracted by PDF parser
 
-        # Qty before OEM is lost (Finding)
+        # RFQ-2026-001 is NOT extracted as a false-positive MPN
+        rfq_lines = [l for l in lines if "RFQ-2026" in str(l.requested_mpn)]
+        assert len(rfq_lines) == 0, "Quote ID should not be extracted as MPN"
+
+        # Quantity before OEM is now extracted
         lines_with_qty = [l for l in lines if l.quantity is not None and l.quantity > 0]
         lines_without_qty = [l for l in lines if (l.quantity is None or l.quantity <= 0)]
-        assert len(lines_without_qty) > 0, "Quantity before OEM is not extracted"
-
-        # RFQ-2026-001 is extracted as a false-positive MPN
-        rfq_lines = [l for l in lines if "RFQ-2026" in str(l.requested_mpn)]
-        assert len(rfq_lines) >= 1, "Quote ID extracted as MPN (false positive)"
-
-        record_finding(
-            title="PDF parser loses quantity when it appears before manufacturer",
-            severity="Medium",
-            category="PDF Extraction",
-            expected="Quantity regex should find quantities anywhere in the line, not just at end",
-            observed=f"{len(lines_without_qty)} of {len(lines)} lines have no quantity (qty appears before OEM)",
-            evidence="pdf_parser.py:114 — qty_match regex anchors to end of line: r'\\b(\\d+(?:\\.\\d+)?)\\s*(EA|PCS|UNITS|M|FT|SET)?\\b\\s*$'",
-            defect_type="defect",
-        )
-
-        record_finding(
-            title="PDF parser extracts document reference numbers as MPNs",
-            severity="Low",
-            category="PDF Extraction / False Positives",
-            expected="RFQ reference numbers like 'RFQ-2026-001' should not be extracted as MPNs",
-            observed="RFQ-2026-001 extracted as requested_mpn with no manufacturer",
-            evidence="pdf_parser.py:130 — token regex matches 'RFQ-2026-001' pattern",
-            defect_type="defect",
-        )
+        assert len(lines_without_qty) == 0, "All lines should have a quantity"
 
         # Verify source locators
         pages = {l.source_locator.page_number for l in lines}
@@ -661,15 +584,17 @@ class TestPdfLayoutDiversity:
         qty_lines = [l for l in lines if l.quantity and l.quantity > 0]
         assert len(qty_lines) >= 3
 
-    def test_scanned_pdf_rejected_without_crash(self, ext_services):
-        """Image-only PDF (no text layer) must be rejected with clear error."""
+    def test_scanned_pdf_retained_as_failed_case_without_crash(self, ext_services):
+        """Image-only PDF must be preserved with a clear blocking error for manual handling."""
         manager, _, catalog, _ = ext_services
         content = (AUDIT_FIXTURES / "scanned_image_pdf.pdf").read_bytes()
-        with pytest.raises((DocumentParserError, Exception), match="Scanned|image-only|OCR"):
-            manager.create_case_from_upload(
-                filename="scanned.pdf", content=content,
-                customer_label="SYN-TEST", actor="Auditor",
-            )
+        case = manager.create_case_from_upload(
+            filename="scanned.pdf", content=content,
+            customer_label="SYN-TEST", actor="Auditor",
+        )
+        assert case.status.value == "FAILED"
+        assert "Scanned" in case.document_warnings[0].message or "image-only" in case.document_warnings[0].message
+        assert manager.get_lines(case.case_id) == []
 
     def test_pdf_with_unknown_manufacturer_not_normalized(self, ext_services):
         """PDF lines with unknown manufacturers should be NO_MATCH, not auto-matched."""
@@ -934,11 +859,10 @@ class TestReviewAndExportExtended:
 
 class TestApiExportDownloadAndPersistence:
 
-    def test_export_download_from_default_storage(self, api_client_no_auth):
+    def test_export_download_from_custom_storage(self, api_client_no_auth):
         """
-        Finding: The download endpoint works when using the default
-        storage/exports path. But when the generator's base_export_dir is
-        configured differently, download returns 404.
+        The download endpoint uses export_generator.base_export_dir, so downloads
+        work even when the generator is configured with a custom base directory.
         """
         client, manager, generator, catalog, tmp_path = api_client_no_auth
 
@@ -960,22 +884,11 @@ class TestApiExportDownloadAndPersistence:
         assert export_resp.status_code == 200
         manifest = export_resp.json()
 
-        # Download from the default storage path (generator uses tmp_path)
+        # Download should work using the generator's base_export_dir (tmp_path/exports)
         download_resp = client.get(manifest["download_url"])
-        # The download endpoint hardcodes "storage/exports" — NOT tmp_path
-        # So this should return 404 (the defect)
-        assert download_resp.status_code == 404, \
-            "Download endpoint hardcodes 'storage/exports' path"
-
-        record_finding(
-            title="Download endpoint hardcodes 'storage/exports' path, ignoring generator config",
-            severity="High",
-            category="Export / Download",
-            expected="Download endpoint should use export_generator.base_export_dir",
-            observed=f"Download returns {download_resp.status_code} because app.py:365 hardcodes Path('storage/exports')",
-            evidence="api/app.py:365 — export_dir = Path('storage/exports') / export_id (does not use self.export_generator.base_export_dir)",
-            defect_type="defect",
-        )
+        assert download_resp.status_code == 200, \
+            f"Download should succeed with custom base_export_dir, got {download_resp.status_code}"
+        assert len(download_resp.content) > 100
 
     def test_export_to_default_storage_works_when_generator_uses_default(self, ext_services, monkeypatch):
         """
@@ -1181,17 +1094,18 @@ class TestApiExportDownloadAndPersistence:
                 customer_label="SYN-TEST", actor="Auditor",
             )
 
-    def test_oversized_csv_rejected_by_parser(self, ext_services):
-        """CSV with >5000 rows must be rejected."""
+    def test_oversized_csv_retained_as_failed_case(self, ext_services):
+        """CSV with >5000 rows must be blocked while retaining the original upload."""
         manager, _, catalog, _ = ext_services
         csv_content = AUDIT_FIXTURES / "oversized_csv_5005_rows.csv"
         if csv_content.exists():
             content = csv_content.read_bytes()
-            with pytest.raises((UploadValidationError, DocumentParserError, Exception)):
-                manager.create_case_from_upload(
-                    filename="big.csv", content=content,
-                    customer_label="SYN-TEST", actor="Auditor",
-                )
+            case = manager.create_case_from_upload(
+                filename="big.csv", content=content,
+                customer_label="SYN-TEST", actor="Auditor",
+            )
+            assert case.status.value == "FAILED"
+            assert "5000" in case.document_warnings[0].message
 
 
 # ---------------------------------------------------------------------------
@@ -1404,19 +1318,15 @@ class TestAuthAndSecurityExtended:
         assert any(e["actor"] == "Authorized Reviewer" for e in events)
         assert not any(e["actor"] == "SYSTEM_ADMIN" for e in events)
 
-    def test_usr_local_demo_bypasses_auth(self, api_client_no_auth):
-        """
-        Finding: When REQUIRE_AUTH is not set, get_current_user returns
-        PilotUser(user_id='usr-local-demo', role='admin'), bypassing auth.
-        The actor field from the client is trusted instead of overridden.
-        """
+    def test_local_demo_actor_is_server_supplied(self, api_client_no_auth):
+        """Unauthenticated demo mode still uses its explicit server identity in audit logs."""
         client, manager, generator, catalog, tmp_path = api_client_no_auth
 
         # No auth required — any request succeeds without API key
         resp = client.get("/api/rfqs")
         assert resp.status_code == 200
 
-        # Actor spoofing when auth is off
+        # The client-supplied actor cannot spoof audit attribution.
         create_resp = client.post(
             "/api/rfqs",
             data={"pasted_text": "10 pcs Schneider Electric LC1D09BD", "title": "Bypass Test", "actor": "FAKE_ADMIN"},
@@ -1426,23 +1336,10 @@ class TestAuthAndSecurityExtended:
 
         audit_resp = client.get(f"/api/rfqs/{case_id}/audit")
         events = audit_resp.json()
-        # When usr-local-demo, the actor field is trusted from client
         case_created_events = [e for e in events if e["action"] == "CASE_CREATED"]
-        if case_created_events:
-            assert case_created_events[0]["actor"] == "FAKE_ADMIN", \
-                "Client-supplied actor was trusted when auth is disabled"
-
-        record_finding(
-            title="usr-local-demo bypass trusts client-supplied actor when auth is disabled",
-            severity="Medium",
-            category="Auth / Accountability",
-            expected="All client-supplied actor strings should be overridden by authenticated principal",
-            observed="When REQUIRE_AUTH is unset, get_current_user returns usr-local-demo (admin role) "
-                     "and app.py trusts the client 'actor' Form parameter",
-            evidence="auth.py:99-103 returns PilotUser(user_id='usr-local-demo', role='admin'); "
-                     "app.py:165 conditional trusts actor when user_id == 'usr-local-demo'",
-            defect_type="limitation",
-        )
+        assert case_created_events
+        assert case_created_events[0]["actor"] == "Local Pilot Operator"
+        assert not any(event["actor"] == "FAKE_ADMIN" for event in events)
 
     def test_path_traversal_in_filename_blocked(self):
         """Filename sanitization must prevent path traversal."""

@@ -520,7 +520,7 @@ test("Rehearsal D — send route is simulated-only (no external transport)", asy
     },
     { quoteId, hash: draft.draft_hash }
   );
-  expect(approveResult.status).toBe(200);
+  expect(approveResult.status, approveResult.body).toBe(200);
 
   // Step 6: Send the approved quote.
   const sendResult = await page.evaluate(

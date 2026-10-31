@@ -1,5 +1,7 @@
 """Parser factory for dispatching by source type."""
 
+import os
+import shutil
 from typing import Optional
 from rfq_assistant.ingestion.parsers.base import BaseDocumentParser, DocumentParserError, ParsedDocumentResult, ParsedLineDraft
 from rfq_assistant.ingestion.parsers.pdf_parser import PDFParser
@@ -8,8 +10,11 @@ from rfq_assistant.ingestion.parsers.text_parser import TextParser
 from rfq_assistant.schemas.enums import SourceType
 
 
-def get_parser(source_type: SourceType, allow_ocr: bool = False) -> BaseDocumentParser:
+def get_parser(source_type: SourceType, allow_ocr: Optional[bool] = None) -> BaseDocumentParser:
     """Returns the appropriate parser instance for the given source type."""
+    if allow_ocr is None:
+        default_enabled = "true" if shutil.which("tesseract") else "false"
+        allow_ocr = os.getenv("RFQ_LOCAL_OCR_ENABLED", default_enabled).strip().lower() in {"1", "true", "yes"}
     if source_type in (SourceType.CSV, SourceType.XLSX):
         return SpreadsheetParser()
     elif source_type in (SourceType.PDF_NATIVE, SourceType.PDF_SCANNED):

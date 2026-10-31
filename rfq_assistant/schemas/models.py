@@ -98,6 +98,18 @@ class BatchReviewRequest(BaseModel):
     notes: Optional[str] = None
 
 
+class ReviewPlan(BaseModel):
+    """Risk-based human review worklist for one extracted RFQ case."""
+    case_id: str
+    total_lines: int
+    exception_line_ids: List[str]
+    sample_line_ids: List[str]
+    remaining_line_ids: List[str]
+    sample_approved: bool
+    sample_correction_found: bool
+    can_batch_approve: bool
+
+
 class SourceFileMetadata(BaseModel):
     """Metadata describing the uploaded RFQ document."""
     file_id: str
@@ -117,6 +129,7 @@ class RFQCase(BaseModel):
     status: CaseStatus = CaseStatus.NEW
     source_type: SourceType
     source_file: Optional[SourceFileMetadata] = None
+    document_warnings: List[ExtractionWarning] = Field(default_factory=list)
     raw_text: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

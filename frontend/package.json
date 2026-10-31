@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "eslint src",
     "gen:types": "openapi-typescript openapi.json -o src/types/api.generated.ts",
     "check:types": "npm run gen:types && git diff --exit-code -- openapi.json src/types/api.generated.ts",
     "e2e": "playwright test"

@@ -22,6 +22,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SAMPLES = ROOT / "fixtures" / "rfq_samples"
 RUN_DIR = tempfile.TemporaryDirectory(prefix="rfq-synthetic-e2e-")
 os.environ["RFQ_ASSISTANT_DB_PATH"] = str(Path(RUN_DIR.name) / "state.sqlite3")
+os.environ["RFQ_LLM_ENABLED"] = "false"  # deterministic timing corpus; never sends source text to a model
+os.environ["RFQ_ASYNC_INGEST_ENABLED"] = "false"  # exercise completion inline; queue behavior has dedicated tests
 os.chdir(RUN_DIR.name)
 
 from fastapi.testclient import TestClient  # noqa: E402
@@ -63,29 +65,43 @@ def _document(kind: str, number: int) -> tuple[str | None, bytes | None, str | N
     return "formal_rfq_native.pdf", (SAMPLES / "formal_rfq_native.pdf").read_bytes(), None
 
 
+def _timed_request(timings: dict[str, float], stage: str, request):
+    started = time.perf_counter()
+    response = request()
+    timings[stage] = round((time.perf_counter() - started) * 1000, 1)
+    return response
+
+
 def _check_document(client: TestClient, number: int, kind: str) -> dict[str, Any]:
     started = time.perf_counter()
+    timings: dict[str, float] = {}
+    build_started = time.perf_counter()
     name, content, pasted_text = _document(kind, number)
+    timings["fixture_build"] = round((time.perf_counter() - build_started) * 1000, 1)
     data = {"title": f"Synthetic RFQ {number:02d}", "customer_label": "Synthetic only"}
     if name:
-        response = client.post(
-            "/api/rfqs",
-            data=data,
-            files={"file": (name, content, "application/octet-stream")},
+        response = _timed_request(
+            timings, "intake", lambda: client.post(
+                "/api/rfqs",
+                data=data,
+                files={"file": (name, content, "application/octet-stream")},
+            ),
         )
     else:
-        response = client.post("/api/rfqs", data={**data, "pasted_text": pasted_text})
+        response = _timed_request(
+            timings, "intake", lambda: client.post("/api/rfqs", data={**data, "pasted_text": pasted_text})
+        )
     if response.status_code != 200:
-        return {"number": number, "format": kind, "step": "intake", "status": response.status_code}
+        return {"number": number, "format": kind, "step": "intake", "status": response.status_code, "stage_latency_ms": timings}
 
     case_id = response.json()["case_id"]
-    lines_response = client.get(f"/api/rfqs/{case_id}/lines")
+    lines_response = _timed_request(timings, "lines", lambda: client.get(f"/api/rfqs/{case_id}/lines"))
     if lines_response.status_code != 200:
-        return {"number": number, "format": kind, "step": "lines", "status": lines_response.status_code}
+        return {"number": number, "format": kind, "step": "lines", "status": lines_response.status_code, "stage_latency_ms": timings}
     lines = lines_response.json()
-    source = client.get(f"/api/rfqs/{case_id}/source")
+    source = _timed_request(timings, "source", lambda: client.get(f"/api/rfqs/{case_id}/source"))
     if not lines or source.status_code != 200:
-        return {"number": number, "format": kind, "step": "source", "line_count": len(lines), "status": source.status_code}
+        return {"number": number, "format": kind, "step": "source", "line_count": len(lines), "status": source.status_code, "stage_latency_ms": timings}
 
     invalid = [
         line
@@ -102,29 +118,64 @@ def _check_document(client: TestClient, number: int, kind: str) -> dict[str, Any
             "step": "extracted-line-validation",
             "invalid_count": len(invalid),
             "invalid_mpns": [line.get("requested_mpn") for line in invalid],
+            "stage_latency_ms": timings,
         }
 
-    review = client.post(
-        f"/api/rfqs/{case_id}/review",
-        json={"line_ids": [line["line_id"] for line in lines], "decision": "APPROVED", "actor": "Synthetic reviewer"},
+    plan_response = _timed_request(
+        timings, "review_plan", lambda: client.get(f"/api/rfqs/{case_id}/review-plan")
     )
-    if review.status_code != 200:
-        return {"number": number, "format": kind, "step": "review", "status": review.status_code}
+    if plan_response.status_code != 200:
+        return {"number": number, "format": kind, "step": "review-plan", "status": plan_response.status_code, "stage_latency_ms": timings}
+    plan = plan_response.json()
+    if plan["sample_line_ids"]:
+        review = _timed_request(
+            timings, "sample_review", lambda: client.post(
+                f"/api/rfqs/{case_id}/review",
+                json={"line_ids": plan["sample_line_ids"], "decision": "APPROVED", "actor": "Synthetic reviewer"},
+            ),
+        )
+        if review.status_code != 200:
+            return {"number": number, "format": kind, "step": "sample-review", "status": review.status_code, "stage_latency_ms": timings}
+    plan = _timed_request(
+        timings, "review_plan_after_sample", lambda: client.get(f"/api/rfqs/{case_id}/review-plan")
+    ).json()
+    if plan["can_batch_approve"]:
+        batch_result = _timed_request(
+            timings, "batch_approve_remaining", lambda: client.post(
+                f"/api/rfqs/{case_id}/review-plan/approve-remaining", json={}
+            ),
+        )
+        if batch_result.status_code != 200:
+            return {"number": number, "format": kind, "step": "batch-approve", "status": batch_result.status_code, "stage_latency_ms": timings}
+    for line_id in plan["exception_line_ids"]:
+        response = _timed_request(
+            timings, "exception_review", lambda line_id=line_id: client.patch(
+                f"/api/rfqs/{case_id}/lines/{line_id}",
+                json={"review_decision": "APPROVED", "actor": "Synthetic reviewer"},
+            ),
+        )
+        if response.status_code != 200:
+            return {"number": number, "format": kind, "step": "exception-review", "status": response.status_code, "stage_latency_ms": timings}
+    approval_check = client.get(f"/api/rfqs/{case_id}/lines").json()
+    if any(line["review_decision"] != "APPROVED" for line in approval_check):
+        return {"number": number, "format": kind, "step": "review-incomplete", "stage_latency_ms": timings}
 
     export_format = "csv" if number % 2 else "xlsx"
-    export = client.post(
-        f"/api/rfqs/{case_id}/exports",
-        json={"case_id": case_id, "actor": "Synthetic reviewer", "format": export_format},
+    export = _timed_request(
+        timings, "export_generation", lambda: client.post(
+            f"/api/rfqs/{case_id}/exports",
+            json={"case_id": case_id, "actor": "Synthetic reviewer", "format": export_format},
+        ),
     )
     if export.status_code != 200:
-        return {"number": number, "format": kind, "step": "export", "status": export.status_code}
+        return {"number": number, "format": kind, "step": "export", "status": export.status_code, "stage_latency_ms": timings}
     manifest = export.json()
-    download = client.get(manifest["download_url"])
+    download = _timed_request(timings, "download", lambda: client.get(manifest["download_url"]))
     if download.status_code != 200 or len(download.content) < 100:
-        return {"number": number, "format": kind, "step": "download", "status": download.status_code}
-    audit = client.get(f"/api/rfqs/{case_id}/audit")
+        return {"number": number, "format": kind, "step": "download", "status": download.status_code, "stage_latency_ms": timings}
+    audit = _timed_request(timings, "audit", lambda: client.get(f"/api/rfqs/{case_id}/audit"))
     if audit.status_code != 200 or not any(event["action"] == "EXPORTED" for event in audit.json()):
-        return {"number": number, "format": kind, "step": "audit", "status": audit.status_code}
+        return {"number": number, "format": kind, "step": "audit", "status": audit.status_code, "stage_latency_ms": timings}
     return {
         "number": number,
         "format": kind,
@@ -132,6 +183,7 @@ def _check_document(client: TestClient, number: int, kind: str) -> dict[str, Any
         "approved": manifest["approved_lines"],
         "download_bytes": len(download.content),
         "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
+        "stage_latency_ms": timings,
     }
 
 
@@ -155,6 +207,24 @@ def main() -> int:
     failures = [result for result in results if "step" in result]
     durations = sorted(result["elapsed_ms"] for result in results if "elapsed_ms" in result)
 
+    stage_values: dict[str, dict[str, list[float]]] = {}
+    for result in results:
+        for stage, elapsed_ms in result.get("stage_latency_ms", {}).items():
+            stage_values.setdefault(result["format"], {}).setdefault(stage, []).append(elapsed_ms)
+
+    stage_latency_summary = {}
+    for kind, stages in stage_values.items():
+        stage_latency_summary[kind] = {}
+        for stage, values in stages.items():
+            ordered = sorted(values)
+            p95_index = max(0, int(len(ordered) * 0.95 + 0.999) - 1)
+            stage_latency_summary[kind][stage] = {
+                "count": len(ordered),
+                "median_ms": ordered[len(ordered) // 2],
+                "p95_ms": ordered[p95_index],
+                "max_ms": max(ordered),
+            }
+
     concurrency_started = time.perf_counter()
     concurrent_request_count = 128
     concurrent_worker_count = 16
@@ -171,6 +241,7 @@ def main() -> int:
             "elapsed_seconds": round(time.perf_counter() - started, 2),
             "median_document_ms": durations[len(durations) // 2] if durations else None,
             "max_document_ms": max(durations) if durations else None,
+            "stage_latency_ms_by_format": stage_latency_summary,
         },
         "concurrent_create_burst": {
             "requests": concurrent_request_count,

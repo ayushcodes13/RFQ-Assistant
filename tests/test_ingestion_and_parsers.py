@@ -119,6 +119,27 @@ class TestSpreadsheetParser:
         field_lines = [l for l in result.lines if l.source_locator.sheet_name == "Field Instrumentation"]
         assert len(field_lines) == 2
 
+    def test_xlsx_formula_quantity_is_preserved_but_not_calculated(self):
+        import io
+        import openpyxl
+        from rfq_assistant.ingestion.parsers.spreadsheet_parser import SpreadsheetParser
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.append(["MPN", "Manufacturer", "Quantity"])
+        sheet.append(["LC1D09BD", "Schneider Electric", "=5+5"])
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        parsed = SpreadsheetParser().parse(output.getvalue(), "formula_quantity.xlsx")
+        assert len(parsed.lines) == 1
+        line = parsed.lines[0]
+        assert line.quantity is None
+        assert "=5+5" in line.raw_text
+        assert any(w.code == "FORMULA_VALUE_NOT_EVALUATED" for w in line.extraction_warnings)
+        assert any(w.code == "MISSING_QUANTITY" for w in line.extraction_warnings)
+
 
 class TestPDFParser:
     """Verifies native PDF parsing and safe detection of corrupt/scanned documents."""
@@ -156,6 +177,101 @@ class TestPDFParser:
         parser = get_parser(SourceType.PDF_NATIVE, allow_ocr=False)
         with pytest.raises(DocumentParserError, match="Scanned or image-only PDF detected"):
             parser.parse(empty_pdf_bytes, "scanned.pdf")
+
+    def test_unparsed_numbered_product_row_is_retained_for_fallback_or_manual_review(self):
+        from fpdf import FPDF
+
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Helvetica", size=12)
+        pdf.multi_cell(0, 10, "1 safety disconnect switch")
+        result = get_parser(SourceType.PDF_NATIVE, allow_ocr=False).parse(
+            bytes(pdf.output()), "unusual_native_rfq.pdf"
+        )
+
+        assert result.lines == []
+        assert len(result.candidate_segments) == 1
+        candidate = result.candidate_segments[0]
+        assert candidate.locator.page_number == 1
+        assert "disconnect switch" in candidate.text
+
+    def test_sparse_image_page_uses_bounded_local_ocr(self, monkeypatch):
+        """Only image-heavy pages are OCRed and every OCR-derived row stays reviewable."""
+        import io
+        import fitz
+        from PIL import Image
+        from rfq_assistant.ingestion.parsers import pdf_parser
+
+        image_buffer = io.BytesIO()
+        Image.new("RGB", (600, 800), "white").save(image_buffer, format="PNG")
+        pdf = fitz.open()
+        page = pdf.new_page(width=595, height=842)
+        page.insert_image(page.rect, stream=image_buffer.getvalue())
+        content = pdf.tobytes()
+        pdf.close()
+
+        monkeypatch.setattr(
+            pdf_parser,
+            "recognize_page",
+            lambda _content, _page_number: "1 Siemens 6ES7214-1AG40-0XB0 PLC 2 EA",
+        )
+        result = get_parser(SourceType.PDF_NATIVE, allow_ocr=True).parse(content, "scan.pdf")
+
+        assert len(result.lines) == 1
+        line = result.lines[0]
+        assert line.requested_mpn == "6ES7214-1AG40-0XB0"
+        assert line.quantity == 2.0
+        assert line.source_locator.page_number == 1
+        assert any(w.code == "OCR_TEXT_REVIEW" for w in line.extraction_warnings)
+        assert any(w.code == "LOCAL_OCR_USED" for w in result.warnings)
+        page_evidence = next(segment for segment in result.evidence_segments if segment.locator.page_number == 1)
+        assert "Siemens" in page_evidence.text
+        assert any(w.code == "OCR_TEXT_REVIEW" for w in page_evidence.warnings)
+
+    def test_page_triage_failure_sends_every_page_to_ocr(self, monkeypatch):
+        """An unknown page classification must not silently trust native text alone."""
+        from fpdf import FPDF
+        from rfq_assistant.ingestion.parsers import pdf_parser
+
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Helvetica", size=12)
+        pdf.cell(0, 10, text="1 Siemens 6ES7214-1AG40-0XB0 PLC 2 EA")
+        content = bytes(pdf.output())
+        calls = []
+
+        def fail_triage(_page, _text):
+            raise RuntimeError("synthetic triage failure")
+
+        def fake_ocr(_content, page_number):
+            calls.append(page_number)
+            return "1 Siemens 6ES7214-1AG40-0XB0 PLC 2 EA"
+
+        monkeypatch.setattr(pdf_parser, "page_needs_ocr", fail_triage)
+        monkeypatch.setattr(pdf_parser, "recognize_page", fake_ocr)
+        result = pdf_parser.PDFParser(allow_ocr=True).parse(content, "triage-fallback.pdf")
+
+        assert calls == [1]
+        assert result.lines[0].requested_mpn == "6ES7214-1AG40-0XB0"
+        assert any(w.code == "PDF_PAGE_TRIAGE_UNAVAILABLE" for w in result.warnings)
+        assert any(w.code == "LOCAL_OCR_USED" for w in result.warnings)
+        assert any(w.code == "OCR_TEXT_REVIEW" for w in result.lines[0].extraction_warnings)
+
+    def test_image_heavy_page_is_blocked_when_ocr_disabled(self):
+        import io
+        import fitz
+        from PIL import Image
+
+        image_buffer = io.BytesIO()
+        Image.new("RGB", (600, 800), "white").save(image_buffer, format="PNG")
+        pdf = fitz.open()
+        page = pdf.new_page(width=595, height=842)
+        page.insert_image(page.rect, stream=image_buffer.getvalue())
+        content = pdf.tobytes()
+        pdf.close()
+
+        with pytest.raises(DocumentParserError, match="image|OCR"):
+            get_parser(SourceType.PDF_NATIVE, allow_ocr=False).parse(content, "scan.pdf")
 
 
 class TestTextAndEmailParser:

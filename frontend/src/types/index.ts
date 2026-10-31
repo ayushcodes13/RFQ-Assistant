@@ -26,6 +26,7 @@ export type AuditEvent = Schemas["AuditEvent"] & { recorded_at: string };
 export type ExportManifest = Schemas["ExportManifest"] & { generated_at: string };
 export type RFQLineItemUpdate = Schemas["RFQLineItemUpdate"];
 export type BatchReviewRequest = Schemas["BatchReviewRequest"];
+export type ReviewPlan = Schemas["ReviewPlan"];
 export type ExportRequest = Schemas["ExportRequest"];
 
 export interface CatalogImportSummary {
