@@ -96,6 +96,7 @@ export default function Home() {
             <WorkbenchView
               caseData={activeCase}
               onOpenExport={() => setIsExportOpen(true)}
+              onCaseUpdated={fetchCases}
             />
           )}
           {currentTab === "catalog" && <CatalogView />}
