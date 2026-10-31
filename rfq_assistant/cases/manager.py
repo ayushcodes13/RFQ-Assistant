@@ -53,6 +53,7 @@ from rfq_assistant.schemas.models import (
     RFQCase,
     RFQLineItem,
     RFQLineItemUpdate,
+    RematchLineRequest,
     ReviewPlan,
     SourceFileMetadata,
     SourceCoverageUnit,
@@ -100,14 +101,29 @@ class CaseManager:
                 self._audit_events[case.case_id] = [
                     AuditEvent.model_validate(item) for item in self.state_store.load_audit_events(case.case_id)
                 ]
+                version_backfilled = False
+                for line in self._lines_by_case[case.case_id]:
+                    if line.matched_catalog_version is None:
+                        recovered_version = self._matched_catalog_version(
+                            line.candidates, line.selected_catalog_sku
+                        )
+                        if recovered_version is not None:
+                            line.matched_catalog_version = recovered_version
+                            version_backfilled = True
+                    line.catalog_rematch_required = self._line_requires_catalog_rematch(line)
+                self._sync_case_catalog_metrics(case.case_id, force_persist=version_backfilled)
 
     def get_case(self, case_id: str) -> Optional[RFQCase]:
+        self._sync_case_catalog_metrics(case_id)
         return self._cases.get(case_id)
 
     def list_cases(self) -> List[RFQCase]:
+        for case_id in self._cases:
+            self._sync_case_catalog_metrics(case_id)
         return sorted(self._cases.values(), key=lambda c: c.created_at, reverse=True)
 
     def get_lines(self, case_id: str) -> List[RFQLineItem]:
+        self._sync_case_catalog_metrics(case_id)
         return self._lines_by_case.get(case_id, [])
 
     def get_audit_trail(self, case_id: str) -> List[AuditEvent]:
@@ -394,11 +410,16 @@ class CaseManager:
 
             # Match lines against catalog
             lines: List[RFQLineItem] = []
+            catalog_snapshot = self.catalog.snapshot()
+            catalog_matcher = ExactMatchEngine(catalog_snapshot)
+            case.catalog_version = catalog_snapshot.active_version
             set_processing_stage(ProcessingStage.MATCHING)
             stage_started = time.perf_counter()
             for draft in parse_result.lines:
                 line_id = f"line-{uuid.uuid4().hex[:8]}"
-                match_res = self.matcher.match_line(draft.requested_mpn, draft.requested_manufacturer)
+                match_res = catalog_matcher.match_line(
+                    draft.requested_mpn, draft.requested_manufacturer
+                )
 
                 reviewable_warnings = [
                     warning for warning in draft.extraction_warnings
@@ -430,6 +451,7 @@ class CaseManager:
                     matched_catalog_version=self._matched_catalog_version(
                         match_res.candidates, match_res.selected_sku
                     ),
+                    catalog_rematch_required=False,
                     candidates=match_res.candidates,
                     review_decision=ReviewDecision.PENDING,
                 )
@@ -437,6 +459,8 @@ class CaseManager:
             timings["match_ms"] = (time.perf_counter() - stage_started) * 1000
 
             self._lines_by_case[case_id] = lines
+            for line in lines:
+                line.catalog_rematch_required = self._line_requires_catalog_rematch(line)
             self._record_audit(
                 case_id=case_id,
                 actor=actor,
@@ -677,6 +701,114 @@ class CaseManager:
         )
         return candidate.catalog_item.catalog_version if candidate else None
 
+    def _line_requires_catalog_rematch(self, line: RFQLineItem) -> bool:
+        if not line.selected_catalog_sku:
+            return False
+        active_item = self.catalog.get_by_sku(line.selected_catalog_sku)
+        if active_item is None:
+            return True
+        if line.matched_catalog_version is None:
+            line.matched_catalog_version = self._matched_catalog_version(
+                line.candidates, line.selected_catalog_sku
+            )
+        return line.matched_catalog_version != active_item.catalog_version
+
+    def _sync_case_catalog_metrics(self, case_id: str, *, force_persist: bool = False) -> int:
+        """Recompute stale-match flags and readiness after restart or catalog edits."""
+        lines = self._lines_by_case.get(case_id, [])
+        stale_count = 0
+        flags_changed = False
+        for line in lines:
+            required = self._line_requires_catalog_rematch(line)
+            stale_count += int(required)
+            if line.catalog_rematch_required != required:
+                line.catalog_rematch_required = required
+                flags_changed = True
+        case = self._cases.get(case_id)
+        if case is None:
+            return stale_count
+        if case.status in (CaseStatus.NEW, CaseStatus.PROCESSING, CaseStatus.FAILED):
+            if flags_changed or force_persist:
+                self._persist_case(case_id)
+            return stale_count
+        unresolved = sum(1 for line in lines if blocking_line_issues(line, self.catalog))
+        expected_status = (
+            CaseStatus.EXPORTED
+            if case.status == CaseStatus.EXPORTED and unresolved == 0
+            else CaseStatus.READY_TO_EXPORT if unresolved == 0 and lines
+            else CaseStatus.NEEDS_REVIEW
+        )
+        if (
+            flags_changed
+            or force_persist
+            or case.unresolved_count != unresolved
+            or case.status != expected_status
+        ):
+            self._refresh_case_metrics(case_id)
+        return stale_count
+
+    def handle_catalog_replacement(self, actor: str, version: Optional[str]) -> None:
+        """Mark affected cases as stale and persist an audit event for the snapshot change."""
+        for case_id, lines in self._lines_by_case.items():
+            case = self._cases.get(case_id)
+            if case is None or case.status in (CaseStatus.NEW, CaseStatus.PROCESSING, CaseStatus.FAILED):
+                continue
+            stale_count = 0
+            for line in lines:
+                required = self._line_requires_catalog_rematch(line)
+                stale_count += int(required)
+                if line.catalog_rematch_required != required:
+                    line.catalog_rematch_required = required
+            if not stale_count:
+                continue
+            self._record_audit(
+                case_id=case_id,
+                actor=actor,
+                action=AuditAction.CATALOG_IMPORTED,
+                field_name="catalog_version",
+                new_value=version,
+                notes=f"Active catalog changed. {stale_count} line match(es) require rematching.",
+            )
+            self._refresh_case_metrics(case_id)
+
+    def rematch_line(self, case_id: str, line_id: str, request: RematchLineRequest) -> RFQLineItem:
+        """Replace a stale match with a current catalog proposal and revoke approval."""
+        lines = self._lines_by_case.get(case_id, [])
+        line = next((item for item in lines if item.line_id == line_id), None)
+        if line is None:
+            raise ValueError("RFQ line item not found.")
+        if request.expected_version != line.version:
+            raise ValueError(
+                f"Stale state / conflict: Line item version is {line.version}, "
+                f"but client expected version {request.expected_version}. Please refresh."
+            )
+        old_version = line.matched_catalog_version
+        matcher = ExactMatchEngine(self.catalog.snapshot())
+        result = matcher.match_line(line.requested_mpn, line.requested_manufacturer)
+        line.match_status = result.match_status
+        line.selected_catalog_sku = result.selected_sku
+        line.candidates = result.candidates
+        line.matched_catalog_version = self._matched_catalog_version(
+            result.candidates, result.selected_sku
+        )
+        line.catalog_rematch_required = self._line_requires_catalog_rematch(line)
+        line.review_decision = ReviewDecision.PENDING
+        line.reviewed_by = None
+        line.reviewed_at = None
+        line.version += 1
+        self._record_audit(
+            case_id=case_id,
+            line_id=line_id,
+            actor=request.actor,
+            action=AuditAction.CATALOG_REMATCHED,
+            field_name="catalog_version",
+            old_value=old_version,
+            new_value=line.matched_catalog_version,
+            notes="The catalog match was refreshed against the active catalog; human review is required again.",
+        )
+        self._refresh_case_metrics(case_id)
+        return line
+
     @staticmethod
     def _llm_segments(
         drafts, content: bytes, filename: str, source_type: SourceType,
@@ -897,6 +1029,8 @@ class CaseManager:
                 f"Stale state / conflict: Line item version is {line.version}, but client expected version {update.expected_version}. Please refresh."
             )
 
+        current_matcher = ExactMatchEngine(self.catalog.snapshot())
+
         material_changes = []
 
         # Validate quantity strictly
@@ -940,7 +1074,7 @@ class CaseManager:
             )
             line.requested_mpn = update.requested_mpn
             # Re-match against catalog
-            rematch = self.matcher.match_line(line.requested_mpn, line.requested_manufacturer)
+            rematch = current_matcher.match_line(line.requested_mpn, line.requested_manufacturer)
             line.match_status = rematch.match_status
             line.selected_catalog_sku = rematch.selected_sku
             line.candidates = rematch.candidates
@@ -960,7 +1094,7 @@ class CaseManager:
                 new_value=update.requested_manufacturer,
             )
             line.requested_manufacturer = update.requested_manufacturer
-            rematch = self.matcher.match_line(line.requested_mpn, line.requested_manufacturer)
+            rematch = current_matcher.match_line(line.requested_mpn, line.requested_manufacturer)
             line.match_status = rematch.match_status
             line.selected_catalog_sku = rematch.selected_sku
             line.candidates = rematch.candidates
@@ -1057,6 +1191,8 @@ class CaseManager:
             line.reviewed_by = update.actor
             line.reviewed_at = datetime.utcnow()
 
+        line.catalog_rematch_required = self._line_requires_catalog_rematch(line)
+
         for field in (
             "requested_manufacturer", "requested_mpn", "description", "quantity", "unit"
         ):
@@ -1124,7 +1260,13 @@ class CaseManager:
             return False
         if line.match_status != MatchStatus.EXACT_MATCH or not line.selected_catalog_sku:
             return False
-        if catalog.get_by_sku(line.selected_catalog_sku) is None:
+        catalog_item = catalog.get_by_sku(line.selected_catalog_sku)
+        if catalog_item is None:
+            return False
+        if (
+            line.catalog_rematch_required
+            or line.matched_catalog_version != catalog_item.catalog_version
+        ):
             return False
         if line.extraction_status != ExtractionStatus.EXTRACTED:
             return False
@@ -1143,6 +1285,7 @@ class CaseManager:
         return f"{extraction_path}|{location}"
 
     def get_review_plan(self, case_id: str) -> ReviewPlan:
+        self._sync_case_catalog_metrics(case_id)
         case = self._cases.get(case_id)
         if case is None:
             raise ValueError("RFQ case not found.")

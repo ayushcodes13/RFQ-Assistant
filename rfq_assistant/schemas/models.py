@@ -155,6 +155,7 @@ class RFQLineItem(BaseModel):
     match_status: MatchStatus = MatchStatus.NO_MATCH
     selected_catalog_sku: Optional[str] = None
     matched_catalog_version: Optional[str] = None
+    catalog_rematch_required: bool = False
     candidates: List[MatchCandidate] = Field(default_factory=list)
     review_decision: ReviewDecision = ReviewDecision.PENDING
     reviewed_by: Optional[str] = None
@@ -181,6 +182,13 @@ class RFQLineItemUpdate(BaseModel):
 class RFQLineItemUpdateRequest(RFQLineItemUpdate):
     """Public reviewer edit contract; every API write must be version-checked."""
     expected_version: int = Field(..., ge=1)
+
+
+class RematchLineRequest(BaseModel):
+    """Explicitly rematch one stale line against the active catalog snapshot."""
+
+    expected_version: int = Field(..., ge=1)
+    actor: str = "Inside Sales"
 
 
 class BatchReviewRequest(BaseModel):
@@ -247,6 +255,7 @@ class RFQCase(BaseModel):
     llm_input_tokens: Optional[int] = None
     llm_output_tokens: Optional[int] = None
     catalog_id: Optional[str] = "default"
+    catalog_version: Optional[str] = None
 
 
 class AuditEvent(BaseModel):

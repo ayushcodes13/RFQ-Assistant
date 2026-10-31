@@ -37,6 +37,7 @@ from rfq_assistant.schemas.models import (
     RFQCase,
     RFQLineItem,
     RFQLineItemUpdateRequest,
+    RematchLineRequest,
     ReviewPlan,
     SpreadsheetSourcePreview,
     SourcePreviewCell,
@@ -46,6 +47,7 @@ from rfq_assistant.schemas.models import (
 ROOT = Path(__file__).resolve().parent.parent.parent
 log = logging.getLogger(__name__)
 DEFAULT_CATALOG_PATH = ROOT / "fixtures" / "catalogs" / "industrial_components_sample_catalog.csv"
+MAX_CATALOG_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
 class PNGResponse(Response):
@@ -176,9 +178,18 @@ async def import_catalog(
     current_user: PilotUser = Depends(require_role(["admin"])),
 ):
     """Imports tenant-authorized catalog CSV (admin only)."""
-    content = await file.read()
+    content = await file.read(MAX_CATALOG_UPLOAD_BYTES + 1)
+    if len(content) > MAX_CATALOG_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"Catalog CSV exceeds the {MAX_CATALOG_UPLOAD_BYTES}-byte upload limit.",
+        )
     try:
-        summary = catalog_repo.import_csv(content)
+        old_version = catalog_repo.active_version
+        summary = catalog_repo.replace_csv(content)
+        new_version = summary.get("catalog_version")
+        if new_version != old_version:
+            case_manager.handle_catalog_replacement(current_user.name, new_version)
         return {"status": "success", "summary": summary}
     except CatalogImportError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -507,6 +518,27 @@ def update_rfq_line(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Line item not found.")
     return updated
+
+
+@app.post(
+    "/api/rfqs/{case_id}/lines/{line_id}/rematch",
+    response_model=RFQLineItem,
+)
+def rematch_rfq_line(
+    case_id: str,
+    line_id: str,
+    request: RematchLineRequest,
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
+):
+    """Refresh one line's catalog match and require the reviewer to approve it again."""
+    if case_manager.get_case(case_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ case not found.")
+    request.actor = current_user.name
+    try:
+        return case_manager.rematch_line(case_id, line_id, request)
+    except ValueError as exc:
+        code = status.HTTP_404_NOT_FOUND if "not found" in str(exc).lower() else status.HTTP_409_CONFLICT
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
 
 
 @app.post("/api/rfqs/{case_id}/review")

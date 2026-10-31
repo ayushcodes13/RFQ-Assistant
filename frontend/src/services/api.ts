@@ -82,6 +82,19 @@ export async function updateLineItem(
   );
 }
 
+export async function rematchLineItem(
+  caseId: string,
+  lineId: string,
+  expectedVersion: number,
+): Promise<RFQLineItem> {
+  return sendJson<RFQLineItem>(
+    `/api/rfqs/${caseId}/lines/${lineId}/rematch`,
+    "POST",
+    { expected_version: expectedVersion },
+    "Failed to refresh catalog match",
+  );
+}
+
 export async function batchReviewLines(
   caseId: string,
   request: BatchReviewRequest

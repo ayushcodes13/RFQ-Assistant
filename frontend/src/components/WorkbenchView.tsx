@@ -23,6 +23,7 @@ import {
   batchReviewLines,
   getCaseLines,
   getReviewPlan,
+  rematchLineItem,
   updateLineItem,
 } from "@/services/api";
 import {
@@ -138,6 +139,7 @@ export function WorkbenchView({
   const [editValue, setEditValue] = useState("");
   const [selectedLine, setSelectedLine] = useState<RFQLineItem | null>(null);
   const [showDetail, setShowDetail] = useState(false);
+  const [rematchingLineId, setRematchingLineId] = useState<string | null>(null);
   const [showSourcePreview, setShowSourcePreview] = useState(false);
   const [showPdfSourcePreview, setShowPdfSourcePreview] = useState(false);
   const closeSourcePreview = useCallback(() => setShowSourcePreview(false), []);
@@ -315,6 +317,22 @@ export function WorkbenchView({
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Approve failed";
       alert(`Approve failed: ${msg}`);
+    }
+  };
+
+  const handleRematch = async (line: RFQLineItem) => {
+    setRematchingLineId(line.line_id);
+    try {
+      const updated = await rematchLineItem(caseData.case_id, line.line_id, line.version);
+      setLines((current) => current.map((item) => item.line_id === updated.line_id ? updated : item));
+      setSelectedLine(updated);
+      await refreshReviewPlan();
+      await onCaseUpdated();
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Catalog rematch failed";
+      alert(`Catalog rematch failed: ${message}`);
+    } finally {
+      setRematchingLineId(null);
     }
   };
 
@@ -1006,6 +1024,20 @@ export function WorkbenchView({
                   {selectedLine.match_status}
                 </dd>
               </div>
+              {selectedLine.catalog_rematch_required && (
+                <div className="sm:col-span-2 rounded-lg border border-[#e8c887] bg-[#fff9eb] p-3" role="alert">
+                  <p className="text-sm font-medium text-[#68460b]">The catalog has changed since this match.</p>
+                  <p className="mt-1 text-xs text-[#765a27]">Refresh the match and review it again before preparing a validated worksheet.</p>
+                  <button
+                    type="button"
+                    className="rfq-secondary mt-3"
+                    disabled={rematchingLineId === selectedLine.line_id}
+                    onClick={() => void handleRematch(selectedLine)}
+                  >
+                    {rematchingLineId === selectedLine.line_id ? "Refreshing match…" : "Refresh catalog match"}
+                  </button>
+                </div>
+              )}
               <div className="sm:col-span-2">
                 <dt
                   className="text-xs font-semibold uppercase tracking-wider mb-0.5"

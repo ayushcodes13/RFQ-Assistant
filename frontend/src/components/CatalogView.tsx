@@ -18,6 +18,7 @@ export function CatalogView() {
   const [result, setResult] = useState<CatalogImportSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [replacementAcknowledged, setReplacementAcknowledged] = useState(false);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -26,6 +27,7 @@ export function CatalogView() {
     if (f && f.name.endsWith(".csv")) {
       setFile(f);
       setError(null);
+      setReplacementAcknowledged(false);
     } else {
       setError("Please upload a .csv file");
     }
@@ -103,6 +105,7 @@ export function CatalogView() {
             onChange={(e) => {
               setFile(e.target.files?.[0] || null);
               setError(null);
+              setReplacementAcknowledged(false);
             }}
             className="hidden"
           />
@@ -163,11 +166,22 @@ export function CatalogView() {
           </AnimatePresence>
         </div>
 
+        <label className="mb-5 flex items-start gap-2 text-[13px] text-[#35484e]">
+          <input
+            type="checkbox"
+            checked={replacementAcknowledged}
+            onChange={(event) => setReplacementAcknowledged(event.target.checked)}
+            className="mt-0.5 accent-[#a83e1c]"
+          />
+          <span>This replaces the active catalog snapshot. Existing matches from older snapshots will need rematching and review.</span>
+        </label>
+        <p className="-mt-3 mb-4 text-xs text-[#52656b]">Upload a complete, authorized catalog file so removed items are not kept active.</p>
+
         {/* Import button */}
         <div className="mb-6 flex justify-start">
           <button
             onClick={handleImport}
-            disabled={!file || importing}
+            disabled={!file || importing || !replacementAcknowledged}
             className="rfq-primary disabled:opacity-50"
             style={{
               backgroundColor: "var(--color-amber-400)",

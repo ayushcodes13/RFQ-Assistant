@@ -389,16 +389,16 @@ def test_pinned_llm_result_is_reused_after_worker_interruption(tmp_path, monkeyp
     job = store.claim_ingestion_job("worker-1")
     assert job is not None
 
-    original_match = manager.matcher.match_line
+    original_match = manager_module.ExactMatchEngine.match_line
     fail_once = {"value": True}
 
-    def fail_first_match(*args, **kwargs):
+    def fail_first_match(matcher, *args, **kwargs):
         if fail_once["value"]:
             fail_once["value"] = False
             raise RuntimeError("synthetic interruption after model validation")
-        return original_match(*args, **kwargs)
+        return original_match(matcher, *args, **kwargs)
 
-    monkeypatch.setattr(manager.matcher, "match_line", fail_first_match)
+    monkeypatch.setattr(manager_module.ExactMatchEngine, "match_line", fail_first_match)
     try:
         manager.create_case_from_upload(
             "request.txt", content, _existing_case_id=case.case_id,

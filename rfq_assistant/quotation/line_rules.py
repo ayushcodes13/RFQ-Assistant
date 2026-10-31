@@ -33,6 +33,13 @@ def blocking_line_issues(line: RFQLineItem, catalog: CatalogRepository) -> List[
         issues.append(f"part match is {line.match_status.value}")
     elif not line.selected_catalog_sku or catalog.get_by_sku(line.selected_catalog_sku) is None:
         issues.append("selected catalog SKU is missing or unknown")
+    else:
+        selected_item = catalog.get_by_sku(line.selected_catalog_sku)
+        if (
+            line.catalog_rematch_required
+            or line.matched_catalog_version != selected_item.catalog_version
+        ):
+            issues.append("catalog changed since match; rematch required")
 
     for warning in line.extraction_warnings:
         if warning.severity.lower() == "error":

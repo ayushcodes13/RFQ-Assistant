@@ -9,6 +9,7 @@ Validates:
 """
 
 import io
+import importlib
 from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
@@ -19,6 +20,8 @@ from rfq_assistant.matching.catalog import CatalogItem
 from rfq_assistant.quotation.validate import ProposedQuote, QuoteLine
 from rfq_assistant.schemas.enums import ReviewDecision
 from rfq_assistant.schemas.models import ExportRequest, RFQLineItemUpdate
+
+api_module = importlib.import_module("rfq_assistant.api.app")
 
 
 @pytest.fixture(autouse=True)
@@ -125,6 +128,22 @@ def test_role_based_access_control(client, monkeypatch):
     # 4. Admin successfully deletes case -> 200
     del_admin = client.delete(f"/api/rfqs/{case.case_id}", headers=admin_headers)
     assert del_admin.status_code == 200
+
+
+def test_catalog_import_rejects_oversized_csv_before_replacement(client, monkeypatch):
+    monkeypatch.setenv("REQUIRE_AUTH", "true")
+    monkeypatch.setattr(api_module, "MAX_CATALOG_UPLOAD_BYTES", 16)
+    before = catalog_repo.list_all()
+
+    response = client.post(
+        "/api/catalogs/import",
+        files={"file": ("large.csv", b"x" * 17, "text/csv")},
+        headers={"X-API-Key": "test-admin-secret-000000001"},
+    )
+
+    assert response.status_code == 413
+    assert "upload limit" in response.json()["detail"]
+    assert catalog_repo.list_all() == before
 
 
 def test_authenticated_actor_cannot_be_spoofed(client, monkeypatch):
