@@ -1,0 +1,5 @@
+SYNTHETIC FIXTURE — Suffix-bearing MPNs (ABC-12, ABC-12A, ABC-12-R2)
+Please quote:
+1. 10 pcs Acme Industrial ABC-12 overload relay
+2. 5 pcs Acme Industrial ABC-12A overload relay with aux
+3. 3 pcs Acme Industrial ABC-12-R2 conformal coated relay

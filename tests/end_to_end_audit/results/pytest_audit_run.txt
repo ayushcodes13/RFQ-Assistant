@@ -1,0 +1,64 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0 -- /Users/devayushrout/.codex/worktrees/rfq-assistant-audit/RFQ-Assistant/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/devayushrout/.codex/worktrees/rfq-assistant-audit/RFQ-Assistant
+configfile: pyproject.toml
+plugins: anyio-4.12.1, asyncio-1.2.0
+asyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 47 items
+
+tests/end_to_end_audit/test_audit_harness.py::TestExtractionTextEdgeCases::test_multiline_email_with_headers PASSED [  2%]
+tests/end_to_end_audit/test_audit_harness.py::TestExtractionTextEdgeCases::test_numeric_only_mpn PASSED [  4%]
+tests/end_to_end_audit/test_audit_harness.py::TestExtractionTextEdgeCases::test_description_only_no_mpn PASSED [  6%]
+tests/end_to_end_audit/test_audit_harness.py::TestExtractionTextEdgeCases::test_suffix_bearing_mpn PASSED [  8%]
+tests/end_to_end_audit/test_audit_harness.py::TestExtractionSpreadsheetEdgeCases::test_csv_different_headers PASSED [ 10%]
+tests/end_to_end_audit/test_audit_harness.py::TestExtractionSpreadsheetEdgeCases::test_csv_alt_headers PASSED [ 12%]
+tests/end_to_end_audit/test_audit_harness.py::TestExtractionSpreadsheetEdgeCases::test_headerless_csv PASSED [ 14%]
+tests/end_to_end_audit/test_audit_harness.py::TestExtractionSpreadsheetEdgeCases::test_csv_with_duplicate_lines PASSED [ 17%]
+tests/end_to_end_audit/test_audit_harness.py::TestExtractionSpreadsheetEdgeCases::test_csv_short_header_names PASSED [ 19%]
+tests/end_to_end_audit/test_audit_harness.py::TestExtractionSpreadsheetEdgeCases::test_xlsx_alt_headers PASSED [ 21%]
+tests/end_to_end_audit/test_audit_harness.py::TestExtractionSpreadsheetEdgeCases::test_xlsx_interleaved_columns PASSED [ 23%]
+tests/end_to_end_audit/test_audit_harness.py::TestExtractionSpreadsheetEdgeCases::test_xlsx_multisheet_diff_cols PASSED [ 25%]
+tests/end_to_end_audit/test_audit_harness.py::TestExtractionSpreadsheetEdgeCases::test_xlsx_formula_mpn_values PASSED [ 27%]
+tests/end_to_end_audit/test_audit_harness.py::TestExtractionSpreadsheetEdgeCases::test_xlsx_formula_in_notes PASSED [ 29%]
+tests/end_to_end_audit/test_audit_harness.py::TestExtractionSpreadsheetEdgeCases::test_headerless_xlsx PASSED [ 31%]
+tests/end_to_end_audit/test_audit_harness.py::TestExtractionPdfEdgeCases::test_multipage_native_pdf PASSED [ 34%]
+tests/end_to_end_audit/test_audit_harness.py::TestExtractionPdfEdgeCases::test_pdf_unfamiliar_manufacturers PASSED [ 36%]
+tests/end_to_end_audit/test_audit_harness.py::TestMatchingExactness::test_suffix_precision_no_collapsed_match PASSED [ 38%]
+tests/end_to_end_audit/test_audit_harness.py::TestMatchingExactness::test_cross_brand_collision_no_auto_selection PASSED [ 40%]
+tests/end_to_end_audit/test_audit_harness.py::TestMatchingExactness::test_no_match_not_silently_approved PASSED [ 42%]
+tests/end_to_end_audit/test_audit_harness.py::TestMatchingExactness::test_unfamiliar_manufacturer_not_normalized_to_known PASSED [ 44%]
+tests/end_to_end_audit/test_audit_harness.py::TestReviewAndExportBlocking::test_unresolved_lines_block_export PASSED [ 46%]
+tests/end_to_end_audit/test_audit_harness.py::TestReviewAndExportBlocking::test_partial_export_allowed_with_flag PASSED [ 48%]
+tests/end_to_end_audit/test_audit_harness.py::TestReviewAndExportBlocking::test_audit_trail_records_all_actions PASSED [ 51%]
+tests/end_to_end_audit/test_audit_harness.py::TestReviewAndExportBlocking::test_post_approval_edit_revokes_approval PASSED [ 53%]
+tests/end_to_end_audit/test_audit_harness.py::TestReviewAndExportBlocking::test_contradictory_sku_selection_blocked PASSED [ 55%]
+tests/end_to_end_audit/test_audit_harness.py::TestExportContentVerification::test_xlsx_export_has_draft_banner PASSED [ 57%]
+tests/end_to_end_audit/test_audit_harness.py::TestExportContentVerification::test_csv_export_has_draft_banner PASSED [ 59%]
+tests/end_to_end_audit/test_audit_harness.py::TestExportContentVerification::test_xlsx_export_no_formula_execution PASSED [ 61%]
+tests/end_to_end_audit/test_audit_harness.py::TestExportContentVerification::test_csv_export_escapes_formula_values PASSED [ 63%]
+tests/end_to_end_audit/test_audit_harness.py::TestExportContentVerification::test_export_includes_source_locator PASSED [ 65%]
+tests/end_to_end_audit/test_audit_harness.py::TestExportContentVerification::test_email_draft_is_unsent PASSED [ 68%]
+tests/end_to_end_audit/test_audit_harness.py::TestAdversarialFailures::test_empty_file_rejected PASSED [ 70%]
+tests/end_to_end_audit/test_audit_harness.py::TestAdversarialFailures::test_corrupt_pdf_rejected PASSED [ 72%]
+tests/end_to_end_audit/test_audit_harness.py::TestAdversarialFailures::test_oversized_csv_rejected PASSED [ 74%]
+tests/end_to_end_audit/test_audit_harness.py::TestAdversarialFailures::test_oversized_file_rejected PASSED [ 76%]
+tests/end_to_end_audit/test_audit_harness.py::TestAdversarialFailures::test_password_protected_pdf_rejected PASSED [ 78%]
+tests/end_to_end_audit/test_audit_harness.py::TestAdversarialFailures::test_unsupported_extension_rejected PASSED [ 80%]
+tests/end_to_end_audit/test_audit_harness.py::TestAdversarialFailures::test_prompt_injection_isolated_as_data PASSED [ 82%]
+tests/end_to_end_audit/test_audit_harness.py::TestAdversarialFailures::test_csv_with_formula_values_handled PASSED [ 85%]
+tests/end_to_end_audit/test_audit_harness.py::TestFullApiWorkflow::test_full_workflow_via_api PASSED [ 87%]
+tests/end_to_end_audit/test_audit_harness.py::TestFullApiWorkflow::test_workflow_with_file_upload_csv PASSED [ 89%]
+tests/end_to_end_audit/test_audit_harness.py::TestFullApiWorkflow::test_workflow_with_file_upload_xlsx PASSED [ 91%]
+tests/end_to_end_audit/test_audit_harness.py::TestFullApiWorkflow::test_source_file_retrieval PASSED [ 93%]
+tests/end_to_end_audit/test_audit_harness.py::TestPersistenceRestart::test_case_survives_manager_restart PASSED [ 95%]
+tests/end_to_end_audit/test_audit_harness.py::TestPersistenceRestart::test_uploaded_file_survives_restart PASSED [ 97%]
+tests/end_to_end_audit/test_audit_harness.py::TestConcurrencyStress::test_concurrent_case_creation PASSED [100%]
+
+=============================== warnings summary ===============================
+.venv/lib/python3.9/site-packages/defusedxml/__init__.py:30
+  /Users/devayushrout/.codex/worktrees/rfq-assistant-audit/RFQ-Assistant/.venv/lib/python3.9/site-packages/defusedxml/__init__.py:30: DeprecationWarning: defusedxml.cElementTree is deprecated, import from defusedxml.ElementTree instead.
+    from . import cElementTree
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 47 passed, 1 warning in 1.14s =========================

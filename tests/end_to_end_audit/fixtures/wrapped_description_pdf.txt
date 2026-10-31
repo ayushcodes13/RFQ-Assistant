@@ -1,0 +1,11 @@
+SYNTHETIC RFQ — PDF WITH WRAPPED DESCRIPTIONS AND TAB-DELIMITED TABLE
+RFQ-2026-001
+Issue Date: 2026-11-01
+Customer: Synthetic Manufacturing Co.
+
+Line	Description	Qty	Unit	Manufacturer	MPN
+1	TeSys D contactor, 24VDC coil, 9A, 3-pole, screw terminals, 14mm	10	EA	Schneider Electric	LC1D09BD
+2	SIMATIC S7-1200 CPU 1214C, DC/DC/DC, 14DI/10DO, 14-pin terminal, 70mm width	4	EA	Siemens	6ES7214-1AG40-0XB0
+3	Miniature relay, 4PDT, 24VDC coil, 16A contact rating, RT-DIN, sealed	50	EA	Omron	MY4N-D2-DC24
+4	Circuit breaker, 1-pole, 10A, C-curve, 30mA RCD, DIN-rail mount, 6kA breaking	20	EA	Eaton	FAZ-C10/1
+5	PLC interface relay module, 24VDC coil, SPDT-NO, 5A, screw clamp, 6mm width	15	EA	Phoenix Contact	2900364
