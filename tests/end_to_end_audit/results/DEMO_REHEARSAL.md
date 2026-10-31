@@ -12,10 +12,11 @@
 | Audit tests | 121 passed, 1 deprecation warning | `pytest -q tests/end_to_end_audit/` |
 | Synthetic XLSX evaluation | 20/20 lines, 80/80 critical fields, 20/20 exact matches, 20 source locators, 0 unflagged critical mismatches | `scripts.evaluate_synthetic_demo`; synthetic ground truth only |
 | Synthetic document corpus | 30/30 full API workflows; 128/128 concurrent create requests | 8 CSV, 7 PDF, 8 text, 7 XLSX; does not establish general input accuracy |
-| Playwright rehearsal | 6/6 passed on each of 3 clean isolated DB runs | create/review/export, blocked export, refresh persistence, simulated send, unsupported-upload recovery |
+| Playwright rehearsal | 6/6 passed on each of 3 clean isolated DB runs; final expanded run 7/7 passed | Added regression for stale export dialog state across two cases |
 | Frontend lint and types | Passed | `npm run lint && npm run check:types` |
 | Production build | Passed | Built from an isolated frontend copy to avoid the user's existing local server artifacts |
-| Manual browser walkthrough | Passed for synthetic pasted-text case | Started with empty DB; created 2 exact-match lines; approved both in UI; opened line provenance; generated and downloaded the draft via browser download event |
+| Manual browser walkthrough | Passed for synthetic pasted text and XLSX upload | Started with empty DB; created/reviewed a 2-line case, opened line provenance, generated/downloaded its draft, then uploaded the 20-line XLSX fixture and checked its unresolved case |
+| Export dialog case isolation | Fixed and verified | A prior export link used to persist when opening a different case. Export modal now gets a fresh state per open/case; unresolved XLSX case showed `NEEDS_REVIEW` with no stale download link |
 | Downloaded workbook structure | Passed | OOXML ZIP integrity verified with Python stdlib; one `Quote Preparation` sheet; draft-only banner; 2 approved rows, quantities, exact SKU/MPN/OEM values, and source locators present |
 
 ## What the browser rehearsal proves
@@ -27,7 +28,7 @@
 - The quote send route reports `simulated_local` and `outbound_transport_invoked: false`.
 - An unsupported upload reports an error, creates no case, and allows recovery through valid pasted text.
 
-The browser rehearsal used the actual download link and the downloaded OOXML package was inspected. The workbook was **not** opened in Excel/LibreOffice, and the manual UI run used pasted text rather than uploading the XLSX fixture. The browser flow did not restart the backend process. Python persistence tests and API corpus runs provide separate evidence, not a substitute for those manual checks.
+The browser rehearsal used the actual download link and the downloaded OOXML package was inspected. The workbook was **not** opened in Excel/LibreOffice. The browser flow did not restart the backend process. Python persistence tests and API corpus runs provide separate evidence, not a substitute for those manual checks.
 
 ## Local server used for manual inspection
 

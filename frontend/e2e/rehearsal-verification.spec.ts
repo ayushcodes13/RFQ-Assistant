@@ -141,6 +141,72 @@ test("Rehearsal A — happy path: create, extract, approve, export, download", a
   expect(body[3]).toBe(0x04);
 });
 
+test("Rehearsal F — export dialog does not carry a prior case download into a new case", async ({
+  page,
+}) => {
+  await page.goto("/workspace");
+
+  await page.getByRole("button", { name: /New RFQ/i }).first().click();
+  const firstIngest = page.getByRole("dialog", { name: "New RFQ" });
+  await firstIngest.getByRole("button", { name: /Paste text/i }).click();
+  await firstIngest
+    .getByPlaceholder(/Paste email or RFQ text here/i)
+    .fill(KNOWN_GOOD_RFQ_TEXT);
+  await firstIngest
+    .getByPlaceholder("Optional case title")
+    .fill("Rehearsal F prior exported case");
+  await firstIngest.getByRole("button", { name: /Extract line items/i }).click();
+  await expect(firstIngest).toBeHidden({ timeout: 30_000 });
+
+  const firstApproveButtons = page.getByRole("button", {
+    name: /^Approve line \d+$/,
+  });
+  await expect(firstApproveButtons).toHaveCount(2);
+  await firstApproveButtons.first().click();
+  await page.getByRole("button", { name: /^Approve line \d+$/ }).first().click();
+  await page.getByRole("button", { name: /Export draft/i }).click();
+
+  const firstExportDialog = page.getByRole("dialog", { name: "Export draft" });
+  await firstExportDialog
+    .getByRole("button", { name: /Generate draft export/i })
+    .click();
+  await expect(firstExportDialog.getByRole("link", { name: /Download worksheet/i })).toBeVisible({
+    timeout: 30_000,
+  });
+  await firstExportDialog.getByRole("button", { name: "Close" }).first().click();
+
+  await page.getByRole("button", { name: "Overview" }).click();
+  await page.getByRole("button", { name: /New RFQ/i }).first().click();
+  const secondIngest = page.getByRole("dialog", { name: "New RFQ" });
+  await secondIngest.getByRole("button", { name: /Paste text/i }).click();
+  await secondIngest
+    .getByPlaceholder(/Paste email or RFQ text here/i)
+    .fill(RFQ_WITH_MISSING_QUANTITY);
+  await secondIngest
+    .getByPlaceholder("Optional case title")
+    .fill("Rehearsal F unresolved new case");
+  await secondIngest.getByRole("button", { name: /Extract line items/i }).click();
+  await expect(secondIngest).toBeHidden({ timeout: 30_000 });
+  await expect(
+    page.getByRole("heading", { name: "Rehearsal F unresolved new case" })
+  ).toBeVisible({ timeout: 30_000 });
+
+  await page.getByRole("button", { name: /Export draft/i }).click();
+  const secondExportDialog = page.getByRole("dialog", { name: "Export draft" });
+  await expect(secondExportDialog.getByText("NEEDS_REVIEW", { exact: true })).toBeVisible();
+  await expect(secondExportDialog.getByText("Export ready!")).toHaveCount(0);
+  await expect(
+    secondExportDialog.getByRole("link", { name: /Download worksheet/i })
+  ).toHaveCount(0);
+  await secondExportDialog
+    .getByRole("button", { name: /Generate draft export/i })
+    .click();
+  await expect(secondExportDialog.getByRole("alert")).toBeVisible();
+  await expect(
+    secondExportDialog.getByRole("link", { name: /Download worksheet/i })
+  ).toHaveCount(0);
+});
+
 /**
  * Test B: A missing quantity blocks export even when the requested part has an
  * exact catalog match. Correct the quantity in the UI, review the line, then
