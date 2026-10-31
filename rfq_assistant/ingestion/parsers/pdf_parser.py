@@ -122,9 +122,9 @@ class PDFParser(BaseDocumentParser):
         # pypdf preserves row-shaped text better for tabular RFQs. PyMuPDF is
         # used for visual triage/rendering, not to reshape native RFQ rows.
         try:
-            import fitz
+            import pymupdf
 
-            visual_doc = fitz.open(stream=content, filetype="pdf")
+            visual_doc = pymupdf.open(stream=content, filetype="pdf")
             try:
                 for page_number, (_, native_text) in enumerate(page_texts, start=1):
                     page = visual_doc[page_number - 1]

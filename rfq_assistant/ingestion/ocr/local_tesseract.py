@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Optional, Tuple
 
-import fitz
+import pymupdf
 
 
 class LocalOCRError(RuntimeError):
@@ -65,7 +65,7 @@ def image_coverage(page: Any) -> float:
     for info in page.get_image_info(xrefs=True):
         bbox = info.get("bbox")
         if bbox:
-            clipped = fitz.Rect(bbox) & rect
+            clipped = pymupdf.Rect(bbox) & rect
             image_area += max(0.0, float(clipped.width * clipped.height))
     return min(1.0, image_area / area)
 
@@ -97,7 +97,7 @@ def recognize_page(
     if not executable:
         raise LocalOCRError("Tesseract is not installed; local OCR is unavailable.")
     try:
-        document = fitz.open(stream=pdf_bytes, filetype="pdf")
+        document = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     except Exception as exc:
         raise LocalOCRError("PDF could not be opened for OCR rendering.") from exc
     try:
@@ -108,7 +108,7 @@ def recognize_page(
         estimated_pixels = page.rect.width * page.rect.height * scale * scale
         if estimated_pixels > max_pixels:
             scale *= (max_pixels / estimated_pixels) ** 0.5
-        pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+        pixmap = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
         png = pixmap.tobytes("png")
         rendered_width, rendered_height = pixmap.width, pixmap.height
     except LocalOCRError:
