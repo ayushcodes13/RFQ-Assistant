@@ -19,6 +19,7 @@ from rfq_assistant.auth import (
     initialize_authentication,
     require_role,
 )
+from rfq_assistant.api.cors import configured_cors_origins
 from rfq_assistant.cases.manager import CaseManager
 from rfq_assistant.exports import ExportGenerator, ExportValidationError
 from rfq_assistant.ingestion.excel import ExcelBOMInspector
@@ -41,6 +42,7 @@ from rfq_assistant.schemas.models import (
     CatalogItem,
     ExportManifest,
     ExportRequest,
+    ExtractionWarning,
     HealthResponse,
     RFQCase,
     RFQCaseSummary,
@@ -149,17 +151,8 @@ if ingestion_worker:
     app.add_event_handler("shutdown", ingestion_worker.stop)
 
 
-# Enable CORS for Next.js frontend
-# In production, restrict to the actual frontend origin(s). The wildcard
-# "*" is used here for local development convenience but is incompatible
-# with allow_credentials=True per the CORS spec. We explicitly enumerate
-# localhost origins to keep development working while remaining safe.
-_cors_origins = [
-    "http://localhost",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:8000",
-]
+# Enable CORS for explicitly configured browser origins.
+_cors_origins = configured_cors_origins()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -167,6 +160,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _scan_blocks_intake(scan) -> bool:
+    """Block detected malware and unscanned content in protected deployments."""
+    if getattr(scan, "quarantined", False):
+        return True
+    if not getattr(scan, "scanned", True):
+        return clamav_scanner.protected_mode
+    return not scan.is_clean
+
+
+def _unscanned_warning(scan) -> List[ExtractionWarning]:
+    if getattr(scan, "scanned", True):
+        return []
+    return [ExtractionWarning(
+        code="ANTIVIRUS_SCAN_UNAVAILABLE",
+        message="No antivirus engine scanned this source. Review the original file carefully before using extracted data.",
+        severity="warning",
+    )]
 
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -244,16 +256,21 @@ async def create_rfq(
                 "[rfq_timing] stage=upload_security bytes=%d upload_read_ms=%.1f scanner_ms=%.1f clean=%s",
                 len(content), upload_read_ms, (time.perf_counter() - scan_started) * 1000, scan.is_clean,
             )
-            if not scan.is_clean:
+            if _scan_blocks_intake(scan):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Security alert: Malicious attachment quarantined ({scan.threat_name}). Processing blocked.",
+                    detail=(
+                        "Security scan unavailable. Processing is blocked in protected mode."
+                        if not scan.scanned and clamav_scanner.protected_mode
+                        else f"Security alert: Malicious attachment quarantined ({scan.threat_name}). Processing blocked."
+                    ),
                 )
 
             if ASYNC_INGEST_ENABLED:
                 case = case_manager.enqueue_case_from_upload(
                     filename=filename, content=content, title=title,
                     customer_label=customer_label, actor=effective_actor,
+                    intake_warnings=_unscanned_warning(scan),
                 )
             else:
                 case = case_manager.create_case_from_upload(
@@ -262,6 +279,7 @@ async def create_rfq(
                     title=title,
                     customer_label=customer_label,
                     actor=effective_actor,
+                    intake_warnings=_unscanned_warning(scan),
                 )
             return case
         else:
@@ -272,16 +290,21 @@ async def create_rfq(
                 "[rfq_timing] stage=pasted_text_security scanner_ms=%.1f clean=%s",
                 (time.perf_counter() - scan_started) * 1000, scan.is_clean,
             )
-            if not scan.is_clean:
+            if _scan_blocks_intake(scan):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Security alert: Malicious content quarantined ({scan.threat_name}).",
+                    detail=(
+                        "Security scan unavailable. Processing is blocked in protected mode."
+                        if not scan.scanned and clamav_scanner.protected_mode
+                        else f"Security alert: Malicious content quarantined ({scan.threat_name})."
+                    ),
                 )
 
             if ASYNC_INGEST_ENABLED:
                 case = case_manager.enqueue_case_from_text(
                     raw_text=raw_text, title=title,
                     customer_label=customer_label, actor=effective_actor,
+                    intake_warnings=_unscanned_warning(scan),
                 )
             else:
                 case = case_manager.create_case_from_text(
@@ -289,6 +312,7 @@ async def create_rfq(
                     title=title,
                     customer_label=customer_label,
                     actor=effective_actor,
+                    intake_warnings=_unscanned_warning(scan),
                 )
             return case
     except (UploadValidationError, DocumentParserError) as e:
@@ -736,10 +760,14 @@ async def v1_extract_rfq(
         filename = file.filename or "upload.dat"
         # 1. Attachment security scan
         scan = clamav_scanner.scan_bytes(content, filename=filename)
-        if not scan.is_clean:
+        if _scan_blocks_intake(scan):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Security alert: Malicious attachment quarantined ({scan.threat_name}). Processing blocked.",
+                detail=(
+                    "Security scan unavailable. Processing is blocked in protected mode."
+                    if not scan.scanned and clamav_scanner.protected_mode
+                    else f"Security alert: Malicious attachment quarantined ({scan.threat_name}). Processing blocked."
+                ),
             )
 
         case = case_manager.create_case_from_upload(
@@ -748,14 +776,19 @@ async def v1_extract_rfq(
             title=title,
             customer_label=customer_name,
             actor=current_user.name,
+            intake_warnings=_unscanned_warning(scan),
         )
     else:
         content = (pasted_text or "").encode("utf-8")
         scan = clamav_scanner.scan_bytes(content, filename="pasted_text.txt")
-        if not scan.is_clean:
+        if _scan_blocks_intake(scan):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Security alert: Malicious content quarantined ({scan.threat_name}).",
+                detail=(
+                    "Security scan unavailable. Processing is blocked in protected mode."
+                    if not scan.scanned and clamav_scanner.protected_mode
+                    else f"Security alert: Malicious content quarantined ({scan.threat_name})."
+                ),
             )
         try:
             case = case_manager.create_case_from_text(
@@ -763,6 +796,7 @@ async def v1_extract_rfq(
                 title=title,
                 customer_label=customer_name,
                 actor=current_user.name,
+                intake_warnings=_unscanned_warning(scan),
             )
         except (UploadValidationError, DocumentParserError) as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -774,6 +808,7 @@ async def v1_extract_rfq(
         "security_scan": {
             "engine": scan.engine,
             "is_clean": scan.is_clean,
+            "scanned": getattr(scan, "scanned", True),
             "file_digest": scan.file_digest,
         },
     }
