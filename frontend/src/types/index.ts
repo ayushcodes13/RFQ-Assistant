@@ -27,6 +27,7 @@ export type ExportManifest = Schemas["ExportManifest"] & { generated_at: string 
 export type RFQLineItemUpdate = Schemas["RFQLineItemUpdateRequest"];
 export type BatchReviewRequest = Schemas["BatchReviewRequest"];
 export type ReviewPlan = Schemas["ReviewPlan"];
+export type SpreadsheetSourcePreview = Schemas["SpreadsheetSourcePreview"];
 export type ExportRequest = Schemas["ExportRequest"];
 
 export interface CatalogImportSummary {

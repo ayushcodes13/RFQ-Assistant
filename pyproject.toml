@@ -7,7 +7,7 @@ name = "rfq-assistant"
 version = "0.1.0"
 description = "Human-reviewed RFQ intake and quotation preparation assistant for industrial component distributors"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     # OpenAPI output is checked into the frontend contract. Keep schema
     # generation deterministic across local and CI environments.
@@ -22,7 +22,24 @@ dependencies = [
     "fpdf2>=2.8.0",
     "rapidfuzz>=3.0.0",
     "defusedxml>=0.7.1",
-    "pydantic-ai>=0.0.1",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "hypothesis>=6.120",
+    "time-machine>=2.16",
+    "ruff>=0.9",
+    "mypy>=1.14",
+    "bandit>=1.8",
+    "pip-audit>=2.7",
+    "redis>=5.0",
+]
+
+production = [
+    "redis>=5.0",
 ]
 
 

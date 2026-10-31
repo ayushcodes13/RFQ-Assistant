@@ -110,6 +110,33 @@ The browser talks to the same-origin Next.js API proxy. Configure
 `NEXT_PUBLIC_` variable for credentials. This proxy does not provide user or
 tenant authentication: the local demo is single-user, and a shared API key is
 not sufficient authorization for a distributor pilot.
+When enabling the optional Luna fallback, `RFQ_LLM_DEPLOYMENT_VERSION` may be
+set to an immutable provider deployment revision to enable retry-safe caching
+of validated model results. If the provider offers only a mutable model alias,
+leave this unset; deterministic parse/OCR retry caching still works.
+Set `RFQ_LLM_TIMEOUT_SECONDS` to bound each provider request (default 12),
+`RFQ_LLM_MAX_ATTEMPTS` to bound transport retries (default 2, maximum 3), and
+`RFQ_LLM_RETRY_BASE_SECONDS` / `RFQ_LLM_RETRY_MAX_DELAY_SECONDS` to control
+transient-error backoff (defaults 0.2 / 2 seconds). Only timeouts, HTTP 408,
+429, and 5xx are retried; permanent errors and malformed responses are not.
+If a provider's `Retry-After` is longer than the configured maximum, the call
+fails promptly and unresolved fields go to human review instead of waiting
+through a long quota pause.
+The reused Luna client applies process-local concurrency limits and a circuit
+breaker. Set `RFQ_LLM_REDIS_URL` and install `pip install -e '.[production]'` to enable atomic
+request-start pacing shared across worker processes; `RFQ_LLM_SHARED_PACE_PREFIX`
+can separate provider quotas (default `{rfq-luna}:provider`). A shared 429
+`Retry-After` hold pauses other workers using that prefix. Redis calls have
+short socket timeouts and fall back to process-local pacing during an outage,
+so configure a Redis health alert before relying on the global quota. Without
+the URL, pacing remains process-local. Configure `RFQ_LLM_MAX_CONCURRENT_REQUESTS`
+(default 2), `RFQ_LLM_REQUESTS_PER_MINUTE` (default 60),
+`RFQ_LLM_CIRCUIT_FAILURE_THRESHOLD` (default 4),
+`RFQ_LLM_CIRCUIT_OPEN_SECONDS` (default 30), and
+`RFQ_LLM_ADMISSION_TIMEOUT_SECONDS` (default 10). If either provider gate
+rejects a call, the affected extraction goes to human review. Global pacing is
+shared when Redis is configured; concurrency limits and the circuit breaker
+remain process-local and require separately coordinated deployment settings.
 Open `http://localhost:3000` for the product landing page and `http://localhost:3000/workspace` for the RFQ workspace. The workspace supports RFQ intake, line-level provenance review, catalog browsing, approval, and draft worksheet export.
 
 ### Client demo

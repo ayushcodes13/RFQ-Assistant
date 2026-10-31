@@ -8,7 +8,7 @@ import time
 import uuid
 
 from rfq_assistant.cases.manager import CaseManager
-from rfq_assistant.persistence import SQLiteStateStore
+from rfq_assistant.persistence import StateStore
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class RFQIngestionWorker:
     def __init__(
         self,
         manager: CaseManager,
-        state_store: SQLiteStateStore,
+        state_store: StateStore,
         *,
         poll_seconds: float = 0.5,
         lease_seconds: float = 90.0,
@@ -98,7 +98,8 @@ class RFQIngestionWorker:
         heartbeat_thread.start()
         try:
             self.manager.process_pending_case(
-                job["case_id"], job_id=job["job_id"], worker_id=worker_id
+                job["case_id"], job_id=job["job_id"], worker_id=worker_id,
+                queue_wait_ms=job.get("queue_wait_ms", 0.0),
             )
             if not lost_lease.is_set():
                 self.state_store.finish_ingestion_job(job["job_id"], worker_id)

@@ -1,8 +1,9 @@
 """Pydantic schemas and models for RFQ cases, line items, catalogs, matches, and audit."""
 
 from datetime import datetime
-from typing import List, Optional
-from pydantic import BaseModel, Field
+import math
+from typing import Dict, List, Optional, Tuple
+from pydantic import BaseModel, Field, field_validator
 
 from rfq_assistant.schemas.enums import (
     AuditAction,
@@ -21,6 +22,75 @@ class SourceLocator(BaseModel):
     sheet_name: Optional[str] = None
     row_number: Optional[int] = None
     text_snippet: Optional[str] = None
+    # Normalized 0..1 PDF page coordinates, after applying page rotation.
+    page_bbox: Optional[Tuple[float, float, float, float]] = None
+    ocr_confidence: Optional[float] = None
+    field_source_cells: Dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("page_bbox")
+    @classmethod
+    def page_bbox_is_valid(cls, value):
+        if value is None:
+            return value
+        if any(not math.isfinite(coordinate) or not 0 <= coordinate <= 1 for coordinate in value):
+            raise ValueError("page_bbox coordinates must be finite values from 0 to 1")
+        x0, y0, x1, y1 = value
+        if x0 >= x1 or y0 >= y1:
+            raise ValueError("page_bbox must have positive width and height")
+        return value
+
+    @field_validator("ocr_confidence")
+    @classmethod
+    def ocr_confidence_is_valid(cls, value):
+        if value is not None and (not math.isfinite(value) or not 0 <= value <= 100):
+            raise ValueError("ocr_confidence must be between 0 and 100")
+        return value
+
+
+class SourceCoverageUnit(BaseModel):
+    """Compact, hash-backed accounting for one PDF page, workbook sheet, or text document."""
+    unit_id: str
+    locator: SourceLocator
+    content_sha256: Optional[str] = None
+    unit_kind: str = "document"
+    processing_status: str = "processed"
+    is_empty: bool = False
+    truncated: bool = False
+    error_code: Optional[str] = None
+    ocr_status: Optional[str] = None
+    ocr_duration_ms: Optional[float] = None
+    sheet_visibility: Optional[str] = None
+    header_row_number: Optional[int] = None
+    hidden_row_count: int = 0
+    hidden_column_count: int = 0
+    formula_backed_fields: int = 0
+    page_rotation_degrees: Optional[int] = None
+    nonempty_regions: int = 0
+    structured_regions: int = 0
+    review_regions: int = 0
+    filtered_regions: int = 0
+    ocr_failures: int = 0
+
+
+class SourcePreviewCell(BaseModel):
+    coordinate: str
+    value: str
+    is_formula: bool = False
+    selected: bool = False
+
+
+class SourcePreviewRow(BaseModel):
+    row_number: int
+    is_target: bool = False
+    cells: List[SourcePreviewCell] = Field(default_factory=list)
+
+
+class SpreadsheetSourcePreview(BaseModel):
+    file_name: str
+    sheet_name: str
+    target_row: int
+    target_cells: List[str] = Field(default_factory=list)
+    rows: List[SourcePreviewRow] = Field(default_factory=list)
 
 
 class ExtractionWarning(BaseModel):
@@ -109,6 +179,7 @@ class ReviewPlan(BaseModel):
     total_lines: int
     exception_line_ids: List[str]
     sample_line_ids: List[str]
+    sample_rationale: Dict[str, str] = Field(default_factory=dict)
     remaining_line_ids: List[str]
     sample_approved: bool
     sample_correction_found: bool
@@ -134,6 +205,7 @@ class RFQCase(BaseModel):
     status: CaseStatus = CaseStatus.NEW
     source_type: SourceType
     source_file: Optional[SourceFileMetadata] = None
+    source_coverage: List[SourceCoverageUnit] = Field(default_factory=list)
     document_warnings: List[ExtractionWarning] = Field(default_factory=list)
     raw_text: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -141,6 +213,20 @@ class RFQCase(BaseModel):
     line_count: int = 0
     unresolved_count: int = 0
     parser_version: str = "v1-deterministic"
+    processing_profile_sha256: Optional[str] = None
+    parse_cache_hit: bool = False
+    stage_timings_ms: Dict[str, float] = Field(default_factory=dict)
+    llm_model: Optional[str] = None
+    llm_deployment_version: Optional[str] = None
+    llm_cache_hit: bool = False
+    llm_prompt_sha256: Optional[str] = None
+    llm_schema_version: Optional[str] = None
+    llm_validator_version: Optional[str] = None
+    llm_call_count: int = 0
+    llm_repair_call_count: int = 0
+    llm_review_call_count: int = 0
+    llm_input_tokens: Optional[int] = None
+    llm_output_tokens: Optional[int] = None
     catalog_id: Optional[str] = "default"
 
 
