@@ -169,9 +169,52 @@ def _check_document(client: TestClient, number: int, kind: str) -> dict[str, Any
     if lines_response.status_code != 200:
         return {"number": number, "format": kind, "step": "lines", "status": lines_response.status_code, "stage_latency_ms": timings}
     lines = lines_response.json()
+    expected_lines = [
+        {
+            "requested_mpn": PRODUCTS[(number + index) % len(PRODUCTS)][1],
+            "requested_manufacturer": PRODUCTS[(number + index) % len(PRODUCTS)][0],
+            "quantity": index + 2,
+            "unit": "EA",
+        }
+        for index in range(2)
+    ]
     source = _timed_request(timings, "source", lambda: client.get(f"/api/rfqs/{case_id}/source"))
     if not lines or source.status_code != 200:
         return {"number": number, "format": kind, "step": "source", "line_count": len(lines), "status": source.status_code, "stage_latency_ms": timings}
+
+    extraction_mismatches = []
+    actual_by_mpn = {line.get("requested_mpn"): line for line in lines if line.get("requested_mpn")}
+    if len(lines) != len(expected_lines) or set(actual_by_mpn) != {
+        line["requested_mpn"] for line in expected_lines
+    }:
+        extraction_mismatches.append({
+            "field": "line_set",
+            "expected_mpns": [line["requested_mpn"] for line in expected_lines],
+            "actual_mpns": [line.get("requested_mpn") for line in lines],
+        })
+    for expected in expected_lines:
+        actual = actual_by_mpn.get(expected["requested_mpn"])
+        if actual is None:
+            continue
+        for field in ("requested_manufacturer", "quantity", "unit"):
+            observed = actual.get(field)
+            if field == "quantity" and observed is not None:
+                observed = float(observed)
+            if observed != expected[field]:
+                extraction_mismatches.append({
+                    "mpn": expected["requested_mpn"],
+                    "field": field,
+                    "expected": expected[field],
+                    "actual": actual.get(field),
+                })
+    if extraction_mismatches:
+        return {
+            "number": number,
+            "format": kind,
+            "step": "ground-truth-field-comparison",
+            "mismatches": extraction_mismatches,
+            "stage_latency_ms": timings,
+        }
 
     invalid = [
         line
@@ -250,6 +293,8 @@ def _check_document(client: TestClient, number: int, kind: str) -> dict[str, Any
         "number": number,
         "format": kind,
         "lines": len(lines),
+        "critical_field_checks_total": len(expected_lines) * 3,
+        "critical_field_checks_passed": len(expected_lines) * 3,
         "approved": manifest["approved_lines"],
         "download_bytes": len(download.content),
         "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
@@ -334,6 +379,8 @@ def main() -> int:
             "xlsx_layout_variants": len(xlsx_layout_variants),
             "xlsx_diversity_passed": xlsx_diversity_passed,
             "successful_full_flows": len(results) - len(failures),
+            "critical_field_checks_total": sum(result.get("critical_field_checks_total", 0) for result in results),
+            "critical_field_checks_passed": sum(result.get("critical_field_checks_passed", 0) for result in results),
             "failures": failures,
             "elapsed_seconds": round(time.perf_counter() - started, 2),
             "median_document_ms": durations[len(durations) // 2] if durations else None,
