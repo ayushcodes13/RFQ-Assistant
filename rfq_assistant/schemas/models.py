@@ -1,7 +1,7 @@
 """Pydantic schemas and models for RFQ cases, line items, catalogs, matches, and audit."""
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from rfq_assistant.schemas.enums import (
@@ -21,6 +21,28 @@ class SourceLocator(BaseModel):
     sheet_name: Optional[str] = None
     row_number: Optional[int] = None
     text_snippet: Optional[str] = None
+
+
+class SourceCoverageUnit(BaseModel):
+    """Compact, hash-backed accounting for one PDF page, workbook sheet, or text document."""
+    unit_id: str
+    locator: SourceLocator
+    content_sha256: Optional[str] = None
+    unit_kind: str = "document"
+    processing_status: str = "processed"
+    is_empty: bool = False
+    truncated: bool = False
+    error_code: Optional[str] = None
+    ocr_status: Optional[str] = None
+    sheet_visibility: Optional[str] = None
+    header_row_number: Optional[int] = None
+    formula_backed_fields: int = 0
+    page_rotation_degrees: Optional[int] = None
+    nonempty_regions: int = 0
+    structured_regions: int = 0
+    review_regions: int = 0
+    filtered_regions: int = 0
+    ocr_failures: int = 0
 
 
 class ExtractionWarning(BaseModel):
@@ -104,6 +126,7 @@ class ReviewPlan(BaseModel):
     total_lines: int
     exception_line_ids: List[str]
     sample_line_ids: List[str]
+    sample_rationale: Dict[str, str] = Field(default_factory=dict)
     remaining_line_ids: List[str]
     sample_approved: bool
     sample_correction_found: bool
@@ -129,6 +152,7 @@ class RFQCase(BaseModel):
     status: CaseStatus = CaseStatus.NEW
     source_type: SourceType
     source_file: Optional[SourceFileMetadata] = None
+    source_coverage: List[SourceCoverageUnit] = Field(default_factory=list)
     document_warnings: List[ExtractionWarning] = Field(default_factory=list)
     raw_text: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -136,6 +160,20 @@ class RFQCase(BaseModel):
     line_count: int = 0
     unresolved_count: int = 0
     parser_version: str = "v1-deterministic"
+    processing_profile_sha256: Optional[str] = None
+    parse_cache_hit: bool = False
+    stage_timings_ms: Dict[str, float] = Field(default_factory=dict)
+    llm_model: Optional[str] = None
+    llm_deployment_version: Optional[str] = None
+    llm_cache_hit: bool = False
+    llm_prompt_sha256: Optional[str] = None
+    llm_schema_version: Optional[str] = None
+    llm_validator_version: Optional[str] = None
+    llm_call_count: int = 0
+    llm_repair_call_count: int = 0
+    llm_review_call_count: int = 0
+    llm_input_tokens: Optional[int] = None
+    llm_output_tokens: Optional[int] = None
     catalog_id: Optional[str] = "default"
 
 

@@ -22,6 +22,7 @@ class ScriptedClient:
     def __init__(self, responses: List[str]):
         self.responses = list(responses)
         self.calls = []
+        self.model = "gpt-6-luna"
 
     def complete(self, *, system: str, user: str) -> str:
         self.calls.append((system, user))
@@ -67,6 +68,38 @@ def test_valid_json_is_typed_and_grounded():
     assert any(w.code == "LLM_PROPOSED_EXTRACTION" for w in line.extraction_warnings)
     assert len(client.calls) == 2
     assert "Review extracted RFQ line proposals" in client.calls[1][0]
+    assert result.llm_model == "gpt-6-luna"
+    assert len(result.llm_prompt_sha256) == 64
+    assert result.llm_call_count == 2
+    assert result.llm_repair_call_count == 0
+    assert result.llm_review_call_count == 1
+
+
+def test_model_cache_requires_explicit_immutable_deployment_version():
+    unpinned = GroundedLLMExtractor(ScriptedClient([]))
+    assert unpinned.cache_profile() is None
+
+    pinned_client = ScriptedClient([])
+    pinned_client.deployment_version = "deployment-revision-2026-10"
+    profile = GroundedLLMExtractor(pinned_client).cache_profile()
+    assert profile["deployment_version"] == "deployment-revision-2026-10"
+    assert profile["schema_version"] == "rfq-grounded-extraction-v1"
+    assert profile["validator_version"] == "json-numeric-verbatim-locator-v1"
+
+
+def test_token_usage_is_aggregated_per_extraction_not_shared_between_calls():
+    class UsageClient(ScriptedClient):
+        last_usage = None
+
+        def complete(self, *, system: str, user: str) -> str:
+            result = super().complete(system=system, user=user)
+            self.last_usage = {"input_tokens": 100, "output_tokens": 10}
+            return result
+
+    result = GroundedLLMExtractor(UsageClient([response(), review_response()])).extract([segment()])
+
+    assert result.llm_input_tokens == 200
+    assert result.llm_output_tokens == 20
 
 
 def test_ungrounded_quantity_is_rejected_after_single_repair_attempt():
@@ -78,6 +111,8 @@ def test_ungrounded_quantity_is_rejected_after_single_repair_attempt():
     assert result.warnings[0].code == "LLM_EXTRACTION_BLOCKED"
     assert result.warnings[0].severity == "error"
     assert len(client.calls) == 2
+    assert result.llm_call_count == 2
+    assert result.llm_repair_call_count == 1
 
 
 def test_part_number_digits_cannot_ground_a_quantity_without_unit_or_quantity_label():
@@ -109,6 +144,42 @@ def test_string_quantity_is_rejected_even_if_it_looks_numeric():
     assert len(client.calls) == 3
 
 
+def test_quantity_that_overflows_float_storage_is_rejected():
+    huge = "9" * 400
+    raw = (
+        '{"lines":[{"line_number":1,"requested_manufacturer":"Fabrikam Controls",'
+        '"requested_mpn":"ABC-123","description":"relay","quantity":' + huge +
+        ',"unit":"EA","segment_id":"row-1","source_quote":"Fabrikam Controls ABC-123 '
+        + huge + ' EA relay"}]}'
+    )
+    client = ScriptedClient([raw, raw])
+    result = GroundedLLMExtractor(client).extract([
+        segment().model_copy(update={"text": f"Fabrikam Controls ABC-123 {huge} EA relay"})
+    ])
+
+    assert result.lines == []
+    assert result.warnings[0].code == "LLM_EXTRACTION_BLOCKED"
+    assert "represented safely" in result.warnings[0].message
+
+
+def test_quantity_precision_loss_in_float_storage_is_rejected():
+    exact_integer = 9007199254740993
+    raw = (
+        '{"lines":[{"line_number":1,"requested_manufacturer":"Fabrikam Controls",'
+        '"requested_mpn":"ABC-123","description":"relay","quantity":' + str(exact_integer) +
+        ',"unit":"EA","segment_id":"row-1","source_quote":"Fabrikam Controls ABC-123 '
+        + str(exact_integer) + ' EA relay"}]}'
+    )
+    client = ScriptedClient([raw, raw])
+    result = GroundedLLMExtractor(client).extract([
+        segment().model_copy(update={"text": f"Fabrikam Controls ABC-123 {exact_integer} EA relay"})
+    ])
+
+    assert result.lines == []
+    assert result.warnings[0].code == "LLM_EXTRACTION_BLOCKED"
+    assert "represented safely" in result.warnings[0].message
+
+
 def test_model_cannot_invent_noncontiguous_line_number_ordinals():
     bad = json.loads(response())
     bad["lines"][0]["line_number"] = 99
@@ -137,6 +208,11 @@ def test_llm_fills_missing_manufacturer_but_keeps_human_review_warning(tmp_path)
     assert line.quantity == 10
     assert line.review_decision.value == "PENDING"
     assert any(w.code == "LLM_PROPOSED_EXTRACTION" for w in line.extraction_warnings)
+    assert case.llm_model == "gpt-6-luna"
+    assert case.llm_schema_version == "rfq-grounded-extraction-v1"
+    assert case.llm_validator_version == "json-numeric-verbatim-locator-v1"
+    assert case.llm_call_count == 2
+    assert case.llm_review_call_count == 1
 
 
 def test_grounded_llm_rows_can_enter_the_review_sample_after_exact_matching(tmp_path):
@@ -244,6 +320,11 @@ def test_ocr_page_evidence_reaches_llm_fallback_and_remains_exceptional(tmp_path
     )
 
     class FakeParser:
+        cache_dependencies = ()
+
+        def cache_profile(self):
+            return {"parser": "test.fake", "version": "v1"}
+
         def parse(self, _content, _filename):
             return ParsedDocumentResult(lines=[], evidence_segments=[ocr_evidence])
 
@@ -264,6 +345,77 @@ def test_ocr_page_evidence_reaches_llm_fallback_and_remains_exceptional(tmp_path
     assert line.source_locator.page_number == 1
     assert any(w.code == "OCR_TEXT_REVIEW" for w in line.extraction_warnings)
     assert line.line_id in plan.exception_line_ids
+
+
+def test_pinned_llm_result_is_reused_after_worker_interruption(tmp_path, monkeypatch):
+    from rfq_assistant.cases import manager as manager_module
+    from rfq_assistant.persistence import SQLiteStateStore
+
+    quote = "Fabrikam Controls ABC-123 10 EA relay"
+    evidence = EvidenceSegment(
+        segment_id="row-1",
+        locator=SourceLocator(file_name="request.txt", row_number=1),
+        text=quote,
+    )
+
+    class FakeParser:
+        cache_dependencies = ()
+        calls = 0
+
+        def cache_profile(self):
+            return {"parser": "test.llm-cache", "version": "v1"}
+
+        def parse(self, _content, _filename):
+            self.calls += 1
+            return ParsedDocumentResult(lines=[], evidence_segments=[evidence])
+
+    parser = FakeParser()
+    monkeypatch.setattr(manager_module, "get_parser", lambda *_args, **_kwargs: parser)
+    client = ScriptedClient([response(quote=quote), review_response()])
+    client.deployment_version = "immutable-test-deployment-v1"
+    store = SQLiteStateStore(tmp_path / "state" / "rfq.sqlite3")
+    manager = CaseManager(
+        catalog=CatalogRepository(),
+        storage=DocumentStorage(base_dir=tmp_path / "files"),
+        state_store=store,
+        llm_extractor=GroundedLLMExtractor(client),
+    )
+    content = quote.encode("utf-8")
+    case = manager.enqueue_case_from_upload("request.txt", content)
+    job = store.claim_ingestion_job("worker-1")
+    assert job is not None
+
+    original_match = manager.matcher.match_line
+    fail_once = {"value": True}
+
+    def fail_first_match(*args, **kwargs):
+        if fail_once["value"]:
+            fail_once["value"] = False
+            raise RuntimeError("synthetic interruption after model validation")
+        return original_match(*args, **kwargs)
+
+    monkeypatch.setattr(manager.matcher, "match_line", fail_first_match)
+    try:
+        manager.create_case_from_upload(
+            "request.txt", content, _existing_case_id=case.case_id,
+            _job_id=job["job_id"], _worker_id="worker-1",
+        )
+    except RuntimeError as exc:
+        assert "after model validation" in str(exc)
+    else:
+        raise AssertionError("synthetic interruption was not raised")
+
+    completed = manager.create_case_from_upload(
+        "request.txt", content, _existing_case_id=case.case_id,
+        _job_id=job["job_id"], _worker_id="worker-1",
+    )
+
+    assert len(client.calls) == 2
+    assert parser.calls == 1
+    assert completed.llm_cache_hit is True
+    assert completed.llm_call_count == 2
+    assert completed.llm_deployment_version == "immutable-test-deployment-v1"
+    assert len(manager.get_lines(case.case_id)) == 1
 
 
 def test_environment_adapter_is_disabled_by_default(monkeypatch):
@@ -323,6 +475,7 @@ def test_provider_telemetry_records_latency_and_tokens_without_source_or_secret(
     assert "temperature" not in json.loads(observed["body"])
     assert "input_tokens=321" in caplog.text
     assert "output_tokens=11" in caplog.text
+    assert client.last_usage == {"input_tokens": 321, "output_tokens": 11}
     assert "synthetic-secret" not in caplog.text
     assert "PRIVATE RFQ SOURCE TEXT" not in caplog.text
 
@@ -334,6 +487,16 @@ def test_source_segment_limit_prevents_accidental_large_model_upload():
     assert result.lines == []
     assert result.warnings[0].code == "LLM_EXTRACTION_BLOCKED"
     assert client.calls == []
+
+
+def test_no_empty_llm_review_call_is_made_when_extraction_has_no_lines():
+    client = ScriptedClient([json.dumps({"lines": []})])
+    result = GroundedLLMExtractor(client).extract([segment()])
+
+    assert result.lines == []
+    assert len(client.calls) == 1
+    assert result.llm_call_count == 1
+    assert result.llm_review_call_count == 0
 
 
 def test_source_segment_builder_fails_closed_before_returning_partial_input():

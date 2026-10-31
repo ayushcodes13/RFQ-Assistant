@@ -8,10 +8,13 @@ review and exact catalog matching.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
+import math
 import os
 import re
 import time
+import threading
 from decimal import Decimal, InvalidOperation
 from typing import List, Optional, Protocol
 from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
@@ -104,6 +107,7 @@ class OpenAICompatibleClient:
         self, api_key: str, model: str, base_url: str,
         timeout_seconds: float = 20.0, api_version: str = "2024-05-01-preview",
         transport: Optional[httpx.BaseTransport] = None,
+        deployment_version: Optional[str] = None,
     ):
         if not api_key or not model or not base_url:
             raise ValueError("LLM API key, model, and base URL must all be configured")
@@ -112,14 +116,22 @@ class OpenAICompatibleClient:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.api_version = api_version
+        self.deployment_version = deployment_version
         if self.timeout_seconds <= 0:
             raise ValueError("LLM timeout must be positive")
         parsed = urlparse(self.base_url)
         if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
             raise ValueError("LLM endpoint must use HTTPS (except for a local test endpoint)")
         self._http = httpx.Client(timeout=self.timeout_seconds, transport=transport)
+        self._usage = threading.local()
+
+    @property
+    def last_usage(self):
+        """Thread-local token usage for the immediately preceding model call."""
+        return getattr(self._usage, "last_usage", None)
 
     def complete(self, *, system: str, user: str) -> str:
+        self._usage.last_usage = None
         endpoint = self._completion_url(self.base_url, self.api_version)
         is_azure = (urlparse(endpoint).hostname or "").endswith((".openai.azure.com", ".services.ai.azure.com"))
         request = {
@@ -152,6 +164,11 @@ class OpenAICompatibleClient:
                 input_tokens = "unknown"
             if not isinstance(output_tokens, int) or isinstance(output_tokens, bool):
                 output_tokens = "unknown"
+            if isinstance(input_tokens, int) and isinstance(output_tokens, int):
+                self._usage.last_usage = {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                }
             log.info(
                 "[rfq_llm_call] model=%s outcome=ok latency_ms=%.1f input_tokens=%s output_tokens=%s",
                 self.model,
@@ -234,6 +251,13 @@ array containing exactly one item for every proposed line_number. Each item has 
 when a field disagrees, and `uncertain` when evidence is incomplete or ambiguous. This review
 is a warning signal only and cannot approve a line."""
 
+LLM_SCHEMA_VERSION = "rfq-grounded-extraction-v1"
+LLM_VALIDATOR_VERSION = "json-numeric-verbatim-locator-v1"
+
+
+def llm_prompt_sha256() -> str:
+    return hashlib.sha256((SYSTEM_PROMPT + "\n" + REVIEW_PROMPT).encode("utf-8")).hexdigest()
+
 
 def _compact_whitespace(value: str) -> str:
     return " ".join(value.split())
@@ -301,6 +325,21 @@ class GroundedLLMExtractor:
         if callable(close):
             close()
 
+    def cache_profile(self) -> Optional[dict]:
+        """Model caching requires an explicitly pinned immutable deployment revision."""
+        deployment_version = getattr(self.client, "deployment_version", None)
+        model = getattr(self.client, "model", None)
+        if not deployment_version or not model:
+            return None
+        return {
+            "model": model,
+            "deployment_version": deployment_version,
+            "prompt_sha256": llm_prompt_sha256(),
+            "schema_version": LLM_SCHEMA_VERSION,
+            "validator_version": LLM_VALIDATOR_VERSION,
+            "max_input_characters": self.max_input_characters,
+        }
+
     @classmethod
     def from_environment(cls) -> Optional["GroundedLLMExtractor"]:
         if os.getenv("RFQ_LLM_ENABLED", "").lower() not in {"1", "true", "yes"}:
@@ -309,6 +348,7 @@ class GroundedLLMExtractor:
         model = os.getenv("RFQ_LLM_MODEL", "gpt-6-luna")
         base_url = os.getenv("RFQ_LLM_BASE_URL", "")
         api_version = os.getenv("RFQ_LLM_API_VERSION", "2024-05-01-preview")
+        deployment_version = os.getenv("RFQ_LLM_DEPLOYMENT_VERSION", "").strip() or None
         # This product has an explicit Luna-only model policy. Refuse to send
         # source data if a different model is configured by mistake.
         if not (key and base_url) or model.casefold() != "gpt-6-luna":
@@ -316,7 +356,8 @@ class GroundedLLMExtractor:
         try:
             timeout = float(os.getenv("RFQ_LLM_TIMEOUT_SECONDS", "12"))
             return cls(OpenAICompatibleClient(
-                key, model, base_url, timeout_seconds=timeout, api_version=api_version
+                key, model, base_url, timeout_seconds=timeout, api_version=api_version,
+                deployment_version=deployment_version,
             ))
         except (ValueError, httpx.InvalidURL):
             return None
@@ -340,10 +381,47 @@ class GroundedLLMExtractor:
             ensure_ascii=False,
             separators=(",", ":"),
         )
-        raw = self.client.complete(system=SYSTEM_PROMPT, user=source_payload)
+        call_count = 0
+        token_usage = {"input": 0, "output": 0, "known": True}
+
+        def complete(*, system: str, user: str) -> str:
+            nonlocal call_count
+            call_count += 1
+            try:
+                return self.client.complete(system=system, user=user)
+            finally:
+                usage = getattr(self.client, "last_usage", None)
+                if (isinstance(usage, dict)
+                        and isinstance(usage.get("input_tokens"), int)
+                        and isinstance(usage.get("output_tokens"), int)):
+                    token_usage["input"] += usage["input_tokens"]
+                    token_usage["output"] += usage["output_tokens"]
+                else:
+                    token_usage["known"] = False
+
+        def attach_metrics(result: ParsedDocumentResult, repair_calls: int = 0):
+            result.llm_model = model
+            result.llm_deployment_version = deployment_version
+            result.llm_prompt_sha256 = prompt_hash
+            result.llm_call_count = call_count
+            result.llm_repair_call_count = repair_calls
+            result.llm_input_tokens = token_usage["input"] if token_usage["known"] else None
+            result.llm_output_tokens = token_usage["output"] if token_usage["known"] else None
+            return result
+
+        model = getattr(self.client, "model", None)
+        deployment_version = getattr(self.client, "deployment_version", None)
+        prompt_hash = llm_prompt_sha256()
+        try:
+            raw = complete(system=SYSTEM_PROMPT, user=source_payload)
+        except Exception:
+            return attach_metrics(self._failure(
+                "The extraction model could not be reached. Verify the source manually.",
+            ))
         result, error = self._validate(raw, segments)
         if result is not None:
-            return self._review(result, segments)
+            result = self._review(result, segments, complete=complete)
+            return attach_metrics(result)
 
         # One bounded repair/validation fallback. It receives only the model's
         # untrusted response, validator errors, and the same bounded source.
@@ -353,7 +431,12 @@ class GroundedLLMExtractor:
             "Return the required JSON object. Validator errors: " + json.dumps(error) +
             "\nOriginal model output:\n" + raw[:12_000] + "\nSource excerpts:\n" + source_payload
         )
-        repaired = self.client.complete(system=SYSTEM_PROMPT, user=repair_prompt)
+        try:
+            repaired = complete(system=SYSTEM_PROMPT, user=repair_prompt)
+        except Exception:
+            return attach_metrics(self._failure(
+                "The extraction repair call could not be reached. Verify the source manually.",
+            ), repair_calls=1)
         result, repair_error = self._validate(repaired, segments)
         if result is not None:
             result.warnings.append(ExtractionWarning(
@@ -361,16 +444,21 @@ class GroundedLLMExtractor:
                 message="The initial model response failed validation; a corrected response passed deterministic checks and still requires human review.",
                 severity="warning",
             ))
-            return self._review(result, segments)
-        return self._failure("Model extraction failed schema or source-grounding validation: " + "; ".join(repair_error))
+            result = self._review(result, segments, complete=complete)
+            return attach_metrics(result, repair_calls=1)
+        return attach_metrics(self._failure(
+            "Model extraction failed schema or source-grounding validation: " + "; ".join(repair_error),
+        ), repair_calls=1)
 
-    def _review(self, result: ParsedDocumentResult, segments: List[EvidenceSegment]) -> ParsedDocumentResult:
+    def _review(self, result: ParsedDocumentResult, segments: List[EvidenceSegment], complete) -> ParsedDocumentResult:
         """Run a second LLM consistency pass after deterministic gates.
 
         This pass can only add exception warnings. It never removes the proposal
         warning or approves a row. If the pass is unavailable or malformed, all
         proposals remain visible but are routed to individual human review.
         """
+        if not result.lines:
+            return result
         proposals = [{
             "line_number": line.line_number,
             "segment_id": line.source_segment_id,
@@ -391,7 +479,7 @@ class GroundedLLMExtractor:
             "text": segment.text,
         } for segment in segments]
         try:
-            raw = self.client.complete(
+            raw = complete(
                 system=REVIEW_PROMPT,
                 user=json.dumps({"proposals": proposals, "source_excerpts": source_payload},
                                 ensure_ascii=False, separators=(",", ":")),
@@ -419,6 +507,7 @@ class GroundedLLMExtractor:
                     message="The LLM review pass could not verify this proposal. Review it individually against the original source.",
                     severity="warning",
                 ))
+        result.llm_review_call_count += 1
         return result
 
     def _validate(self, raw: str, segments: List[EvidenceSegment]):
@@ -452,6 +541,21 @@ class GroundedLLMExtractor:
                     return None, [f"line {line.line_number} {name} is not verbatim in source_quote"]
             if not _quantity_is_grounded(line.quantity, line.unit, quote):
                 return None, [f"line {line.line_number} quantity is not present in source_quote"]
+            normalized_quantity = None
+            if line.quantity is not None:
+                # RFQLineItem currently stores quantities as a Python float.
+                # Reject a grounded Decimal if conversion would overflow or
+                # change its decimal value; otherwise a valid JSON number could
+                # silently become infinity or a different commercial quantity.
+                try:
+                    normalized_quantity = float(line.quantity)
+                except (OverflowError, ValueError):
+                    return None, [f"line {line.line_number} quantity cannot be represented safely"]
+                if (
+                    not math.isfinite(normalized_quantity)
+                    or Decimal(str(normalized_quantity)) != line.quantity
+                ):
+                    return None, [f"line {line.line_number} quantity cannot be represented safely"]
             parsed_lines.append(ParsedLineDraft(
                 line_number=line.line_number,
                 raw_text=quote,
@@ -459,7 +563,7 @@ class GroundedLLMExtractor:
                 requested_manufacturer=line.requested_manufacturer,
                 requested_mpn=line.requested_mpn,
                 description=line.description,
-                quantity=float(line.quantity) if line.quantity is not None else None,
+                quantity=normalized_quantity,
                 unit=line.unit,
                 source_segment_id=line.segment_id,
                 extraction_warnings=[*segment.warnings, ExtractionWarning(
@@ -471,9 +575,18 @@ class GroundedLLMExtractor:
         return ParsedDocumentResult(lines=parsed_lines, total_lines_detected=len(parsed_lines)), []
 
     @staticmethod
-    def _failure(message: str) -> ParsedDocumentResult:
+    def _failure(
+        message: str,
+        *,
+        llm_model: Optional[str] = None,
+        llm_prompt_sha256: Optional[str] = None,
+        llm_call_count: int = 0,
+        llm_repair_call_count: int = 0,
+    ) -> ParsedDocumentResult:
         return ParsedDocumentResult(lines=[], warnings=[ExtractionWarning(
             code="LLM_EXTRACTION_BLOCKED",
             message=message,
             severity="error",
-        )])
+        )], llm_model=llm_model, llm_prompt_sha256=llm_prompt_sha256,
+            llm_call_count=llm_call_count,
+            llm_repair_call_count=llm_repair_call_count)

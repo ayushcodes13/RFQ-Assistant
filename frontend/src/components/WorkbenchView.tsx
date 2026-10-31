@@ -372,6 +372,55 @@ export function WorkbenchView({
         </div>
       )}
 
+      {(caseData.source_coverage ?? []).length > 0 && (() => {
+        const coverage = caseData.source_coverage ?? [];
+        const totals = coverage.reduce((sum, unit) => ({
+          regions: sum.regions + unit.nonempty_regions,
+          structured: sum.structured + unit.structured_regions,
+          review: sum.review + unit.review_regions,
+          filtered: sum.filtered + unit.filtered_regions,
+          ocrFailures: sum.ocrFailures + unit.ocr_failures,
+        }), { regions: 0, structured: 0, review: 0, filtered: 0, ocrFailures: 0 });
+        return (
+          <details className="mb-4 rounded-lg border border-[#d7e1e3] bg-white px-3 py-2 text-sm text-[#3d5056]">
+            <summary className="cursor-pointer font-medium">
+              Source accounting · {totals.regions} non-empty regions across {coverage.length} source sections
+              <span className="ml-2 font-normal text-[#687b81]">
+                {totals.structured} parsed · {totals.review} sent to review · {totals.filtered} metadata filtered
+                {totals.ocrFailures > 0 && ` · ${totals.ocrFailures} OCR failures`}
+              </span>
+            </summary>
+            <ul className="mt-2 space-y-1 pl-5 text-xs text-[#52656b]">
+              {coverage.map((unit) => (
+                <li key={unit.unit_id}>
+                  {unit.unit_id}: {unit.nonempty_regions} regions · {unit.structured_regions} parsed · {unit.review_regions} review · {unit.filtered_regions} filtered
+                  {unit.ocr_failures > 0 && ` · ${unit.ocr_failures} OCR failures`}
+                  {unit.ocr_status && unit.ocr_status !== "not_needed" && ` · OCR ${unit.ocr_status}`}
+                  {unit.is_empty && " · no readable content"}
+                  {unit.sheet_visibility === "hidden" && " · hidden sheet"}
+                  {unit.header_row_number != null && ` · header row ${unit.header_row_number}`}
+                  {unit.formula_backed_fields > 0 && ` · ${unit.formula_backed_fields} formula-backed fields`}
+                  {unit.page_rotation_degrees != null && unit.page_rotation_degrees !== 0 && ` · rotated ${unit.page_rotation_degrees}°`}
+                  {unit.truncated && " · processing stopped at a safety limit"}
+                  {unit.processing_status !== "processed" && ` · ${unit.processing_status}`}
+                  {unit.error_code && ` (${unit.error_code})`}
+                </li>
+              ))}
+            </ul>
+            <div className="mt-2 text-xs text-[#52656b]">
+              {caseData.parse_cache_hit && <span>Deterministic extraction reused from the same source and parser profile. </span>}
+              {caseData.llm_cache_hit && <span>Luna result reused for its pinned deployment version. </span>}
+              {caseData.llm_call_count > 0 && (
+                <span>
+                  Luna · {caseData.llm_call_count} calls ({caseData.llm_repair_call_count} repair, {caseData.llm_review_call_count} validation)
+                  {caseData.llm_input_tokens != null && ` · ${caseData.llm_input_tokens} input / ${caseData.llm_output_tokens ?? "unknown"} output tokens`}
+                </span>
+              )}
+            </div>
+          </details>
+        );
+      })()}
+
       {caseData.status === "PROCESSING" && lines.length === 0 && (
         <div role="status" className="mb-4 rounded-lg border border-[#cbd6d9] bg-white px-4 py-3 text-sm text-[#33464c]">
           The original request is saved. Document processing is running in the background; this view will update when the review rows are ready.
@@ -388,6 +437,7 @@ export function WorkbenchView({
               <p className="mt-1 text-sm text-[#52656b]">
                 Check the marked rows against the original. {reviewPlan.exception_line_ids.length} exception rows still need individual review.
                 AI-proposed rows are eligible for the sample only after JSON, number, and source-quote checks pass.
+                The sample spans {new Set(Object.values(reviewPlan.sample_rationale ?? {})).size} source and extraction groups; it reduces routine review, but does not statistically prove every line is correct.
                 {reviewPlan.remaining_line_ids.length > 0 && " After the sample is approved, you can approve the remaining clean rows together."}
                 {reviewPlan.sample_correction_found && " A sampled row needed correction, so the remaining clean rows must be checked individually."}
               </p>

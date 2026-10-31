@@ -110,6 +110,10 @@ The browser talks to the same-origin Next.js API proxy. Configure
 `NEXT_PUBLIC_` variable for credentials. This proxy does not provide user or
 tenant authentication: the local demo is single-user, and a shared API key is
 not sufficient authorization for a distributor pilot.
+When enabling the optional Luna fallback, `RFQ_LLM_DEPLOYMENT_VERSION` may be
+set to an immutable provider deployment revision to enable retry-safe caching
+of validated model results. If the provider offers only a mutable model alias,
+leave this unset; deterministic parse/OCR retry caching still works.
 Open `http://localhost:3000` for the product landing page and `http://localhost:3000/workspace` for the RFQ workspace. The workspace supports RFQ intake, line-level provenance review, catalog browsing, approval, and draft worksheet export.
 
 ### Local persistence

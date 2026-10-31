@@ -706,14 +706,61 @@ export interface components {
              */
             line_count: number;
             /**
+             * Llm Cache Hit
+             * @default false
+             */
+            llm_cache_hit: boolean;
+            /**
+             * Llm Call Count
+             * @default 0
+             */
+            llm_call_count: number;
+            /** Llm Deployment Version */
+            llm_deployment_version?: string | null;
+            /** Llm Input Tokens */
+            llm_input_tokens?: number | null;
+            /** Llm Model */
+            llm_model?: string | null;
+            /** Llm Output Tokens */
+            llm_output_tokens?: number | null;
+            /** Llm Prompt Sha256 */
+            llm_prompt_sha256?: string | null;
+            /**
+             * Llm Repair Call Count
+             * @default 0
+             */
+            llm_repair_call_count: number;
+            /**
+             * Llm Review Call Count
+             * @default 0
+             */
+            llm_review_call_count: number;
+            /** Llm Schema Version */
+            llm_schema_version?: string | null;
+            /** Llm Validator Version */
+            llm_validator_version?: string | null;
+            /**
+             * Parse Cache Hit
+             * @default false
+             */
+            parse_cache_hit: boolean;
+            /**
              * Parser Version
              * @default v1-deterministic
              */
             parser_version: string;
+            /** Processing Profile Sha256 */
+            processing_profile_sha256?: string | null;
             /** Raw Text */
             raw_text?: string | null;
+            /** Source Coverage */
+            source_coverage?: components["schemas"]["SourceCoverageUnit"][];
             source_file?: components["schemas"]["SourceFileMetadata"] | null;
             source_type: components["schemas"]["SourceType"];
+            /** Stage Timings Ms */
+            stage_timings_ms?: {
+                [key: string]: number;
+            };
             /** @default NEW */
             status: components["schemas"]["CaseStatus"];
             /** Title */
@@ -838,8 +885,83 @@ export interface components {
             sample_correction_found: boolean;
             /** Sample Line Ids */
             sample_line_ids: string[];
+            /** Sample Rationale */
+            sample_rationale?: {
+                [key: string]: string;
+            };
             /** Total Lines */
             total_lines: number;
+        };
+        /**
+         * SourceCoverageUnit
+         * @description Compact, hash-backed accounting for one PDF page, workbook sheet, or text document.
+         */
+        SourceCoverageUnit: {
+            /** Content Sha256 */
+            content_sha256?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /**
+             * Filtered Regions
+             * @default 0
+             */
+            filtered_regions: number;
+            /**
+             * Formula Backed Fields
+             * @default 0
+             */
+            formula_backed_fields: number;
+            /** Header Row Number */
+            header_row_number?: number | null;
+            /**
+             * Is Empty
+             * @default false
+             */
+            is_empty: boolean;
+            locator: components["schemas"]["SourceLocator"];
+            /**
+             * Nonempty Regions
+             * @default 0
+             */
+            nonempty_regions: number;
+            /**
+             * Ocr Failures
+             * @default 0
+             */
+            ocr_failures: number;
+            /** Ocr Status */
+            ocr_status?: string | null;
+            /** Page Rotation Degrees */
+            page_rotation_degrees?: number | null;
+            /**
+             * Processing Status
+             * @default processed
+             */
+            processing_status: string;
+            /**
+             * Review Regions
+             * @default 0
+             */
+            review_regions: number;
+            /** Sheet Visibility */
+            sheet_visibility?: string | null;
+            /**
+             * Structured Regions
+             * @default 0
+             */
+            structured_regions: number;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /** Unit Id */
+            unit_id: string;
+            /**
+             * Unit Kind
+             * @default document
+             */
+            unit_kind: string;
         };
         /**
          * SourceFileMetadata

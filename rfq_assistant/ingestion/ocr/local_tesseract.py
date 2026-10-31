@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from functools import lru_cache
 from typing import Any
 
 import fitz
@@ -15,6 +16,23 @@ import fitz
 
 class LocalOCRError(RuntimeError):
     """Local OCR could not be completed for a page."""
+
+
+@lru_cache(maxsize=1)
+def engine_profile() -> str:
+    """Return a bounded, content-free identity for the installed OCR binary."""
+    executable = shutil.which("tesseract")
+    if not executable:
+        return "unavailable"
+    try:
+        result = subprocess.run(
+            [executable, "--version"], capture_output=True, text=True,
+            timeout=2.0, check=False,
+        )
+        first_line = (result.stdout or result.stderr).splitlines()[0].strip()
+        return first_line[:120] if result.returncode == 0 and first_line else "unknown"
+    except (OSError, subprocess.TimeoutExpired, IndexError):
+        return "unknown"
 
 
 def image_coverage(page: Any) -> float:

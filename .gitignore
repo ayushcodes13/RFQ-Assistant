@@ -30,6 +30,7 @@ __pycache__/
 node_modules/
 .next/
 .next-e2e/
+frontend/.next-coverage/
 dist/
 coverage/
 frontend/AGENTS.md

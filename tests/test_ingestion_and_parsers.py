@@ -149,6 +149,14 @@ class TestSpreadsheetParser:
         assert "=5+5" in line.raw_text
         assert any(w.code == "FORMULA_VALUE_NOT_EVALUATED" for w in line.extraction_warnings)
         assert any(w.code == "MISSING_QUANTITY" for w in line.extraction_warnings)
+        assert len(parsed.source_coverage) == 1
+        sheet_coverage = parsed.source_coverage[0]
+        assert sheet_coverage.unit_id == "sheet:Sheet"
+        assert sheet_coverage.nonempty_regions == 2
+        assert sheet_coverage.structured_regions == 1
+        assert sheet_coverage.filtered_regions == 1
+        assert sheet_coverage.header_row_number == 1
+        assert sheet_coverage.formula_backed_fields == 1
 
 
 class TestPDFParser:
@@ -169,6 +177,14 @@ class TestPDFParser:
         phoenix_line = next(line for line in result.lines if line.requested_manufacturer == "Phoenix Contact")
         assert phoenix_line.requested_mpn == "2900364"
         assert all(l.source_locator.page_number == 1 for l in result.lines)
+        coverage = result.source_coverage
+        assert [unit.unit_id for unit in coverage] == ["page:1"]
+        assert coverage[0].nonempty_regions == (
+            coverage[0].structured_regions
+            + coverage[0].review_regions
+            + coverage[0].filtered_regions
+        )
+        assert len(coverage[0].content_sha256) == 64
 
     def test_corrupt_pdf_fails_safely(self):
         file_path = SAMPLES_DIR / "corrupt_file.pdf"
@@ -231,6 +247,55 @@ class TestPDFParser:
         assert result.lines == []
         assert len(result.candidate_segments) == 1
         assert result.candidate_segments[0].locator.row_number == 1
+
+    def test_text_coverage_accounts_for_extraction_review_and_metadata(self):
+        from rfq_assistant.ingestion.parsers.text_parser import TextParser
+
+        content = (
+            "Subject: Synthetic request\n"
+            "1. 10 pcs Schneider Electric LC1D09BD contactor\n"
+            "Could you also include the unusual assembly from last time?\n"
+        )
+        result = TextParser().parse(content.encode(), "coverage.txt")
+        assert len(result.source_coverage) == 1
+        unit = result.source_coverage[0]
+        assert unit.unit_id == "document"
+        assert unit.nonempty_regions == 3
+        assert unit.structured_regions == 1
+        assert unit.review_regions == 1
+        assert unit.filtered_regions == 1
+        assert unit.structured_regions + unit.review_regions + unit.filtered_regions == unit.nonempty_regions
+        assert unit.locator.row_number is None
+        assert unit.locator.text_snippet is None
+        assert len(unit.content_sha256) == 64
+        repeated = TextParser().parse(content.encode(), "coverage.txt")
+        assert repeated.source_coverage == result.source_coverage
+        changed = TextParser().parse(content.replace("10 pcs", "11 pcs").encode(), "coverage.txt")
+        assert changed.source_coverage[0].content_sha256 != unit.content_sha256
+
+    def test_xlsx_manifest_includes_empty_and_hidden_sheets(self):
+        import io
+        import openpyxl
+        from rfq_assistant.ingestion.parsers.spreadsheet_parser import SpreadsheetParser
+
+        workbook = openpyxl.Workbook()
+        workbook.active.title = "Empty"
+        hidden = workbook.create_sheet("Hidden RFQ")
+        hidden.sheet_state = "hidden"
+        hidden.append(["Synthetic quotation request"])
+        hidden.append(["MPN", "Quantity", "Description"])
+        hidden.append(["LC1D09BD", 2, "Contactor"])
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        parsed = SpreadsheetParser().parse(output.getvalue(), "hidden_sheet.xlsx")
+        coverage = {unit.locator.sheet_name: unit for unit in parsed.source_coverage}
+        assert coverage["Empty"].is_empty is True
+        assert coverage["Empty"].sheet_visibility == "visible"
+        assert coverage["Hidden RFQ"].is_empty is False
+        assert coverage["Hidden RFQ"].sheet_visibility == "hidden"
+        assert coverage["Hidden RFQ"].header_row_number == 2
 
     def test_candidate_region_limit_fails_explicitly(self):
         from rfq_assistant.ingestion.parsers.text_parser import TextParser
@@ -314,8 +379,12 @@ class TestPDFParser:
         content = pdf.tobytes()
         pdf.close()
 
-        with pytest.raises(DocumentParserError, match="image|OCR"):
+        with pytest.raises(DocumentParserError, match="image|OCR") as error:
             get_parser(SourceType.PDF_NATIVE, allow_ocr=False).parse(content, "scan.pdf")
+        page = error.value.source_coverage[0]
+        assert page.ocr_status == "disabled"
+        assert page.processing_status == "needs_review"
+        assert page.is_empty is True
 
 
 class TestTextAndEmailParser:

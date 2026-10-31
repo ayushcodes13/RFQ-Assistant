@@ -42,6 +42,8 @@ def test_review_plan_selects_a_stable_per_case_randomized_sample_and_batches_res
     assert len(first.sample_line_ids) == 5
     assert first.exception_line_ids == []
     assert len(first.remaining_line_ids) == 7
+    assert set(first.sample_rationale) == set(first.sample_line_ids)
+    assert all("structured extraction" in reason for reason in first.sample_rationale.values())
     assert manager.get_review_plan(case.case_id).sample_line_ids == first.sample_line_ids
     assert not first.can_batch_approve
 
