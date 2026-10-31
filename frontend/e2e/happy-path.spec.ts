@@ -12,6 +12,9 @@ const RFQ_TEXT = `Please quote the following spare parts:
 1. 10 pcs of Schneider Electric LC1D09BD contactors (24VDC coil)
 2. 4 units Siemens 6ES7223-1BL32-0XB0 digital I/O modules`;
 
+const CONFLICTING_SOURCE_TEXT = `Email: Please quote 20 pcs Schneider Electric LC1D09BD
+Attachment row: 200 pcs Schneider Electric LC1D09BD`;
+
 test("paste RFQ, approve every line, export and download a draft worksheet", async ({
   page,
 }) => {
@@ -113,6 +116,33 @@ test("paste RFQ, approve every line, export and download a draft worksheet", asy
   expect(response.status()).toBe(200);
   expect(response.headers()["content-type"]).toContain("spreadsheetml");
   expect((await response.body()).byteLength).toBeGreaterThan(1_000);
+});
+
+test("show conflicting quantities from message and attachment as a review blocker", async ({ page }) => {
+  await page.goto("/workspace");
+  await page.getByRole("button", { name: /New RFQ/i }).first().click();
+
+  const ingestDialog = page.getByRole("dialog", { name: "New RFQ" });
+  await ingestDialog.getByRole("button", { name: /Paste text/i }).click();
+  await ingestDialog
+    .getByPlaceholder(/Paste email or RFQ text here/i)
+    .fill(CONFLICTING_SOURCE_TEXT);
+  await ingestDialog
+    .getByPlaceholder("Optional case title")
+    .fill("Quantity conflict E2E");
+  await ingestDialog.getByRole("button", { name: /Extract line items/i }).click();
+
+  await expect(ingestDialog).toBeHidden({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "Quantity conflict E2E" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/2 lines · 2 need review/i)).toBeVisible();
+  await page.getByRole("row").nth(1).click();
+  await expect(page.getByText("SOURCE_QUANTITY_CONFLICT", { exact: false })).toBeVisible();
+
+  await page.getByRole("button", { name: /Export draft/i }).click();
+  const exportDialog = page.getByRole("dialog", { name: /Export draft/i });
+  await expect(exportDialog.getByText("NEEDS_REVIEW", { exact: true })).toBeVisible();
+  await expect(exportDialog.getByText("Export ready!")).toHaveCount(0);
+  await expect(exportDialog.getByRole("link", { name: /Download worksheet/i })).toHaveCount(0);
 });
 
 test("open an extracted XLSX line at its source row and field cells", async ({ page }) => {

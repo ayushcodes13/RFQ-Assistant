@@ -102,7 +102,16 @@ def generate_unsent_email_draft(case: RFQCase, lines: List[RFQLineItem]) -> str:
 
             if not line.unit:
                 questions.append("Please confirm the requested unit or packaging.")
-            if any(w.severity.lower() == "error" for w in line.extraction_warnings):
+            quantity_conflicts = [
+                warning for warning in line.extraction_warnings
+                if warning.code == "SOURCE_QUANTITY_CONFLICT"
+            ]
+            if quantity_conflicts:
+                questions.append(
+                    "The provided sources appear to give different quantities for this item. "
+                    "Please confirm the required quantity."
+                )
+            elif any(w.severity.lower() == "error" for w in line.extraction_warnings):
                 questions.append(
                     "Our review found contradictory source details. Please confirm the requested "
                     "manufacturer and part number; no substitute has been approved."
