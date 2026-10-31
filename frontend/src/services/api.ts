@@ -5,6 +5,7 @@ import {
   CatalogItem,
   ExportManifest,
   RFQCase,
+  RFQCaseSummary,
   RFQLineItem,
   RFQLineItemUpdate,
   ReviewPlan,
@@ -48,14 +49,14 @@ async function sendJson<T>(
 }
 
 export async function fetchHealth() {
-  return getJson<{ status: string; catalog_size: number; total_cases: number }>(
+  return getJson<{ status: "healthy" }>(
     "/api/health",
     "Backend service unreachable"
   );
 }
 
-export async function listCases(): Promise<RFQCase[]> {
-  return getJson<RFQCase[]>("/api/rfqs", "Failed to load RFQ cases");
+export async function listCases(): Promise<RFQCaseSummary[]> {
+  return getJson<RFQCaseSummary[]>("/api/rfqs", "Failed to load RFQ cases");
 }
 
 export async function getCase(caseId: string): Promise<RFQCase> {

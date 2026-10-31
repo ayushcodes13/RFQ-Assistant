@@ -637,6 +637,21 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HealthResponse": {
+        "description": "Minimal public liveness response for local and hosted health probes.",
+        "properties": {
+          "status": {
+            "const": "healthy",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
       "MatchCandidate": {
         "description": "Proposed catalog match backed by exact OEM and MPN evidence.",
         "properties": {
@@ -689,7 +704,7 @@
         "type": "string"
       },
       "RFQCase": {
-        "description": "An RFQ quotation case containing metadata and processing status.",
+        "description": "An RFQ quotation case, including source text on the case-detail route.",
         "properties": {
           "case_id": {
             "title": "Case Id",
@@ -937,6 +952,246 @@
           "source_type"
         ],
         "title": "RFQCase",
+        "type": "object"
+      },
+      "RFQCaseSummary": {
+        "description": "Case-list projection without customer RFQ text.",
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "catalog_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "default",
+            "title": "Catalog Id"
+          },
+          "catalog_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Version"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "customer_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Label"
+          },
+          "document_warnings": {
+            "items": {
+              "$ref": "#/components/schemas/ExtractionWarning"
+            },
+            "title": "Document Warnings",
+            "type": "array"
+          },
+          "line_count": {
+            "default": 0,
+            "title": "Line Count",
+            "type": "integer"
+          },
+          "llm_cache_hit": {
+            "default": false,
+            "title": "Llm Cache Hit",
+            "type": "boolean"
+          },
+          "llm_call_count": {
+            "default": 0,
+            "title": "Llm Call Count",
+            "type": "integer"
+          },
+          "llm_deployment_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Deployment Version"
+          },
+          "llm_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Input Tokens"
+          },
+          "llm_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Model"
+          },
+          "llm_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Output Tokens"
+          },
+          "llm_prompt_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Prompt Sha256"
+          },
+          "llm_repair_call_count": {
+            "default": 0,
+            "title": "Llm Repair Call Count",
+            "type": "integer"
+          },
+          "llm_review_call_count": {
+            "default": 0,
+            "title": "Llm Review Call Count",
+            "type": "integer"
+          },
+          "llm_schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Schema Version"
+          },
+          "llm_validator_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Validator Version"
+          },
+          "parse_cache_hit": {
+            "default": false,
+            "title": "Parse Cache Hit",
+            "type": "boolean"
+          },
+          "parser_version": {
+            "default": "v1-deterministic",
+            "title": "Parser Version",
+            "type": "string"
+          },
+          "processing_profile_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Processing Profile Sha256"
+          },
+          "processing_stage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProcessingStage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_coverage": {
+            "items": {
+              "$ref": "#/components/schemas/SourceCoverageUnit"
+            },
+            "title": "Source Coverage",
+            "type": "array"
+          },
+          "source_file": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceFileMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_type": {
+            "$ref": "#/components/schemas/SourceType"
+          },
+          "stage_timings_ms": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Stage Timings Ms",
+            "type": "object"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CaseStatus",
+            "default": "NEW"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "unresolved_count": {
+            "default": 0,
+            "title": "Unresolved Count",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "case_id",
+          "title",
+          "source_type"
+        ],
+        "title": "RFQCaseSummary",
         "type": "object"
       },
       "RFQLineItem": {
@@ -1960,12 +2215,15 @@
     },
     "/api/health": {
       "get": {
+        "description": "Public liveness probe; expose no catalog or customer activity counts.",
         "operationId": "health_check_api_health_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2018,7 +2276,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/RFQCase"
+                    "$ref": "#/components/schemas/RFQCaseSummary"
                   },
                   "title": "Response List Rfqs Api Rfqs Get",
                   "type": "array"

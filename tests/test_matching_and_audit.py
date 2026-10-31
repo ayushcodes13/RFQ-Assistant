@@ -140,9 +140,7 @@ class TestAPIEndpoints:
     def test_health_endpoint(self, client):
         resp = client.get("/api/health")
         assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "healthy"
-        assert data["catalog_size"] >= 20
+        assert resp.json() == {"status": "healthy"}
 
     def test_create_rfq_from_pasted_text(self, client):
         text = "10 pcs Schneider Electric LC1D09BD\n5 pcs Siemens 6ES7214-1AG40-0XB0"
