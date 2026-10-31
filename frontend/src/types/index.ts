@@ -24,7 +24,7 @@ export type RFQCase = Schemas["RFQCase"] & {
 };
 export type AuditEvent = Schemas["AuditEvent"] & { recorded_at: string };
 export type ExportManifest = Schemas["ExportManifest"] & { generated_at: string };
-export type RFQLineItemUpdate = Schemas["RFQLineItemUpdate"];
+export type RFQLineItemUpdate = Schemas["RFQLineItemUpdateRequest"];
 export type BatchReviewRequest = Schemas["BatchReviewRequest"];
 export type ReviewPlan = Schemas["ReviewPlan"];
 export type SpreadsheetSourcePreview = Schemas["SpreadsheetSourcePreview"];

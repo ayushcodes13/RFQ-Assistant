@@ -97,6 +97,8 @@ def test_spreadsheet_preview_bounds_rows_and_rejects_unknown_sheets(tmp_path, mo
     monkeypatch.delenv("REQUIRE_AUTH", raising=False)
     workbook = openpyxl.Workbook()
     workbook.active.title = "RFQ"
+    workbook.active.append(["MPN", "Quantity"])
+    workbook.active.append(["PN-0001", 1])
     output = BytesIO()
     workbook.save(output)
     case = manager.create_case_from_upload(filename="source.xlsx", content=output.getvalue())

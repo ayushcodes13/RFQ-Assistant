@@ -527,11 +527,6 @@ export interface components {
         };
         /** Body_create_rfq_api_rfqs_post */
         Body_create_rfq_api_rfqs_post: {
-            /**
-             * Actor
-             * @default Inside Sales
-             */
-            actor: string;
             /** Customer Label */
             customer_label?: string | null;
             /** File */
@@ -872,10 +867,10 @@ export interface components {
             version: number;
         };
         /**
-         * RFQLineItemUpdate
-         * @description Payload for human reviewer correcting or approving a line item.
+         * RFQLineItemUpdateRequest
+         * @description Public reviewer edit contract; every API write must be version-checked.
          */
-        RFQLineItemUpdate: {
+        RFQLineItemUpdateRequest: {
             /**
              * Actor
              * @default Inside Sales
@@ -884,7 +879,7 @@ export interface components {
             /** Description */
             description?: string | null;
             /** Expected Version */
-            expected_version?: number | null;
+            expected_version: number;
             /** Notes */
             notes?: string | null;
             /** Quantity */
@@ -1549,7 +1544,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RFQLineItemUpdate"];
+                "application/json": components["schemas"]["RFQLineItemUpdateRequest"];
             };
         };
         responses: {

@@ -174,7 +174,7 @@ class TestAPIEndpoints:
         line1_id = lines[0]["line_id"]
         patch_resp = client.patch(
             f"/api/rfqs/{case_id}/lines/{line1_id}",
-            json={"review_decision": "APPROVED", "actor": "Test Reviewer"},
+            json={"review_decision": "APPROVED", "expected_version": lines[0]["version"], "actor": "Test Reviewer"},
         )
         assert patch_resp.status_code == 200
         assert patch_resp.json()["review_decision"] == "APPROVED"

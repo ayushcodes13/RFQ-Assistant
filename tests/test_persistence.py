@@ -1,7 +1,10 @@
 """Restart recovery checks for local durable RFQ state."""
 
+import pytest
+
 from rfq_assistant.cases.manager import CaseManager
-from rfq_assistant.ingestion import DocumentStorage
+from rfq_assistant.ingestion import DocumentParserError, DocumentStorage
+from rfq_assistant.ingestion.parsers.spreadsheet_parser import SpreadsheetParser
 from rfq_assistant.matching.catalog import CatalogRepository
 from rfq_assistant.persistence import SQLiteStateStore
 from rfq_assistant.schemas.models import RFQLineItemUpdate
@@ -99,15 +102,19 @@ def test_failed_pdf_case_persists_empty_source_coverage(tmp_path):
     assert case.source_coverage[0].is_empty is True
 
 
-def test_failed_header_only_csv_keeps_parser_coverage(tmp_path):
+def test_header_only_csv_preflight_blocks_case_but_parser_keeps_coverage(tmp_path):
+    parsed = SpreadsheetParser().parse(b"MPN,Qty\n", "headers_only.csv")
+    assert parsed.source_coverage[0].unit_id == "sheet:Default"
+    assert parsed.source_coverage[0].nonempty_regions == 1
+
     store = SQLiteStateStore(tmp_path / "state" / "rfq.sqlite3")
-    manager = CaseManager(CatalogRepository(state_store=store), state_store=store)
-
-    case = manager.create_case_from_upload("headers_only.csv", b"MPN,Qty\n")
-
-    assert case.status.value == "FAILED"
-    assert case.source_coverage[0].unit_id == "sheet:Default"
-    assert case.source_coverage[0].nonempty_regions == 1
+    storage = DocumentStorage(tmp_path / "source")
+    manager = CaseManager(CatalogRepository(state_store=store), storage=storage, state_store=store)
+    with pytest.raises(DocumentParserError, match="headers but no RFQ line items"):
+        manager.create_case_from_upload("headers_only.csv", b"MPN,Qty\n")
+    assert manager.list_cases() == []
+    assert store.load_cases() == []
+    assert not list(storage.uploads_dir.glob("**/*"))
 
 
 def test_processing_artifact_cache_skips_oversized_payloads(tmp_path):

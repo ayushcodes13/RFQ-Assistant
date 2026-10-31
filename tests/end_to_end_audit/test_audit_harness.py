@@ -941,7 +941,7 @@ class TestFullApiWorkflow:
         for line in lines:
             patch_resp = client.patch(
                 f"/api/rfqs/{case_id}/lines/{line['line_id']}",
-                json={"review_decision": "APPROVED", "actor": "Auditor"},
+                json={"review_decision": "APPROVED", "expected_version": line["version"], "actor": "Auditor"},
             )
             assert patch_resp.status_code == 200
 

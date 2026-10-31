@@ -139,6 +139,23 @@ shared when Redis is configured; concurrency limits and the circuit breaker
 remain process-local and require separately coordinated deployment settings.
 Open `http://localhost:3000` for the product landing page and `http://localhost:3000/workspace` for the RFQ workspace. The workspace supports RFQ intake, line-level provenance review, catalog browsing, approval, and draft worksheet export.
 
+### Client demo
+
+For a clean, predictable demo, start both applications with the isolated demo launcher:
+
+```bash
+./scripts/demo.sh
+```
+
+It starts the API with synchronous ingestion, serves the workspace at
+`http://localhost:3010/workspace`, and uses a fresh SQLite database and file
+storage under `.demo-runtime/`. This reset does not delete or change `storage/`
+or its existing RFQs. The launcher refuses to use occupied ports; choose
+alternates with `RFQ_DEMO_BACKEND_PORT` and `RFQ_DEMO_FRONTEND_PORT`. Stop only
+the processes started by this script with `./scripts/demo.sh stop`. Synthetic
+drag-and-drop examples are in `demo-data/` (email text, PDF, XLSX, and catalog
+CSV). The catalog is preloaded automatically in a fresh demo database.
+
 ### Local persistence
 
 The API stores RFQ cases, extracted lines, audit events, and the imported catalog

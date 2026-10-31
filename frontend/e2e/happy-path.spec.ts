@@ -56,8 +56,21 @@ test("paste RFQ, approve every line, export and download a draft worksheet", asy
   await expect(page.getByText("Approved", { exact: true })).toHaveCount(2);
   await expect(page.getByText("Ready", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: /Export draft/i }).click();
+  const exportTrigger = page.getByRole("button", { name: /Export draft/i });
+  await exportTrigger.click();
   const exportDialog = page.getByRole("dialog", { name: "Export draft" });
+  await expect(exportDialog).toBeVisible();
+  await expect(exportDialog).toHaveAttribute("aria-modal", "true");
+  const headerClose = exportDialog.locator('button[aria-label="Close"]');
+  await expect(headerClose).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(exportDialog.getByRole("button", { name: "Close" }).last()).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(headerClose).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(exportDialog).toBeHidden();
+  await expect(exportTrigger).toBeFocused();
+  await exportTrigger.click();
   await expect(exportDialog).toBeVisible();
   await expect(exportDialog.getByText("READY_TO_EXPORT", { exact: true })).toBeVisible();
   await exportDialog

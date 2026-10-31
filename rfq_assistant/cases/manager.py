@@ -1,5 +1,6 @@
 """Case lifecycle manager with audit logging and state tracking."""
 
+import csv
 import hashlib
 import json
 import logging
@@ -9,7 +10,10 @@ import time
 import uuid
 from datetime import datetime
 from importlib import metadata as package_metadata
+from io import BytesIO, StringIO
 from typing import Dict, List, Optional
+
+from openpyxl import load_workbook
 
 from rfq_assistant.ingestion import (
     DocumentParserError,
@@ -49,6 +53,8 @@ from rfq_assistant.schemas.models import (
     SourceCoverageUnit,
     SourceLocator,
 )
+
+MAX_TEXT_INTAKE_REGIONS = 500
 
 log = logging.getLogger(__name__)
 
@@ -140,6 +146,7 @@ class CaseManager:
 
         stage_started = time.perf_counter()
         clean_name, src_type, digest = validate_file_upload(filename, content)
+        self._validate_intake_regions(clean_name, src_type, content)
         timings["validate_ms"] = (time.perf_counter() - stage_started) * 1000
         if _existing_case_id:
             case_id = _existing_case_id
@@ -702,6 +709,8 @@ class CaseManager:
         actor: str = "Inside Sales",
     ) -> RFQCase:
         """Parses and matches plain pasted email or inquiry text."""
+        if not raw_text.strip():
+            raise DocumentParserError("Pasted RFQ text is empty. Add non-whitespace content before creating a case.")
         content = raw_text.encode("utf-8")
         case = self.create_case_from_upload(
             filename="pasted_inquiry.txt",
@@ -714,6 +723,49 @@ class CaseManager:
         case.raw_text = raw_text
         self._persist_case(case.case_id)
         return case
+
+    @staticmethod
+    def _validate_intake_regions(filename: str, source_type: SourceType, content: bytes) -> None:
+        """Reject clearly empty or unbounded intake before writing case state/files."""
+        if source_type == SourceType.EMAIL_TEXT:
+            text = content.decode("utf-8", errors="replace")
+            regions = [line for line in text.splitlines() if line.strip()]
+            if not regions:
+                raise DocumentParserError("Pasted RFQ text is empty. Add non-whitespace content before creating a case.")
+            if len(regions) > MAX_TEXT_INTAKE_REGIONS:
+                raise DocumentParserError(
+                    f"This RFQ contains more than {MAX_TEXT_INTAKE_REGIONS} non-empty text regions. Split it into smaller requests."
+                )
+        elif filename.lower().endswith(".csv"):
+            try:
+                rows = [row for row in csv.reader(StringIO(content.decode("utf-8-sig"))) if any(cell.strip() for cell in row)]
+            except (UnicodeDecodeError, csv.Error) as exc:
+                raise DocumentParserError("CSV could not be read safely. Check its encoding and contents.") from exc
+            if len(rows) == 1 and any(token in " ".join(rows[0]).lower() for token in ("mpn", "part number", "manufacturer", "quantity", "qty", "description")):
+                raise DocumentParserError("This CSV contains headers but no RFQ line items.")
+        elif filename.lower().endswith(".xlsx"):
+            workbook = load_workbook(BytesIO(content), read_only=True, data_only=False)
+            nonempty_rows = 0
+            header_rows = 0
+            header_terms = ("mpn", "part number", "manufacturer", "quantity", "qty", "description")
+            try:
+                for worksheet in workbook.worksheets:
+                    first_content_row = True
+                    for row in worksheet.iter_rows(values_only=True):
+                        values = [str(value).strip() for value in row if value is not None and str(value).strip()]
+                        if not values:
+                            continue
+                        nonempty_rows += 1
+                        if first_content_row:
+                            first_content_row = False
+                            if any(term in " ".join(values).lower() for term in header_terms):
+                                header_rows += 1
+            finally:
+                workbook.close()
+            if not nonempty_rows:
+                raise DocumentParserError("This spreadsheet contains no non-empty cells.")
+            if header_rows and nonempty_rows == header_rows:
+                raise DocumentParserError("This workbook contains headers but no RFQ line items.")
 
     def update_line(
         self, case_id: str, line_id: str, update: RFQLineItemUpdate

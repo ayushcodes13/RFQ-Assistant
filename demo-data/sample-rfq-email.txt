@@ -1,0 +1,22 @@
+SYNTHETIC TEST FIXTURE — EMAIL INTAKE
+From: buyer@synthetic-customer-mfg.com
+To: quotes@industrial-distributor.com
+Subject: Urgent RFQ - Line spares for line 3 overhaul
+
+Hi Team,
+
+Could you please quote us on the following items for delivery next Tuesday?
+
+1. 10 pcs of Schneider Electric LC1D09BD contactors (24VDC coil)
+2. 4 units Siemens 6ES7223-1BL32-0XB0 digital I/O modules
+3. 25x XB4BA31 green pushbuttons (Schneider)
+4. Need 5 pcs of MY4N-D2-DC24 relays from Omron
+5. Also quote the sensor from last time we ordered for conveyor 2, about 3 pieces
+6. 12 EA of Eaton FAZ-C10/1 breakers
+
+Please confirm current pricing and lead time ASAP.
+
+Best regards,
+Mark Henderson
+Maintenance Lead, Plant 4
+SYNTHETIC NOTICE: This is test data.

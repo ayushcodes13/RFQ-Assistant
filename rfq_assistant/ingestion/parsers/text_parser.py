@@ -232,7 +232,8 @@ class TextParser(BaseDocumentParser):
     def _is_known_non_item_text(text: str) -> bool:
         """Discard narrow email context patterns while retaining unknown prose."""
         return bool(re.match(
-            r"^(?:synthetic\b|could you please quote .*following items|please quote the following items:?|"
+            r"^(?:synthetic\b|customer\s*:|rfq\s*ref\s*:|date\s*:|"
+            r"(?:please\s+)?provide unit price and stock for\s*:|could you please quote .*following items|please quote the following items:?|"
             r"also,? our .* added:?|i can confirm the above\b|please include pricing\b|"
             r"the following(?::| items:)?|find below the list\b|some items may have alternative manufacturers\b|"
             r"for the exact mpns listed\b|please confirm (?:current )?pricing\b|confirm current pricing\b|please let us know\b|"
