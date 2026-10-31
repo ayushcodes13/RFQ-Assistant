@@ -22,6 +22,13 @@ from rfq_assistant.schemas.models import (
     RFQLineItemUpdate,
 )
 
+LIVE_SMOKE_SOURCE_TEXT = (
+    # Fabrikam is intentionally outside the deterministic parser's OEM
+    # aliases, so this source must reach the configured Luna fallback.
+    # Every proposed value is still directly supported by the text.
+    "Please quote FC-4821 from Fabrikam Controls, 12 units, an auxiliary contact block."
+)
+
 
 def main() -> int:
     extractor = GroundedLLMExtractor.from_environment()
@@ -38,11 +45,6 @@ def main() -> int:
             description="Synthetic auxiliary contact block",
         )
     )
-    source_text = (
-        "Please quote 12 units of FC-4821 from Fabrikam Controls, "
-        "an auxiliary contact block."
-    )
-
     try:
         with tempfile.TemporaryDirectory(prefix="rfq-luna-e2e-") as temporary_root:
             root = Path(temporary_root)
@@ -52,7 +54,7 @@ def main() -> int:
                 llm_extractor=extractor,
             )
             case = manager.create_case_from_text(
-                source_text,
+                LIVE_SMOKE_SOURCE_TEXT,
                 title="SYNTHETIC Luna full-flow check",
             )
             lines = manager.get_lines(case.case_id)
@@ -106,6 +108,8 @@ def main() -> int:
             passed = (
                 reviewed_lines[0].review_decision == ReviewDecision.APPROVED
                 and manifest.is_draft
+                and case.llm_call_count >= 1
+                and case.llm_review_call_count >= 1
             )
             print(
                 f"e2e={'pass' if passed else 'failed'} "
