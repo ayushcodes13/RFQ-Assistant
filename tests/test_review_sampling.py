@@ -88,7 +88,7 @@ def test_sample_correction_disables_batch_approval_for_the_case(tmp_path):
     manager, case = _case(tmp_path)
     plan = manager.get_review_plan(case.case_id)
     line = next(row for row in manager.get_lines(case.case_id) if row.line_id == plan.sample_line_ids[0])
-    manager.update_line(case.case_id, line.line_id, RFQLineItemUpdate(
+    manager.update_line(case.case_id, line.line_id, RFQLineItemUpdate(expected_version=line.version,
         quantity=3,
         review_decision=ReviewDecision.APPROVED,
         actor="Synthetic reviewer",

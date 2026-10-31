@@ -147,7 +147,7 @@ class RFQLineItem(BaseModel):
 
 class RFQLineItemUpdate(BaseModel):
     """Payload for human reviewer correcting or approving a line item."""
-    expected_version: Optional[int] = Field(default=None, ge=1)
+    expected_version: int = Field(ge=1)
     requested_manufacturer: Optional[str] = None
     requested_mpn: Optional[str] = None
     description: Optional[str] = None

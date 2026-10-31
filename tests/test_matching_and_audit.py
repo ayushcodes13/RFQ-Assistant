@@ -113,7 +113,7 @@ class TestCaseManagerAndAuditTrail:
         updated = case_manager.update_line(
             case_id=case.case_id,
             line_id=line18.line_id,
-            update=RFQLineItemUpdate(
+            update=RFQLineItemUpdate(expected_version=line18.version,
                 quantity=100.0,
                 actor="Operator Bob",
                 reviewer_notes="Confirmed quantity with customer",

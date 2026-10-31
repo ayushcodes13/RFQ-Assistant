@@ -805,7 +805,7 @@ class CaseManager:
             return None
 
         # Optimistic concurrency check
-        if update.expected_version is not None and update.expected_version != line.version:
+        if update.expected_version != line.version:
             raise ValueError(
                 f"Stale state / conflict: Line item version is {line.version}, but client expected version {update.expected_version}. Please refresh."
             )

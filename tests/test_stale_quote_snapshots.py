@@ -46,7 +46,7 @@ def create_approved_source(manager):
     manager.update_line(
         case.case_id,
         line.line_id,
-        RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED, actor="Synthetic Reviewer"),
+        RFQLineItemUpdate(expected_version=line.version, review_decision=ReviewDecision.APPROVED, actor="Synthetic Reviewer"),
     )
     return case, line
 
@@ -63,7 +63,7 @@ def test_edited_rfq_cannot_approve_old_draft(isolated_api):
     draft = create_draft(client, case)
 
     manager.update_line(
-        case.case_id, line.line_id, RFQLineItemUpdate(quantity=1000.0, actor="Second Reviewer")
+        case.case_id, line.line_id, RFQLineItemUpdate(expected_version=line.version, quantity=1000.0, actor="Second Reviewer")
     )
 
     response = client.post(
@@ -85,7 +85,7 @@ def test_approved_quote_cannot_send_after_rfq_edit(isolated_api):
     assert approve.status_code == 200, approve.text
 
     manager.update_line(
-        case.case_id, line.line_id, RFQLineItemUpdate(unit="BOX", actor="Second Reviewer")
+        case.case_id, line.line_id, RFQLineItemUpdate(expected_version=line.version, unit="BOX", actor="Second Reviewer")
     )
 
     response = client.post(

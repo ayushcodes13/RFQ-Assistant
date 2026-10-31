@@ -72,7 +72,7 @@ class TestReviewIntegrityAdversarial:
         case_manager.update_line(
             case.case_id,
             line_id,
-            RFQLineItemUpdate(
+            RFQLineItemUpdate(expected_version=lines[0].version,
                 review_decision=ReviewDecision.APPROVED,
                 actor="Auditor #1",
                 reviewer_notes="Verified against specification",
@@ -86,7 +86,7 @@ class TestReviewIntegrityAdversarial:
         case_manager.update_line(
             case.case_id,
             line_id,
-            RFQLineItemUpdate(quantity=1000.0, actor="Staff #2"),
+            RFQLineItemUpdate(expected_version=line.version, quantity=1000.0, actor="Staff #2"),
         )
         line_after = case_manager.get_lines(case.case_id)[0]
 
@@ -122,13 +122,13 @@ class TestReviewIntegrityAdversarial:
         case_manager.update_line(
             case.case_id,
             line_id,
-            RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED, actor="Lead Estimator"),
+            RFQLineItemUpdate(expected_version=case_manager.get_lines(case.case_id)[0].version, review_decision=ReviewDecision.APPROVED, actor="Lead Estimator"),
         )
         assert case_manager.get_lines(case.case_id)[0].review_decision == ReviewDecision.APPROVED
 
         # Modify material field
         kwargs = {field: new_val, "actor": "Sales Rep"}
-        case_manager.update_line(case.case_id, line_id, RFQLineItemUpdate(**kwargs))
+        case_manager.update_line(case.case_id, line_id, RFQLineItemUpdate(expected_version=case_manager.get_lines(case.case_id)[0].version, **kwargs))
 
         # Must be reverted to PENDING
         updated_line = case_manager.get_lines(case.case_id)[0]
@@ -146,7 +146,7 @@ class TestReviewIntegrityAdversarial:
         case_manager.update_line(
             case.case_id,
             line_id,
-            RFQLineItemUpdate(
+            RFQLineItemUpdate(expected_version=case_manager.get_lines(case.case_id)[0].version,
                 selected_catalog_sku="SKU-SIEM-001",
                 requested_manufacturer="Schneider",
             ),
@@ -244,7 +244,7 @@ class TestReviewIntegrityAdversarial:
             case_manager.update_line(
                 case.case_id,
                 line_id,
-                RFQLineItemUpdate(quantity=invalid_qty),
+                RFQLineItemUpdate(expected_version=case_manager.get_lines(case.case_id)[0].version, quantity=invalid_qty),
             )
 
     def test_invalid_prices_rejected_in_quote_validator(self):

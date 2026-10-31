@@ -710,14 +710,14 @@ class TestReviewAndExportExtended:
 
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED, actor="Auditor"),
+            RFQLineItemUpdate(expected_version=line.version, review_decision=ReviewDecision.APPROVED, actor="Auditor"),
         )
         assert manager.get_lines(case.case_id)[0].review_decision == ReviewDecision.APPROVED
 
         # Change SKU (material change)
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(selected_catalog_sku="SKU-EXT-002", actor="Auditor"),
+            RFQLineItemUpdate(expected_version=line.version, selected_catalog_sku="SKU-EXT-002", actor="Auditor"),
         )
         updated = manager.get_lines(case.case_id)[0]
         assert updated.review_decision == ReviewDecision.PENDING
@@ -733,12 +733,12 @@ class TestReviewAndExportExtended:
         line = manager.get_lines(case.case_id)[0]
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED, actor="Auditor"),
+            RFQLineItemUpdate(expected_version=line.version, review_decision=ReviewDecision.APPROVED, actor="Auditor"),
         )
 
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(requested_mpn="6ES7214-1AG40-0XB0", actor="Auditor"),
+            RFQLineItemUpdate(expected_version=line.version, requested_mpn="6ES7214-1AG40-0XB0", actor="Auditor"),
         )
         updated = manager.get_lines(case.case_id)[0]
         assert updated.review_decision == ReviewDecision.PENDING
@@ -804,7 +804,7 @@ class TestReviewAndExportExtended:
         line = manager.get_lines(case.case_id)[0]
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(selected_catalog_sku="SKU-EXT-002", actor="Auditor"),
+            RFQLineItemUpdate(expected_version=line.version, selected_catalog_sku="SKU-EXT-002", actor="Auditor"),
         )
 
         trail = manager.get_audit_trail(case.case_id)
@@ -827,7 +827,7 @@ class TestReviewAndExportExtended:
         line = manager.get_lines(case.case_id)[0]
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED, actor="Auditor"),
+            RFQLineItemUpdate(expected_version=line.version, review_decision=ReviewDecision.APPROVED, actor="Auditor"),
         )
         case = manager.get_case(case.case_id)
         assert case.status == CaseStatus.READY_TO_EXPORT
@@ -842,7 +842,7 @@ class TestReviewAndExportExtended:
         line = manager.get_lines(case.case_id)[0]
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED, actor="Auditor"),
+            RFQLineItemUpdate(expected_version=line.version, review_decision=ReviewDecision.APPROVED, actor="Auditor"),
         )
 
         req = ExportRequest(case_id=case.case_id, allow_partial=False, format="csv", actor="Auditor")
@@ -873,7 +873,7 @@ class TestApiExportDownloadAndPersistence:
         line = manager.get_lines(case.case_id)[0]
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED, actor="Auditor"),
+            RFQLineItemUpdate(expected_version=line.version, review_decision=ReviewDecision.APPROVED, actor="Auditor"),
         )
 
         # Export through the API
@@ -912,7 +912,7 @@ class TestApiExportDownloadAndPersistence:
         line = manager.get_lines(case.case_id)[0]
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED, actor="Auditor"),
+            RFQLineItemUpdate(expected_version=line.version, review_decision=ReviewDecision.APPROVED, actor="Auditor"),
         )
 
         client = TestClient(api_module.app)
@@ -973,7 +973,7 @@ class TestApiExportDownloadAndPersistence:
         for line in lines:
             manager1.update_line(
                 case.case_id, line.line_id,
-                RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED, actor="Auditor"),
+                RFQLineItemUpdate(expected_version=line.version, review_decision=ReviewDecision.APPROVED, actor="Auditor"),
             )
 
         # Step 2: Export before restart
@@ -1375,7 +1375,7 @@ class TestAuthAndSecurityExtended:
         line = manager.get_lines(case.case_id)[0]
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(
+            RFQLineItemUpdate(expected_version=line.version,
                 notes="=HYPERLINK(\"https://evil.test\",\"click\")",
                 selected_catalog_sku="SKU-EXT-001",
                 review_decision=ReviewDecision.APPROVED,
@@ -1404,7 +1404,7 @@ class TestAuthAndSecurityExtended:
         line = manager.get_lines(case.case_id)[0]
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(
+            RFQLineItemUpdate(expected_version=line.version,
                 notes="@SUM(1,2)",
                 selected_catalog_sku="SKU-EXT-001",
                 review_decision=ReviewDecision.APPROVED,
@@ -1541,7 +1541,7 @@ class TestConcurrencyExtended:
         line = manager.get_lines(case.case_id)[0]
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED, actor="Auditor"),
+            RFQLineItemUpdate(expected_version=line.version, review_decision=ReviewDecision.APPROVED, actor="Auditor"),
         )
 
         errors = []

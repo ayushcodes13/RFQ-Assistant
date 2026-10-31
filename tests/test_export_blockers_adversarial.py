@@ -52,7 +52,7 @@ def test_nonpositive_csv_quantity_never_becomes_export_ready(services, raw_quant
     manager.update_line(
         case.case_id,
         line.line_id,
-        RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED),
+        RFQLineItemUpdate(expected_version=line.version, review_decision=ReviewDecision.APPROVED),
     )
     assert manager.get_case(case.case_id).status == CaseStatus.NEEDS_REVIEW
     assert manager.get_case(case.case_id).unresolved_count == 1
@@ -80,7 +80,7 @@ def test_unknown_manual_sku_cannot_be_export_ready(services):
     manager.update_line(
         case.case_id,
         line.line_id,
-        RFQLineItemUpdate(selected_catalog_sku="NONEXISTENT-SKU", review_decision=ReviewDecision.APPROVED),
+        RFQLineItemUpdate(expected_version=line.version, selected_catalog_sku="NONEXISTENT-SKU", review_decision=ReviewDecision.APPROVED),
     )
     assert manager.get_case(case.case_id).status == CaseStatus.NEEDS_REVIEW
     with pytest.raises(ExportValidationError, match="selected catalog SKU is missing or unknown"):
@@ -97,7 +97,7 @@ def test_explicitly_approved_cross_oem_override_still_blocks_full_export(service
     manager.update_line(
         case.case_id,
         line.line_id,
-        RFQLineItemUpdate(selected_catalog_sku="SKU-SYN-2", review_decision=ReviewDecision.APPROVED),
+        RFQLineItemUpdate(expected_version=line.version, selected_catalog_sku="SKU-SYN-2", review_decision=ReviewDecision.APPROVED),
     )
     assert line.review_decision == ReviewDecision.APPROVED
     assert any(w.severity == "error" and w.code == "CONTRADICTION" for w in line.extraction_warnings)
@@ -124,7 +124,7 @@ def test_valid_reviewed_exact_match_can_still_export(services):
     manager.update_line(
         case.case_id,
         line.line_id,
-        RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED),
+        RFQLineItemUpdate(expected_version=line.version, review_decision=ReviewDecision.APPROVED),
     )
     assert manager.get_case(case.case_id).status == CaseStatus.READY_TO_EXPORT
     manifest = exporter.generate_export(

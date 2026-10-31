@@ -51,14 +51,14 @@ class TestAllProductScenarios:
         case_manager.update_line(
             case.case_id,
             line18.line_id,
-            RFQLineItemUpdate(quantity=50.0, actor="Sales Rep John", reviewer_notes="Confirmed 50 EA with buyer"),
+            RFQLineItemUpdate(expected_version=line18.version, quantity=50.0, actor="Sales Rep John", reviewer_notes="Confirmed 50 EA with buyer"),
         )
 
         # Operator assigns manual SKU for non-catalog bracket
         case_manager.update_line(
             case.case_id,
             line19.line_id,
-            RFQLineItemUpdate(selected_catalog_sku="SKU-SCH-005", review_decision=ReviewDecision.APPROVED),
+            RFQLineItemUpdate(expected_version=line19.version, selected_catalog_sku="SKU-SCH-005", review_decision=ReviewDecision.APPROVED),
         )
 
         # Batch approve all other exact matches
@@ -67,7 +67,7 @@ class TestAllProductScenarios:
                 case_manager.update_line(
                     case.case_id,
                     l.line_id,
-                    RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED, actor="Sales Rep John"),
+                    RFQLineItemUpdate(expected_version=l.version, review_decision=ReviewDecision.APPROVED, actor="Sales Rep John"),
                 )
 
         updated_case = case_manager.get_case(case.case_id)
@@ -201,7 +201,7 @@ class TestAllProductScenarios:
         assert lines[0].selected_catalog_sku == "SKU-UNPRICED-001"
 
         case_manager.update_line(
-            case.case_id, lines[0].line_id, RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED)
+            case.case_id, lines[0].line_id, RFQLineItemUpdate(expected_version=lines[0].version, review_decision=ReviewDecision.APPROVED)
         )
 
         req = ExportRequest(case_id=case.case_id, allow_partial=False, format="csv")

@@ -80,7 +80,7 @@ class TestExportEngine:
             case_manager.update_line(
                 case.case_id,
                 line.line_id,
-                RFQLineItemUpdate(
+                RFQLineItemUpdate(expected_version=line.version,
                     quantity=line.quantity or 10.0,
                     selected_catalog_sku=sku_override,
                     review_decision=ReviewDecision.APPROVED,
