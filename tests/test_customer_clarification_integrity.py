@@ -10,12 +10,13 @@ def make_case():
 
 
 def make_line(*, review=ReviewDecision.PENDING, match=MatchStatus.EXACT_MATCH,
-              mpn="LC1D09BD", quantity=10.0, warnings=None):
+              mpn="LC1D09BD", quantity=10.0, warnings=None, line_number=1,
+              raw_text="10 pcs Schneider Electric LC1D09BD"):
     return RFQLineItem(
         line_id="syn-1",
         case_id="RFQ-SYN-123",
-        line_number=1,
-        raw_text="10 pcs Schneider Electric LC1D09BD",
+        line_number=line_number,
+        raw_text=raw_text,
         source_locator=SourceLocator(file_name="synthetic.txt", row_number=1),
         requested_manufacturer="Schneider Electric",
         requested_mpn=mpn,
@@ -78,3 +79,29 @@ def test_rejected_item_is_not_presented_as_verified_or_customer_question():
     ])
     assert "Our team has reviewed the following" not in email
     assert "Before finalizing your quote" not in email
+
+
+def test_email_draft_preserves_original_line_numbers_across_sections():
+    approved = make_line(review=ReviewDecision.APPROVED, line_number=18)
+    clarification = make_line(
+        match=MatchStatus.NO_MATCH,
+        mpn=None,
+        quantity=None,
+        line_number=1,
+        raw_text=(
+            "1 | 2 units sensor from last time request reference "
+            "supersupercalifragilisticlongidentifierXYZ, manufacturer unknown"
+        ),
+    )
+    approved.line_id = "syn-approved-18"
+    approved.source_locator.row_number = 18
+    clarification.line_id = "syn-clarification-1"
+
+    email = generate_unsent_email_draft(make_case(), [approved, clarification])
+
+    assert "  18. 10 EA - Schneider Electric (Part: LC1D09BD)" in email
+    assert "  1. 10 EA - Schneider Electric (Part: LC1D09BD)" not in email
+    assert "  * Line 1 — 2 units sensor from last time request reference…:" in email
+    assert "Line 1 — 1 |" not in email
+    assert "supersupercalifragilisticlongidentifierXYZ" not in email
+    assert "NO AUTOMATIC OUTBOUND DISPATCH" in email
