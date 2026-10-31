@@ -606,6 +606,13 @@
             ],
             "title": "Customer Label"
           },
+          "document_warnings": {
+            "items": {
+              "$ref": "#/components/schemas/ExtractionWarning"
+            },
+            "title": "Document Warnings",
+            "type": "array"
+          },
           "line_count": {
             "default": 0,
             "title": "Line Count",
@@ -984,6 +991,64 @@
         ],
         "title": "ReviewDecision",
         "type": "string"
+      },
+      "ReviewPlan": {
+        "description": "Risk-based human review worklist for one extracted RFQ case.",
+        "properties": {
+          "can_batch_approve": {
+            "title": "Can Batch Approve",
+            "type": "boolean"
+          },
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "exception_line_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Exception Line Ids",
+            "type": "array"
+          },
+          "remaining_line_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Remaining Line Ids",
+            "type": "array"
+          },
+          "sample_approved": {
+            "title": "Sample Approved",
+            "type": "boolean"
+          },
+          "sample_correction_found": {
+            "title": "Sample Correction Found",
+            "type": "boolean"
+          },
+          "sample_line_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sample Line Ids",
+            "type": "array"
+          },
+          "total_lines": {
+            "title": "Total Lines",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "case_id",
+          "total_lines",
+          "exception_line_ids",
+          "sample_line_ids",
+          "remaining_line_ids",
+          "sample_approved",
+          "sample_correction_found",
+          "can_batch_approve"
+        ],
+        "title": "ReviewPlan",
+        "type": "object"
       },
       "SourceFileMetadata": {
         "description": "Metadata describing the uploaded RFQ document.",
@@ -2124,6 +2189,146 @@
           }
         },
         "summary": "Batch Review Lines"
+      }
+    },
+    "/api/rfqs/{case_id}/review-plan": {
+      "get": {
+        "operationId": "get_rfq_review_plan_api_rfqs__case_id__review_plan_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewPlan"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Rfq Review Plan"
+      }
+    },
+    "/api/rfqs/{case_id}/review-plan/approve-remaining": {
+      "post": {
+        "operationId": "approve_remaining_validated_lines_api_rfqs__case_id__review_plan_approve_remaining_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Remaining Validated Lines"
       }
     },
     "/api/rfqs/{case_id}/source": {

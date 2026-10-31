@@ -44,6 +44,13 @@ export default function Home() {
     void fetchCases();
   }, [fetchCases]);
 
+  const hasProcessingCases = cases.some((item) => item.status === "PROCESSING");
+  useEffect(() => {
+    if (!hasProcessingCases) return;
+    const timer = window.setInterval(() => void fetchCases(), 1200);
+    return () => window.clearInterval(timer);
+  }, [fetchCases, hasProcessingCases]);
+
   const handleSelectCase = async (caseId: string) => {
     setCasesError(null);
     try {

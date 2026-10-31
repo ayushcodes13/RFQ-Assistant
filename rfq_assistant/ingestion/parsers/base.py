@@ -7,6 +7,15 @@ from pydantic import BaseModel, Field
 from rfq_assistant.schemas.models import ExtractionWarning, SourceLocator
 
 
+class EvidenceSegment(BaseModel):
+    """Bounded source text retained for a later model fallback."""
+
+    segment_id: str
+    locator: SourceLocator
+    text: str
+    warnings: List[ExtractionWarning] = Field(default_factory=list)
+
+
 class ParsedLineDraft(BaseModel):
     """An extracted candidate line draft with source locator and extracted fields."""
     line_number: int
@@ -18,6 +27,9 @@ class ParsedLineDraft(BaseModel):
     quantity: Optional[float] = None
     unit: Optional[str] = "EA"
     notes: Optional[str] = None
+    # Internal link used only while merging a grounded model fallback with a
+    # deterministic candidate. It is not copied into the persisted RFQ schema.
+    source_segment_id: Optional[str] = None
     extraction_warnings: List[ExtractionWarning] = Field(default_factory=list)
 
 
@@ -26,6 +38,10 @@ class ParsedDocumentResult(BaseModel):
     lines: List[ParsedLineDraft]
     warnings: List[ExtractionWarning] = Field(default_factory=list)
     total_lines_detected: int = 0
+    evidence_segments: List[EvidenceSegment] = Field(default_factory=list)
+    # Non-empty regions that the deterministic parser could not confidently
+    # classify. They must reach grounded fallback or become explicit review rows.
+    candidate_segments: List[EvidenceSegment] = Field(default_factory=list)
 
 
 class DocumentParserError(Exception):

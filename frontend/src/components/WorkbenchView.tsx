@@ -16,14 +16,17 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { MotionWrapper } from "@/components/ui/MotionWrapper";
 import {
+  approveRemainingValidatedLines,
   batchReviewLines,
   getCaseLines,
+  getReviewPlan,
   updateLineItem,
 } from "@/services/api";
 import {
   RFQCase,
   RFQLineItem,
   RFQLineItemUpdate,
+  ReviewPlan,
   SourceLocator,
 } from "@/types";
 
@@ -33,10 +36,11 @@ interface WorkbenchViewProps {
   onCaseUpdated: () => Promise<void>;
 }
 
-type FilterType = "all" | "exact" | "ambiguous" | "missing";
+type FilterType = "all" | "sample" | "exact" | "ambiguous" | "missing";
 
 const filterConfig: { id: FilterType; label: string }[] = [
   { id: "all", label: "All lines" },
+  { id: "sample", label: "Review sample" },
   { id: "exact", label: "Exact match" },
   { id: "ambiguous", label: "Needs review" },
   { id: "missing", label: "No match" },
@@ -82,6 +86,8 @@ export function WorkbenchView({
   onCaseUpdated,
 }: WorkbenchViewProps) {
   const [lines, setLines] = useState<RFQLineItem[]>([]);
+  const [reviewPlan, setReviewPlan] = useState<ReviewPlan | null>(null);
+  const [reviewPlanBusy, setReviewPlanBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterType>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -111,6 +117,15 @@ export function WorkbenchView({
     }
   }, [caseData.case_id]);
 
+  const refreshReviewPlan = useCallback(async () => {
+    try {
+      setReviewPlan(await getReviewPlan(caseData.case_id));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Could not load review plan";
+      console.error(msg);
+    }
+  }, [caseData.case_id]);
+
   useEffect(() => {
     let cancelled = false;
     getCaseLines(caseData.case_id)
@@ -134,10 +149,26 @@ export function WorkbenchView({
     return () => {
       cancelled = true;
     };
-  }, [caseData.case_id]);
+  }, [caseData.case_id, caseData.status]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getReviewPlan(caseData.case_id)
+      .then((plan) => {
+        if (!cancelled) setReviewPlan(plan);
+      })
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : "Could not load review plan";
+        console.error(msg);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [caseData.case_id, caseData.status]);
 
   const filteredLines = lines.filter((l) => {
     // Filter by match/extraction state using backend enum values.
+    if (filter === "sample" && !reviewPlan?.sample_line_ids.includes(l.line_id)) return false;
     if (filter === "exact" && l.match_status !== "EXACT_MATCH") return false;
     if (
       filter === "ambiguous" &&
@@ -212,6 +243,7 @@ export function WorkbenchView({
         prev.map((l) => (l.line_id === updated.line_id ? updated : l))
       );
       setEditingCell(null);
+      await refreshReviewPlan();
       await onCaseUpdated();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Save failed";
@@ -226,16 +258,52 @@ export function WorkbenchView({
 
   const handleApprove = async (lineId: string) => {
     try {
-      await batchReviewLines(caseData.case_id, {
-        line_ids: [lineId],
-        decision: "APPROVED",
+      await updateLineItem(caseData.case_id, lineId, {
+        review_decision: "APPROVED",
         actor: "Inside Sales",
       });
       await fetchLines();
+      await refreshReviewPlan();
       await onCaseUpdated();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Approve failed";
       alert(`Approve failed: ${msg}`);
+    }
+  };
+
+  const handleApproveSample = async () => {
+    if (!reviewPlan?.sample_line_ids.length) return;
+    setReviewPlanBusy(true);
+    try {
+      await batchReviewLines(caseData.case_id, {
+        line_ids: reviewPlan.sample_line_ids,
+        decision: "APPROVED",
+        actor: "Inside Sales",
+        notes: "Reviewer checked the risk-based sample against the original source.",
+      });
+      await fetchLines();
+      await refreshReviewPlan();
+      await onCaseUpdated();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Sample approval failed";
+      alert(`Sample approval failed: ${msg}`);
+    } finally {
+      setReviewPlanBusy(false);
+    }
+  };
+
+  const handleApproveRemaining = async () => {
+    setReviewPlanBusy(true);
+    try {
+      await approveRemainingValidatedLines(caseData.case_id);
+      await fetchLines();
+      await refreshReviewPlan();
+      await onCaseUpdated();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Batch approval failed";
+      alert(`Batch approval failed: ${msg}`);
+    } finally {
+      setReviewPlanBusy(false);
     }
   };
 
@@ -283,6 +351,80 @@ export function WorkbenchView({
           </button>
         </div>
       </MotionWrapper>
+
+      {(caseData.document_warnings ?? []).length > 0 && (
+        <div className="mb-4 space-y-2" aria-label="Document extraction warnings">
+          {(caseData.document_warnings ?? []).map((warning, index) => (
+            <div
+              key={`${warning.code}-${index}`}
+              role={warning.severity.toLowerCase() === "error" ? "alert" : "status"}
+              className="flex items-start gap-2 rounded-lg border px-3 py-2 text-sm"
+              style={{
+                borderColor: warning.severity.toLowerCase() === "error" ? "var(--color-warning-100)" : "var(--color-sand-200)",
+                backgroundColor: warning.severity.toLowerCase() === "error" ? "var(--color-warning-50)" : "var(--color-cream-100)",
+                color: "var(--color-brown-800)",
+              }}
+            >
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+              <span>{warning.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {caseData.status === "PROCESSING" && lines.length === 0 && (
+        <div role="status" className="mb-4 rounded-lg border border-[#cbd6d9] bg-white px-4 py-3 text-sm text-[#33464c]">
+          The original request is saved. Document processing is running in the background; this view will update when the review rows are ready.
+        </div>
+      )}
+
+      {reviewPlan && reviewPlan.sample_line_ids.length > 0 && (
+        <section className="mb-5 rounded-xl border border-[#d9d0c5] bg-white px-4 py-4 shadow-sm" aria-labelledby="quick-review-title">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <h2 id="quick-review-title" className="text-sm font-semibold text-[#1d2b30]">
+                Quick review · {reviewPlan.sample_line_ids.length} sample rows
+              </h2>
+              <p className="mt-1 text-sm text-[#52656b]">
+                Check the marked rows against the original. {reviewPlan.exception_line_ids.length} exception rows still need individual review.
+                AI-proposed rows are eligible for the sample only after JSON, number, and source-quote checks pass.
+                {reviewPlan.remaining_line_ids.length > 0 && " After the sample is approved, you can approve the remaining clean rows together."}
+                {reviewPlan.sample_correction_found && " A sampled row needed correction, so the remaining clean rows must be checked individually."}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Sampled line items">
+                {reviewPlan.sample_line_ids.map((lineId) => {
+                  const line = lines.find((item) => item.line_id === lineId);
+                  return (
+                    <span key={lineId} className="rounded-full bg-[#f3eee6] px-2.5 py-1 text-xs font-medium text-[#33464c]">
+                      Line {line?.line_number ?? "?"}{line?.source_locator.sheet_name ? ` · ${line.source_locator.sheet_name}` : line?.source_locator.page_number ? ` · p. ${line.source_locator.page_number}` : ""}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <a
+                href={`/api/proxy/api/rfqs/${encodeURIComponent(caseData.case_id)}/source`}
+                target="_blank"
+                rel="noreferrer"
+                className="rfq-secondary"
+              >
+                Open original
+              </a>
+              {!reviewPlan.sample_approved && (
+                <button type="button" onClick={handleApproveSample} disabled={reviewPlanBusy} className="rfq-secondary disabled:opacity-50">
+                  <Check size={15} /> I checked the sample
+                </button>
+              )}
+              {reviewPlan.can_batch_approve && (
+                <button type="button" onClick={handleApproveRemaining} disabled={reviewPlanBusy} className="rfq-primary disabled:opacity-50">
+                  Approve remaining {reviewPlan.remaining_line_ids.length}
+                </button>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Filter bar + Search */}
       <MotionWrapper direction="up" delay={0.1}>
@@ -404,7 +546,15 @@ export function WorkbenchView({
                         className="px-3 sm:px-4 py-2.5 font-mono text-xs"
                         style={{ color: "var(--color-brown-300)" }}
                       >
-                        {line.line_number}
+                        <span className="inline-flex items-center gap-1.5">
+                          {line.line_number}
+                          {reviewPlan?.sample_line_ids.includes(line.line_id) && (
+                            <span className="rounded bg-[#e9e0d3] px-1.5 py-0.5 text-[10px] font-medium text-[#5b4b3d]">sample</span>
+                          )}
+                          {line.extraction_warnings.some((warning) => warning.code === "LLM_PROPOSED_EXTRACTION") && (
+                            <span className="rounded bg-[#e5eef0] px-1.5 py-0.5 text-[10px] font-medium text-[#33464c]">AI</span>
+                          )}
+                        </span>
                       </td>
 
                       {/* Qty */}

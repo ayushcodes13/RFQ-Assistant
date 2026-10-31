@@ -234,6 +234,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/rfqs/{case_id}/review-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Rfq Review Plan */
+        get: operations["get_rfq_review_plan_api_rfqs__case_id__review_plan_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rfqs/{case_id}/review-plan/approve-remaining": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Remaining Validated Lines */
+        post: operations["approve_remaining_validated_lines_api_rfqs__case_id__review_plan_approve_remaining_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/rfqs/{case_id}/source": {
         parameters: {
             query?: never;
@@ -664,6 +698,8 @@ export interface components {
             created_at?: string;
             /** Customer Label */
             customer_label?: string | null;
+            /** Document Warnings */
+            document_warnings?: components["schemas"]["ExtractionWarning"][];
             /**
              * Line Count
              * @default 0
@@ -783,6 +819,28 @@ export interface components {
          * @enum {string}
          */
         ReviewDecision: "PENDING" | "APPROVED" | "NEEDS_CLARIFICATION" | "REJECTED";
+        /**
+         * ReviewPlan
+         * @description Risk-based human review worklist for one extracted RFQ case.
+         */
+        ReviewPlan: {
+            /** Can Batch Approve */
+            can_batch_approve: boolean;
+            /** Case Id */
+            case_id: string;
+            /** Exception Line Ids */
+            exception_line_ids: string[];
+            /** Remaining Line Ids */
+            remaining_line_ids: string[];
+            /** Sample Approved */
+            sample_approved: boolean;
+            /** Sample Correction Found */
+            sample_correction_found: boolean;
+            /** Sample Line Ids */
+            sample_line_ids: string[];
+            /** Total Lines */
+            total_lines: number;
+        };
         /**
          * SourceFileMetadata
          * @description Metadata describing the uploaded RFQ document.
@@ -1303,6 +1361,74 @@ export interface operations {
                 "application/json": components["schemas"]["BatchReviewRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_rfq_review_plan_api_rfqs__case_id__review_plan_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-API-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewPlan"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_remaining_validated_lines_api_rfqs__case_id__review_plan_approve_remaining_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-API-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

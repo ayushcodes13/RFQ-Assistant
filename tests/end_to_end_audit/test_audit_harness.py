@@ -155,16 +155,7 @@ class TestExtractionTextEdgeCases:
         assert l1.quantity == 10.0
 
     def test_numeric_only_mpn(self, audit_services):
-        """Numeric-only MPNs like 2900364 are NOT extracted as MPNs by TextParser.
-        
-        DEFECT FINDING: _extract_mpn in text_parser.py requires tokens to have
-        at least one letter AND one digit, OR uppercase letters + hyphen pattern.
-        Pure-numeric MPNs (e.g. 2900364) are silently skipped — the line is still
-        detected (because the OEM name 'Schneider Electric' is recognized), but
-        requested_mpn is None and the line gets NO_MATCH. This means valid
-        numeric MPNs in catalog cannot be auto-matched when they appear in text
-        input.
-        """
+        """Numeric-only MPNs are extracted and matched by exact catalog ID."""
         manager, _, catalog, _ = audit_services
         content = (AUDIT_FIXTURES / "numeric_only_mpn.txt").read_bytes()
         case = manager.create_case_from_upload(
@@ -173,16 +164,17 @@ class TestExtractionTextEdgeCases:
         )
         lines = manager.get_lines(case.case_id)
 
-        # All 3 lines are detected (OEMs are known), but MPNs are None for lines 1-2
+        # All three lines are detected. Numeric MPNs are extracted, while the
+        # catalog correctly reports collisions where manufacturer context differs.
         assert len(lines) == 3, f"Expected 3 lines, got {len(lines)}"
 
-        # Lines with numeric-only MPNs: MPN is None, match is NO_MATCH
+        # Numeric-only identifiers remain valid exact-match candidates.
         l1 = lines[0]
-        assert l1.requested_mpn is None
-        assert l1.match_status == MatchStatus.NO_MATCH
+        assert l1.requested_mpn == "2900364"
+        assert l1.match_status == MatchStatus.COLLISION
 
         l2 = lines[1]
-        assert l2.requested_mpn is None
+        assert l2.requested_mpn == "2966171"
         assert l2.match_status == MatchStatus.NO_MATCH
 
         # Line 3: LC1D09BD (alphanumeric) is correctly extracted and matched
@@ -393,22 +385,18 @@ class TestExtractionSpreadsheetEdgeCases:
                 assert not line.notes.startswith("=SUM") or line.notes == "=HYPERLINK(\"https://evil.test\",\"click\")"
 
     def test_headerless_xlsx(self, audit_services):
-        """Headerless XLSX: the parser has NO fallback for missing headers.
-        
-        DEFECT FINDING: When the XLSX parser's header detection finds no header
-        row (header_row_idx == -1), it does `continue` (spreadsheet_parser.py:213-215),
-        silently skipping the entire sheet. This contrasts with the CSV parser
-        which has a headerless fallback (spreadsheet_parser.py:104-108). The result
-        is a DocumentParserError("No RFQ line items could be extracted") with no
-        indication that the sheet was skipped due to missing headers.
-        """
+        """Headerless XLSX retains candidate rows and clearly marks guessed columns."""
         manager, _, catalog, _ = audit_services
         content = (AUDIT_FIXTURES / "headerless_xlsx.xlsx").read_bytes()
-        with pytest.raises(Exception, match="No RFQ line items could be extracted"):
-            manager.create_case_from_upload(
-                filename="headerless.xlsx", content=content,
-                customer_label="SYN-TEST", actor="Auditor",
-            )
+        case = manager.create_case_from_upload(
+            filename="headerless.xlsx", content=content,
+            customer_label="SYN-TEST", actor="Auditor",
+        )
+        assert case.status.value == "NEEDS_REVIEW"
+        assert manager.storage.get_file(case.case_id, "headerless.xlsx") == content
+        lines = manager.get_lines(case.case_id)
+        assert [line.requested_mpn for line in lines] == ["LC1D09BD", "6ES7214-1AG40-0XB0"]
+        assert all(any(w.code == "HEADERLESS_LAYOUT_REVIEW" for w in line.extraction_warnings) for line in lines)
 
 
 # ---------------------------------------------------------------------------
@@ -847,15 +835,16 @@ class TestAdversarialFailures:
                 customer_label="SYN-TEST", actor="Auditor",
             )
 
-    def test_oversized_csv_rejected(self, audit_services):
-        """CSV exceeding 5000 rows must be rejected."""
+    def test_oversized_csv_retained_as_failed_case(self, audit_services):
+        """CSV exceeding 5000 rows must be blocked with its upload retained."""
         manager, _, catalog, _ = audit_services
         content = (AUDIT_FIXTURES / "oversized_csv_5005_rows.csv").read_bytes()
-        with pytest.raises(Exception, match="exceeds maximum permitted limit"):
-            manager.create_case_from_upload(
-                filename="oversized.csv", content=content,
-                customer_label="SYN-TEST", actor="Auditor",
-            )
+        case = manager.create_case_from_upload(
+            filename="oversized.csv", content=content,
+            customer_label="SYN-TEST", actor="Auditor",
+        )
+        assert case.status.value == "FAILED"
+        assert "exceeds maximum permitted limit" in case.document_warnings[0].message
 
     def test_oversized_file_rejected(self, audit_services):
         """File exceeding 10MB must be rejected at upload validation."""
@@ -865,14 +854,18 @@ class TestAdversarialFailures:
             validate_file_upload("big.csv", content)
 
     def test_password_protected_pdf_rejected(self, audit_services):
-        """Password-protected PDF must fail safely without crash."""
+        """Password-protected PDF must create a visible failed case with a clear message."""
         manager, _, catalog, _ = audit_services
         content = (AUDIT_FIXTURES / "password_protected_pdf.pdf").read_bytes()
-        with pytest.raises(Exception):
-            manager.create_case_from_upload(
-                filename="protected.pdf", content=content,
-                customer_label="SYN-TEST", actor="Auditor",
-            )
+        case = manager.create_case_from_upload(
+            filename="protected.pdf", content=content,
+            customer_label="SYN-TEST", actor="Auditor",
+        )
+        assert case.status.value == "FAILED"
+        assert case.document_warnings
+        assert any("Password-protected" in w.message for w in case.document_warnings), \
+            "Should surface a clear password-protected PDF message"
+        assert manager.storage.get_file(case.case_id, "protected.pdf") == content
 
     def test_unsupported_extension_rejected(self, audit_services):
         """Unsupported file extensions must be rejected."""

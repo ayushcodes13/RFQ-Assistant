@@ -2,6 +2,7 @@
 
 import csv
 import io
+import itertools
 import re
 from typing import Dict, List, Optional, Tuple
 import openpyxl
@@ -9,6 +10,7 @@ import openpyxl
 from rfq_assistant.ingestion.parsers.base import (
     BaseDocumentParser,
     DocumentParserError,
+    EvidenceSegment,
     ParsedDocumentResult,
     ParsedLineDraft,
 )
@@ -74,20 +76,37 @@ class SpreadsheetParser(BaseDocumentParser):
     def parse(self, content: bytes, filename: str) -> ParsedDocumentResult:
         if filename.lower().endswith(".csv"):
             return self._parse_csv(content, filename)
+        elif filename.lower().endswith(".xls"):
+            return self._parse_xls(content, filename)
         elif filename.lower().endswith(".xlsx"):
             return self._parse_xlsx(content, filename)
         else:
             raise DocumentParserError(f"Unsupported spreadsheet format for file: {filename}")
 
+    def _parse_xls(self, content: bytes, filename: str) -> ParsedDocumentResult:
+        """Convert legacy BIFF files in a bounded subprocess, then use XLSX parsing."""
+        from rfq_assistant.ingestion.xls_conversion import (
+            LegacyXLSConversionError,
+            convert_legacy_xls,
+        )
+
+        try:
+            converted = convert_legacy_xls(content)
+        except LegacyXLSConversionError as exc:
+            raise DocumentParserError(str(exc)) from exc
+        result = self._parse_xlsx(converted, filename)
+        result.warnings.insert(0, ExtractionWarning(
+            code="LEGACY_XLS_CONVERTED",
+            message="This legacy Excel file was converted in an isolated temporary profile before parsing. Verify the five sampled rows against the original workbook.",
+            severity="warning",
+        ))
+        return result
+
     def _parse_csv(self, content: bytes, filename: str) -> ParsedDocumentResult:
         text = content.decode("utf-8", errors="replace")
-        reader = csv.reader(io.StringIO(text))
-        rows = list(reader)
-
-        if len(rows) > 5000:
-            raise DocumentParserError(f"CSV row count ({len(rows)}) exceeds maximum permitted limit (5000 rows).")
-
-        if not rows:
+        reader = iter(csv.reader(io.StringIO(text)))
+        header_sample = list(itertools.islice(reader, 10))
+        if not header_sample:
             return ParsedDocumentResult(lines=[], warnings=[
                 ExtractionWarning(code="EMPTY_CSV", message="CSV file contains no rows.")
             ])
@@ -95,23 +114,36 @@ class SpreadsheetParser(BaseDocumentParser):
         # Scan first 10 rows for header row
         header_row_idx = -1
         col_map: Dict[str, int] = {}
-        for idx, row in enumerate(rows[:10]):
+        for idx, row in enumerate(header_sample):
             col_map = identify_columns([str(c) for c in row])
             if "mpn" in col_map or ("description" in col_map and "quantity" in col_map):
                 header_row_idx = idx
                 break
 
+        warnings: List[ExtractionWarning] = []
         if header_row_idx == -1:
             # Headerless distributor CSVs are common. Preserve the very first
             # line as data rather than silently discarding it as a header.
-            header_row_idx = -1
             col_map = {"mpn": 0, "quantity": 1, "description": 2}
+            data_rows = itertools.chain(header_sample, reader)
+            first_row_number = 1
+            warnings.append(ExtractionWarning(
+                code="HEADERLESS_CSV_LAYOUT_GUESSED",
+                message="No recognized CSV header was found. The first three columns are treated as part, quantity, and description; verify the rows.",
+                severity="warning",
+            ))
+        else:
+            data_rows = itertools.chain(header_sample[header_row_idx + 1:], reader)
+            first_row_number = header_row_idx + 2
 
         lines: List[ParsedLineDraft] = []
-        warnings: List[ExtractionWarning] = []
         line_counter = 1
 
-        for row_idx, row in enumerate(rows[header_row_idx + 1:], start=header_row_idx + 2):
+        for row_idx, row in enumerate(data_rows, start=first_row_number):
+            if row_idx > 5000:
+                raise DocumentParserError("CSV row count exceeds maximum permitted limit (5000 rows).")
+            if len(row) > 100:
+                raise DocumentParserError(f"CSV row {row_idx} column count ({len(row)}) exceeds maximum permitted limit (100 columns).")
             if not row or all(str(c).strip() == "" for c in row):
                 continue  # Skip completely empty rows
 
@@ -134,6 +166,12 @@ class SpreadsheetParser(BaseDocumentParser):
             unit = raw_unit or parsed_unit or "EA"
 
             line_warnings: List[ExtractionWarning] = []
+            if header_row_idx == -1:
+                line_warnings.append(ExtractionWarning(
+                    code="HEADERLESS_LAYOUT_REVIEW",
+                    message=f"Column roles were guessed for CSV row {row_idx}.",
+                    severity="warning",
+                ))
             if qty is None:
                 line_warnings.append(
                     ExtractionWarning(
@@ -180,88 +218,189 @@ class SpreadsheetParser(BaseDocumentParser):
         return ParsedDocumentResult(lines=lines, warnings=warnings, total_lines_detected=len(lines))
 
     def _parse_xlsx(self, content: bytes, filename: str) -> ParsedDocumentResult:
-        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+        try:
+            wb = openpyxl.load_workbook(io.BytesIO(content), data_only=False, read_only=True)
+        except Exception as exc:
+            raise DocumentParserError(f"Workbook could not be opened safely: {type(exc).__name__}") from exc
         if len(wb.sheetnames) > 20:
+            wb.close()
             raise DocumentParserError(f"Spreadsheet sheet count ({len(wb.sheetnames)}) exceeds maximum permitted limit (20 sheets).")
 
         lines: List[ParsedLineDraft] = []
         warnings: List[ExtractionWarning] = []
+        candidate_segments: List[EvidenceSegment] = []
         line_counter = 1
+        try:
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                if ws.max_row and ws.max_row > 5000:
+                    raise DocumentParserError(f"Spreadsheet sheet '{sheet_name}' row count ({ws.max_row}) exceeds limit (5000 rows).")
+                if ws.max_column and ws.max_column > 100:
+                    raise DocumentParserError(f"Spreadsheet sheet '{sheet_name}' column count ({ws.max_column}) exceeds limit (100 columns).")
 
-        for sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-            if ws.max_row and ws.max_row > 5000:
-                raise DocumentParserError(f"Spreadsheet sheet '{sheet_name}' row count ({ws.max_row}) exceeds limit (5000 rows).")
-            if ws.max_column and ws.max_column > 100:
-                raise DocumentParserError(f"Spreadsheet sheet '{sheet_name}' column count ({ws.max_column}) exceeds limit (100 columns).")
-
-            all_rows = list(ws.iter_rows(values_only=True))
-            if not all_rows:
-                continue
-
-            # Detect header row in first 10 rows
-            header_row_idx = -1
-            col_map: Dict[str, int] = {}
-            for idx, row in enumerate(all_rows[:10]):
-                if not row:
+                row_iterator = iter(ws.iter_rows(values_only=False))
+                header_sample = list(itertools.islice(row_iterator, 10))
+                if not header_sample:
                     continue
-                col_map = identify_columns([str(c) if c is not None else "" for c in row])
-                if "mpn" in col_map or ("description" in col_map and "quantity" in col_map):
-                    header_row_idx = idx
-                    break
+                header_row_idx = -1
+                col_map: Dict[str, int] = {}
+                for idx, row in enumerate(header_sample):
+                    col_map = identify_columns([str(c.value) if c.value is not None else "" for c in row])
+                    if "mpn" in col_map or ("description" in col_map and "quantity" in col_map):
+                        header_row_idx = idx
+                        break
 
-            if header_row_idx == -1:
-                # Check if sheet contains line-item-like data
-                continue
-
-            for row_idx, row in enumerate(all_rows[header_row_idx + 1:], start=header_row_idx + 2):
-                if not row or all(c is None or str(c).strip() == "" for c in row):
-                    continue
-
-                row_text = " | ".join(str(c).strip() for c in row if c is not None and str(c).strip())
-                locator = SourceLocator(
-                    file_name=filename,
-                    sheet_name=sheet_name,
-                    row_number=row_idx,
-                    text_snippet=row_text[:120],
-                )
-
-                mpn = self._get_col_value(row, col_map.get("mpn"))
-                oem = self._get_col_value(row, col_map.get("manufacturer"))
-                desc = self._get_col_value(row, col_map.get("description"))
-                raw_qty = self._get_col_value(row, col_map.get("quantity"))
-                raw_unit = self._get_col_value(row, col_map.get("unit"))
-                notes = self._get_col_value(row, col_map.get("notes"))
-
-                qty, parsed_unit = parse_quantity_and_unit(raw_qty)
-                unit = raw_unit or parsed_unit or "EA"
-
-                line_warnings: List[ExtractionWarning] = []
-                if qty is None:
-                    line_warnings.append(
-                        ExtractionWarning(
-                            code="MISSING_QUANTITY",
-                            message=f"Missing or unparseable quantity in row {row_idx} of sheet '{sheet_name}'",
+                guessed_layout = header_row_idx == -1
+                hidden_sheet = ws.sheet_state != "visible"
+                if hidden_sheet:
+                    warnings.append(ExtractionWarning(
+                        code="HIDDEN_SHEET_INCLUDED",
+                        message=f"Hidden sheet '{sheet_name}' contains possible request data and was included in inspection.",
+                        severity="warning",
+                    ))
+                if guessed_layout:
+                    col_map = self._infer_xlsx_columns(header_sample)
+                    if not col_map:
+                        for source_row_number, row in enumerate(
+                            itertools.chain(header_sample, row_iterator), start=1
+                        ):
+                            row_text = " | ".join(
+                                str(cell.value).strip()
+                                for cell in row
+                                if cell.value is not None and str(cell.value).strip()
+                            )
+                            if row_text and self._looks_like_product_row(row_text):
+                                candidate_segments.append(EvidenceSegment(
+                                    segment_id=f"candidate-{sheet_name}-row-{source_row_number}",
+                                    locator=SourceLocator(
+                                        file_name=filename,
+                                        sheet_name=sheet_name,
+                                        row_number=source_row_number,
+                                        text_snippet=row_text[:120],
+                                    ),
+                                    text=row_text,
+                                    warnings=[ExtractionWarning(
+                                        code="HEADERLESS_SHEET_LAYOUT_UNKNOWN",
+                                        message=f"This row came from sheet '{sheet_name}', whose columns could not be mapped. Verify it as a possible RFQ item.",
+                                        severity="warning",
+                                    )],
+                                ))
+                        warnings.append(ExtractionWarning(
+                            code="HEADERLESS_SHEET_LAYOUT_UNKNOWN",
+                            message=f"No header or recognizable part/quantity columns were found in sheet '{sheet_name}'. The original sheet was not silently treated as line items.",
                             severity="warning",
-                        )
-                    )
-
-                if not mpn and not desc:
-                    if not oem and qty is None and not notes:
+                        ))
                         continue
-                    line_warnings.append(
-                        ExtractionWarning(
+                    data_rows = itertools.chain(header_sample, row_iterator)
+                    first_row_number = 1
+                    warnings.append(ExtractionWarning(
+                        code="HEADERLESS_SHEET_LAYOUT_GUESSED",
+                        message=f"No recognized header was found in sheet '{sheet_name}'. Column roles were inferred; verify these rows.",
+                        severity="warning",
+                    ))
+                else:
+                    data_rows = itertools.chain(header_sample[header_row_idx + 1:], row_iterator)
+                    first_row_number = header_row_idx + 2
+
+                for row_idx, row in enumerate(data_rows, start=first_row_number):
+                    if not row or all(c.value is None or str(c.value).strip() == "" for c in row):
+                        continue
+                    row_text = " | ".join(str(c.value).strip() for c in row if c.value is not None and str(c.value).strip())
+                    mpn_idx = col_map.get("mpn")
+                    qty_idx = col_map.get("quantity")
+                    oem_idx = col_map.get("manufacturer")
+                    desc_idx = col_map.get("description")
+                    unit_idx = col_map.get("unit")
+                    notes_idx = col_map.get("notes")
+
+                    formula_fields = {
+                        name for name, idx in (("mpn", mpn_idx), ("manufacturer", oem_idx), ("description", desc_idx), ("quantity", qty_idx), ("unit", unit_idx))
+                        if idx is not None and idx < len(row) and getattr(row[idx], "data_type", None) == "f"
+                    }
+                    mpn = self._get_col_value(row, mpn_idx)
+                    oem = self._get_col_value(row, oem_idx)
+                    desc = self._get_col_value(row, desc_idx)
+                    raw_qty = self._get_col_value(row, qty_idx)
+                    raw_unit = self._get_col_value(row, unit_idx)
+                    notes = self._get_col_value(row, notes_idx)
+
+                    qty, parsed_unit = parse_quantity_and_unit(raw_qty)
+                    unit = raw_unit or parsed_unit or "EA"
+                    line_warnings: List[ExtractionWarning] = []
+                    if guessed_layout:
+                        line_warnings.append(ExtractionWarning(
+                            code="HEADERLESS_LAYOUT_REVIEW",
+                            message=f"Column roles were guessed for sheet '{sheet_name}', row {row_idx}.",
+                            severity="warning",
+                        ))
+                    if hidden_sheet:
+                        line_warnings.append(ExtractionWarning(
+                            code="HIDDEN_SHEET_REVIEW",
+                            message=f"This row came from hidden sheet '{sheet_name}'. Verify it is part of the RFQ.",
+                            severity="warning",
+                        ))
+                    if formula_fields:
+                        line_warnings.append(ExtractionWarning(
+                            code="FORMULA_VALUE_NOT_EVALUATED",
+                            message=f"Formula-backed fields ({', '.join(sorted(formula_fields))}) were preserved as formula text and not calculated.",
+                            severity="warning",
+                        ))
+                        if "quantity" in formula_fields:
+                            qty = None
+                    if qty is None:
+                        line_warnings.append(ExtractionWarning(
+                            code="MISSING_QUANTITY",
+                            message=f"Missing or unparseable quantity in row {row_idx} of sheet '{sheet_name}'.",
+                            severity="warning",
+                        ))
+                    if not mpn and not desc:
+                        if not oem and qty is None and not notes:
+                            continue
+                        line_warnings.append(ExtractionWarning(
                             code="MISSING_PART_REFERENCE",
                             message=f"Cannot identify requested part on row {row_idx} of sheet '{sheet_name}'.",
                             severity="warning",
-                        )
-                    )
+                        ))
 
-                lines.append(
-                    ParsedLineDraft(
+                    # Headerless inference should not promote titles and notes to
+                    # product rows. A likely part reference or quantity must exist.
+                    if guessed_layout and not mpn and qty is None:
+                        if row_text and self._looks_like_product_row(row_text):
+                            candidate_segments.append(EvidenceSegment(
+                                segment_id=f"candidate-{sheet_name}-row-{row_idx}",
+                                locator=SourceLocator(
+                                    file_name=filename,
+                                    sheet_name=sheet_name,
+                                    row_number=row_idx,
+                                    text_snippet=row_text[:120],
+                                ),
+                                text=row_text,
+                                warnings=[ExtractionWarning(
+                                    code="HEADERLESS_SHEET_LAYOUT_UNKNOWN",
+                                    message=f"This row in sheet '{sheet_name}' could not be mapped to a part and quantity column.",
+                                    severity="warning",
+                                )],
+                            ))
+                        continue
+                    if (
+                        not mpn and not desc and not oem and qty is None and not notes
+                        and row_text and self._looks_like_product_row(row_text)
+                    ):
+                        candidate_segments.append(EvidenceSegment(
+                            segment_id=f"candidate-{sheet_name}-row-{row_idx}",
+                            locator=SourceLocator(
+                                file_name=filename,
+                                sheet_name=sheet_name,
+                                row_number=row_idx,
+                                text_snippet=row_text[:120],
+                            ),
+                            text=row_text,
+                        ))
+                        continue
+                    lines.append(ParsedLineDraft(
                         line_number=line_counter,
                         raw_text=row_text,
-                        source_locator=locator,
+                        source_locator=SourceLocator(file_name=filename, sheet_name=sheet_name, row_number=row_idx, text_snippet=row_text[:120]),
                         requested_manufacturer=oem,
                         requested_mpn=mpn,
                         description=desc,
@@ -269,26 +408,80 @@ class SpreadsheetParser(BaseDocumentParser):
                         unit=unit,
                         notes=notes,
                         extraction_warnings=line_warnings,
-                    )
-                )
-                line_counter += 1
+                    ))
+                    line_counter += 1
+        finally:
+            wb.close()
 
         if not lines:
-            warnings.append(
-                ExtractionWarning(
-                    code="NO_LINES_EXTRACTED",
-                    message="No valid part lines could be extracted from workbook sheets.",
-                    severity="error",
-                )
-            )
+            warnings.append(ExtractionWarning(
+                code="NO_LINES_EXTRACTED",
+                message="No valid part lines could be extracted from workbook sheets.",
+                severity="error",
+            ))
+        return ParsedDocumentResult(
+            lines=lines,
+            warnings=warnings,
+            total_lines_detected=len(lines),
+            candidate_segments=candidate_segments,
+        )
 
-        return ParsedDocumentResult(lines=lines, warnings=warnings, total_lines_detected=len(lines))
+    @staticmethod
+    def _infer_xlsx_columns(rows: List[Tuple]) -> Dict[str, int]:
+        """Infer likely part, quantity, and description columns from a small sample."""
+        width = max((len(row) for row in rows), default=0)
+        mpn_scores: Dict[int, int] = {}
+        qty_scores: Dict[int, int] = {}
+        desc_scores: Dict[int, int] = {}
+        for col_idx in range(width):
+            for row in rows:
+                if col_idx >= len(row) or row[col_idx].value is None:
+                    continue
+                value = str(row[col_idx].value).strip()
+                if not value:
+                    continue
+                if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{2,}", value) and (
+                    (any(ch.isdigit() for ch in value) and any(ch.isalpha() for ch in value))
+                    or (value.isdigit() and len(value) >= 5)
+                ):
+                    mpn_scores[col_idx] = mpn_scores.get(col_idx, 0) + 1
+                quantity, _ = parse_quantity_and_unit(value)
+                if quantity is not None:
+                    qty_scores[col_idx] = qty_scores.get(col_idx, 0) + 1
+                if len(value) >= 20 and quantity is None and not ((any(ch.isdigit() for ch in value) and any(ch.isalpha() for ch in value))):
+                    desc_scores[col_idx] = desc_scores.get(col_idx, 0) + 1
+        result: Dict[str, int] = {}
+        if mpn_scores:
+            result["mpn"] = max(mpn_scores, key=mpn_scores.get)
+        available = {idx: score for idx, score in qty_scores.items() if idx != result.get("mpn")}
+        if available:
+            result["quantity"] = max(available, key=available.get)
+        available_desc = {idx: score for idx, score in desc_scores.items() if idx not in result.values()}
+        if available_desc:
+            result["description"] = max(available_desc, key=available_desc.get)
+        return result
+
+    @staticmethod
+    def _looks_like_product_row(text: str) -> bool:
+        """Avoid turning footers/metadata into fallback rows while retaining BOM-like text."""
+        return bool(
+            re.search(r"\b\d+(?:\.\d+)?\s*(?:EA|PCS|UNITS?|SET|FT|M)\b", text, re.IGNORECASE)
+            or re.search(
+                r"\b(?:[A-Z]{2,}[A-Z0-9]*[-_/][A-Z0-9][A-Z0-9._/-]*|[A-Z0-9]{4,})\b",
+                text,
+            )
+            or re.search(
+                r"\b(?:sensor|relay|switch|module|contactor|breaker|motor|cable|terminal|disconnect|assembly|assemblies|connector|valve|bearing|plc|pushbutton|fuse|lamp|light|transformer|power supply|auxiliary\s+contacts?)\b",
+                text,
+                re.IGNORECASE,
+            )
+        )
 
     @staticmethod
     def _get_col_value(row: Tuple, col_idx: Optional[int]) -> Optional[str]:
         if col_idx is None or col_idx >= len(row):
             return None
-        val = row[col_idx]
+        val = getattr(row[col_idx], "value", row[col_idx])
         if val is None:
             return None
         val_str = str(val).strip()

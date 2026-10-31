@@ -13,7 +13,7 @@ import openpyxl
 import pytest
 from fastapi.testclient import TestClient
 
-from rfq_assistant.api.app import app, case_manager
+from rfq_assistant.api.app import app
 from rfq_assistant.ingestion.malware import ClamAVScanner, EICAR_SIGNATURE
 from rfq_assistant.ingestion.parsers.base import DocumentParserError
 from rfq_assistant.ingestion.parsers.pdf_parser import PDFParser
@@ -70,8 +70,8 @@ def test_clamav_development_fallback_when_unprotected():
     assert result.engine == "clamav-offline-fallback"
 
 
-def test_parsing_failure_rolls_back_case_and_storage(tmp_path, monkeypatch):
-    """If document validation passes but parser fails, case and disk storage must rollback completely."""
+def test_parsing_failure_keeps_source_and_failed_case_for_manual_review(tmp_path, monkeypatch):
+    """A validated upload stays available when parsing fails, with an explicit failed case."""
     # Mock parser to raise DocumentParserError
     from rfq_assistant.ingestion.parsers import base
 
@@ -81,19 +81,23 @@ def test_parsing_failure_rolls_back_case_and_storage(tmp_path, monkeypatch):
 
     monkeypatch.setattr("rfq_assistant.cases.manager.get_parser", lambda src: BrokenParser())
 
-    initial_cases_count = len(case_manager.list_cases())
+    from rfq_assistant.cases.manager import CaseManager
+    from rfq_assistant.ingestion.storage import DocumentStorage
+    from rfq_assistant.matching.catalog import CatalogRepository
+
+    manager = CaseManager(catalog=CatalogRepository(), storage=DocumentStorage(base_dir=tmp_path))
     valid_csv_content = b"Part Number,Quantity\nLC1D09BD,10\n"
 
-    with pytest.raises(DocumentParserError) as exc_info:
-        case_manager.create_case_from_upload(
-            filename="test_corrupt_stream.csv",
-            content=valid_csv_content,
-            title="Rollback Test",
-        )
+    case = manager.create_case_from_upload(
+        filename="test_corrupt_stream.csv",
+        content=valid_csv_content,
+        title="Manual review required",
+    )
 
-    assert "Parser failed" in str(exc_info.value)
-    # Verify no leaked case in case_manager
-    assert len(case_manager.list_cases()) == initial_cases_count
+    assert case.status.value == "FAILED"
+    assert any("Parser failed" in warning.message for warning in case.document_warnings)
+    assert manager.storage.get_file(case.case_id, "test_corrupt_stream.csv") == valid_csv_content
+    assert manager.get_lines(case.case_id) == []
 
 
 def test_text_parser_preserves_please_quote_and_urgent_inquiries():
