@@ -797,7 +797,7 @@ export interface components {
             /** Description */
             description?: string | null;
             /** Expected Version */
-            expected_version?: number | null;
+            expected_version: number;
             /** Notes */
             notes?: string | null;
             /** Quantity */

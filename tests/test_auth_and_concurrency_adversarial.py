@@ -142,7 +142,7 @@ def test_authenticated_actor_cannot_be_spoofed(client, monkeypatch):
     # Attempt to spoof actor as "Chief Financial Officer"
     resp = client.patch(
         f"/api/rfqs/{case.case_id}/lines/{line.line_id}",
-        json={"review_decision": "APPROVED", "actor": "Chief Financial Officer"},
+        json={"expected_version": 1, "review_decision": "APPROVED", "actor": "Chief Financial Officer"},
         headers=headers,
     )
     assert resp.status_code == 200
@@ -197,7 +197,7 @@ def test_optimistic_concurrency_conflict_detection(client):
     assert resp1.status_code == 200
     assert resp1.json()["version"] == 2
 
-    # Second reviewer (stale browser tab) attempts to update using outdated expected_version=1
+    # Second reviewer (stale browser tab) attempts to update using outdated expected_version=line.version
     resp2 = client.patch(
         f"/api/rfqs/{case.case_id}/lines/{line.line_id}",
         json={"expected_version": 1, "quantity": 30.0},

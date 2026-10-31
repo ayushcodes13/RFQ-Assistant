@@ -42,7 +42,7 @@ def quote_case(tmp_path):
         customer_label="=1+1",
     )
     line = manager.get_lines(case.case_id)[0]
-    manager.update_line(case.case_id, line.line_id, RFQLineItemUpdate(
+    manager.update_line(case.case_id, line.line_id, RFQLineItemUpdate(expected_version=line.version,
         notes="=HYPERLINK(\"https://example.invalid\",\"test\")",
         review_decision=ReviewDecision.APPROVED,
     ))

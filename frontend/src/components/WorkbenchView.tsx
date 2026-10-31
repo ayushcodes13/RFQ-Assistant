@@ -257,10 +257,13 @@ export function WorkbenchView({
   };
 
   const handleApprove = async (lineId: string) => {
+    const line = lines.find((item) => item.line_id === lineId);
+    if (!line) return;
     try {
       await updateLineItem(caseData.case_id, lineId, {
         review_decision: "APPROVED",
         actor: "Inside Sales",
+        expected_version: line.version,
       });
       await fetchLines();
       await refreshReviewPlan();

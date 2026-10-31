@@ -9,24 +9,15 @@ Show the proposed **pre-ERP quotation preparation step**: incoming RFQ file or e
 ### Preflight, 10-15 minutes before the meeting
 
 1. Clone and open this repository on an isolated machine. **No real customer, employer or personal production data**.
-2. Start backend from repository root (use isolated storage so an existing local database is not reused):
-   ```bash
-   export RFQ_ASSISTANT_DB_PATH="$PWD/storage/demo-rehearsal.sqlite3"
-   .venv/bin/python -m uvicorn rfq_assistant.api.app:app --host 127.0.0.1 --port 8001
-   ```
-3. Start frontend in a separate terminal, pointing it at the matching backend:
-   ```bash
-   cd frontend
-   RFQ_ASSISTANT_API_URL=http://127.0.0.1:8001 npm run dev -- --port 3001
-   ```
-4. Open `http://localhost:3001/workspace`. Confirm the **Cases Inbox**, **New RFQ Intake**, review workbench, **Audit Log** and **Export Quotation Worksheet** work.
-5. Confirm the sample catalog is available at `fixtures/catalogs/industrial_components_sample_catalog.csv` (the README says the backend loads it locally).
-6. Stage **two or three separate synthetic cases** before recording:
+2. From the repository root, run `./scripts/demo.sh`. It starts synchronous ingestion on backend port 8010 and frontend port 3010, uses fresh isolated state under `.demo-runtime/`, and leaves existing `storage/` untouched. It refuses ports already in use; override with `RFQ_DEMO_BACKEND_PORT` or `RFQ_DEMO_FRONTEND_PORT` if needed. Stop with `./scripts/demo.sh stop`.
+3. Open `http://localhost:3010/workspace`. Confirm the **Cases Inbox**, **New RFQ Intake**, review workbench, **Audit Log** and **Export Quotation Worksheet** work.
+4. Confirm the sample catalog is available at `fixtures/catalogs/industrial_components_sample_catalog.csv` (the README says the backend loads it locally).
+5. Stage **two or three separate synthetic cases** before recording:
    - Upload `fixtures/rfq_samples/industrial_control_bom_20lines.xlsx` to demonstrate **file upload and parsing**.
    - Paste the contents of `fixtures/rfq_samples/messy_email_quote_request.txt` into **Paste Email / Parts List** to demonstrate **an unspecified sensor** and review warnings.
    - Optionally paste `fixtures/rfq_samples/cross_brand_collision.txt` to demonstrate **XG-42 manufacturer ambiguity**. Confirm actual behavior before claiming it appears. Use `fixtures/ground_truth/annotations.json` for fixture expectations.
-7. Leave **unresolved rows unapproved**. Preview the export modal and make sure draft versus final behavior matches the current build. Do not make up per-row extraction counts, hit rates or warnings: speak only about what the local app actually shows.
-8. Check that the screen share has no Gmail, CRM, Apollo, Hunter, customer identities, secrets, or employer material visible. Turn off notifications.
+6. Leave **unresolved rows unapproved**. Preview the export modal and make sure draft versus final behavior matches the current build. Do not make up per-row extraction counts, hit rates or warnings: speak only about what the local app actually shows.
+7. Check that the screen share has no Gmail, CRM, Apollo, Hunter, customer identities, secrets, or employer material visible. Turn off notifications.
 
 ### Live demo: 3:00 total
 

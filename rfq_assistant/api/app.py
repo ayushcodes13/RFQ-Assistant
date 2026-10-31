@@ -550,12 +550,15 @@ async def v1_extract_rfq(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Security alert: Malicious content quarantined ({scan.threat_name}).",
             )
-        case = case_manager.create_case_from_text(
-            raw_text=pasted_text or "",
-            title=title,
-            customer_label=customer_name,
-            actor=current_user.name,
-        )
+        try:
+            case = case_manager.create_case_from_text(
+                raw_text=pasted_text or "",
+                title=title,
+                customer_label=customer_name,
+                actor=current_user.name,
+            )
+        except (UploadValidationError, DocumentParserError) as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     lines = case_manager.get_lines(case.case_id)
     return {

@@ -429,7 +429,7 @@ class TestExtractionPdfEdgeCases:
 
     def test_pdf_unfamiliar_manufacturers(self, audit_services):
         """Unknown Brand Co / Fictional Dynamics must not be auto-matched to known OEMs.
-        
+
         DEFECT FINDING: The PDF parser extracts pipe-delimited table rows but does
         NOT split cells to extract manufacturer from position. All lines get
         requested_manufacturer=None. With None manufacturer:
@@ -504,7 +504,7 @@ class TestMatchingExactness:
 
     def test_no_match_not_silently_approved(self, audit_services):
         """Unknown part numbers must be NO_MATCH, never auto-substituted.
-        
+
         Note: TextParser only detects lines with known OEMs. To test NO_MATCH
         for an unknown part, we use a known OEM (Schneider Electric) with an
         unknown MPN.
@@ -522,7 +522,7 @@ class TestMatchingExactness:
 
     def test_unfamiliar_manufacturer_not_normalized_to_known(self, audit_catalog):
         """An unrecognized manufacturer with an unknown MPN must not be matched.
-        
+
         Note: 'ZZ-99999' IS in the audit catalog under 'Unknown Brand Co', so it's
         an exact match. We use a truly unknown MPN here to verify NO_MATCH.
         """
@@ -580,7 +580,7 @@ class TestReviewAndExportBlocking:
         line = manager.get_lines(case.case_id)[0]
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED, actor="Auditor"),
+            RFQLineItemUpdate(expected_version=line.version, review_decision=ReviewDecision.APPROVED, actor="Auditor"),
         )
 
         trail = manager.get_audit_trail(case.case_id)
@@ -599,14 +599,14 @@ class TestReviewAndExportBlocking:
         line = manager.get_lines(case.case_id)[0]
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED, actor="Auditor"),
+            RFQLineItemUpdate(expected_version=line.version, review_decision=ReviewDecision.APPROVED, actor="Auditor"),
         )
         assert manager.get_lines(case.case_id)[0].review_decision == ReviewDecision.APPROVED
 
         # Edit quantity
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(quantity=100.0, actor="Auditor"),
+            RFQLineItemUpdate(expected_version=line.version, quantity=100.0, actor="Auditor"),
         )
         updated = manager.get_lines(case.case_id)[0]
         assert updated.review_decision == ReviewDecision.PENDING
@@ -624,7 +624,7 @@ class TestReviewAndExportBlocking:
         # Override with a Siemens SKU (contradiction)
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(
+            RFQLineItemUpdate(expected_version=line.version,
                 selected_catalog_sku="SKU-SYN-002",  # Siemens SKU
                 review_decision=ReviewDecision.APPROVED,
                 actor="Auditor",
@@ -662,7 +662,7 @@ class TestExportContentVerification:
         line = manager.get_lines(case.case_id)[0]
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED, actor="Auditor"),
+            RFQLineItemUpdate(expected_version=line.version, review_decision=ReviewDecision.APPROVED, actor="Auditor"),
         )
 
         req = ExportRequest(case_id=case.case_id, allow_partial=False, format="xlsx", actor="Auditor")
@@ -695,7 +695,7 @@ class TestExportContentVerification:
         line = manager.get_lines(case.case_id)[0]
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED, actor="Auditor"),
+            RFQLineItemUpdate(expected_version=line.version, review_decision=ReviewDecision.APPROVED, actor="Auditor"),
         )
 
         req = ExportRequest(case_id=case.case_id, allow_partial=False, format="csv", actor="Auditor")
@@ -720,7 +720,7 @@ class TestExportContentVerification:
         # Set a formula-like note
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(
+            RFQLineItemUpdate(expected_version=line.version,
                 notes="=HYPERLINK(\"https://evil.test\",\"click\")",
                 selected_catalog_sku="SKU-SYN-001",
                 review_decision=ReviewDecision.APPROVED,
@@ -753,7 +753,7 @@ class TestExportContentVerification:
         line = manager.get_lines(case.case_id)[0]
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(
+            RFQLineItemUpdate(expected_version=line.version,
                 notes="=HYPERLINK(\"https://evil.test\",\"click\")",
                 selected_catalog_sku="SKU-SYN-001",
                 review_decision=ReviewDecision.APPROVED,
@@ -781,7 +781,7 @@ class TestExportContentVerification:
         line = manager.get_lines(case.case_id)[0]
         manager.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(review_decision=ReviewDecision.APPROVED, actor="Auditor"),
+            RFQLineItemUpdate(expected_version=line.version, review_decision=ReviewDecision.APPROVED, actor="Auditor"),
         )
 
         req = ExportRequest(case_id=case.case_id, allow_partial=False, format="csv", actor="Auditor")
@@ -941,7 +941,7 @@ class TestFullApiWorkflow:
         for line in lines:
             patch_resp = client.patch(
                 f"/api/rfqs/{case_id}/lines/{line['line_id']}",
-                json={"review_decision": "APPROVED", "actor": "Auditor"},
+                json={"expected_version": 1, "review_decision": "APPROVED", "actor": "Auditor"},
             )
             assert patch_resp.status_code == 200
 
@@ -1061,7 +1061,7 @@ class TestPersistenceRestart:
         original_version = line.version
         manager1.update_line(
             case.case_id, line.line_id,
-            RFQLineItemUpdate(quantity=50.0, actor="Auditor"),
+            RFQLineItemUpdate(expected_version=line.version, quantity=50.0, actor="Auditor"),
         )
 
         # Simulate restart: new manager from same SQLite

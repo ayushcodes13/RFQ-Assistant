@@ -881,15 +881,9 @@
             "title": "Description"
           },
           "expected_version": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expected Version"
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
           },
           "notes": {
             "anyOf": [
@@ -979,6 +973,9 @@
             "title": "Unit"
           }
         },
+        "required": [
+          "expected_version"
+        ],
         "title": "RFQLineItemUpdate",
         "type": "object"
       },

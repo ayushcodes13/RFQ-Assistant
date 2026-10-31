@@ -20,6 +20,8 @@ from rfq_assistant.ingestion.ai_extraction import (
     GroundedLLMExtractor,
 )
 from rfq_assistant.ingestion.parsers.base import ParsedDocumentResult, ParsedLineDraft
+from rfq_assistant.ingestion.parsers.text_parser import TextParser
+from rfq_assistant.ingestion.parsers.spreadsheet_parser import identify_columns
 from rfq_assistant.ingestion.source_segments import source_segments
 from rfq_assistant.matching import CatalogRepository, ExactMatchEngine
 from rfq_assistant.quotation.line_rules import blocking_line_issues
@@ -364,7 +366,7 @@ class CaseManager:
         customer_label: Optional[str] = None, actor: str = "Inside Sales",
     ) -> RFQCase:
         """Durably store pasted email text as a case-scoped source before queueing it."""
-        content = raw_text.encode("utf-8")
+        content = self._preflight_text_input(raw_text)
         case = self.enqueue_case_from_upload(
             "pasted_inquiry.txt", content, title=title or "RFQ Intake - Pasted Email",
             customer_label=customer_label, actor=actor,
@@ -556,7 +558,7 @@ class CaseManager:
         actor: str = "Inside Sales",
     ) -> RFQCase:
         """Parses and matches plain pasted email or inquiry text."""
-        content = raw_text.encode("utf-8")
+        content = self._preflight_text_input(raw_text)
         case = self.create_case_from_upload(
             filename="pasted_inquiry.txt",
             content=content,
@@ -569,6 +571,27 @@ class CaseManager:
         self._persist_case(case.case_id)
         return case
 
+    @staticmethod
+    def _preflight_text_input(raw_text: str) -> bytes:
+        """Reject empty/header-only paste before creating a case or storing bytes."""
+        content = raw_text.encode("utf-8")
+        if not raw_text.strip():
+            raise DocumentParserError("Pasted RFQ text is empty. Add inquiry text or line items before creating a case.")
+        validate_file_upload("pasted_inquiry.txt", content)
+        parsed = TextParser().parse(content, "pasted_inquiry.txt")
+        if not parsed.lines and parsed.candidate_segments:
+            def is_header(segment) -> bool:
+                text = segment.text.strip()
+                for delimiter in ("|", ",", ";", "\t"):
+                    if delimiter in text:
+                        mapping = identify_columns([part.strip() for part in text.split(delimiter)])
+                        if "mpn" in mapping and len(mapping) >= 2:
+                            return True
+                return False
+            if all(is_header(segment) for segment in parsed.candidate_segments):
+                raise DocumentParserError("The pasted text contains only table headers. Add at least one item row.")
+        return content
+
     def update_line(
         self, case_id: str, line_id: str, update: RFQLineItemUpdate
     ) -> Optional[RFQLineItem]:
@@ -579,7 +602,7 @@ class CaseManager:
             return None
 
         # Optimistic concurrency check
-        if update.expected_version is not None and update.expected_version != line.version:
+        if update.expected_version != line.version:
             raise ValueError(
                 f"Stale state / conflict: Line item version is {line.version}, but client expected version {update.expected_version}. Please refresh."
             )
@@ -755,7 +778,11 @@ class CaseManager:
                 )
         updated = 0
         for lid in request.line_ids:
+            line = next((item for item in self.get_lines(case_id) if item.line_id == lid), None)
+            if line is None:
+                continue
             upd = RFQLineItemUpdate(
+                expected_version=line.version,
                 review_decision=request.decision,
                 actor=request.actor,
                 reviewer_notes=request.notes,

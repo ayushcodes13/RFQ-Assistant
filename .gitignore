@@ -12,6 +12,7 @@
 /exports/
 /prospects/
 /storage/
+/.demo-runtime/
 /quarantine/
 *.sqlite
 *.db
@@ -30,6 +31,7 @@ __pycache__/
 node_modules/
 .next/
 .next-e2e/
+frontend/.next-demo/
 dist/
 coverage/
 frontend/AGENTS.md

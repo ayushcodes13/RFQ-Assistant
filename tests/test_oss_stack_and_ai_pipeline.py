@@ -383,7 +383,7 @@ class TestV1APIEndpoints:
         # 3. Human reviews and approves the line item
         rev_resp = client.patch(
             f"/api/rfqs/{case_id}/lines/{line_id}",
-            json={"review_decision": "APPROVED", "actor": "Sales Rep #402"},
+            json={"expected_version": 1, "review_decision": "APPROVED", "actor": "Sales Rep #402"},
         )
         assert rev_resp.status_code == 200
         assert rev_resp.json()["review_decision"] == "APPROVED"

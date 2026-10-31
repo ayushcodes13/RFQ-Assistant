@@ -80,7 +80,7 @@ class TestExportEngine:
             case_manager.update_line(
                 case.case_id,
                 line.line_id,
-                RFQLineItemUpdate(
+                RFQLineItemUpdate(expected_version=line.version,
                     quantity=line.quantity or 10.0,
                     selected_catalog_sku=sku_override,
                     review_decision=ReviewDecision.APPROVED,
@@ -128,7 +128,7 @@ class TestExportAPIEndpoints:
         line_id = lines[0]["line_id"]
 
         # Approve line
-        client.patch(f"/api/rfqs/{case_id}/lines/{line_id}", json={"review_decision": "APPROVED"})
+        client.patch(f"/api/rfqs/{case_id}/lines/{line_id}", json={"expected_version": 1, "review_decision": "APPROVED"})
 
         # Export worksheet
         export_resp = client.post(

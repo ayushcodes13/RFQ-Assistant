@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -28,6 +28,43 @@ export function ExportModal({
   const [manifest, setManifest] = useState<ExportManifest | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    closeButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab" || !dialog) return;
+      const items = Array.from(dialog.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )).filter((item) => item.getAttribute("aria-hidden") !== "true");
+      if (!items.length) { event.preventDefault(); dialog.focus(); return; }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
+        event.preventDefault(); first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+    };
+  }, [isOpen]);
 
   const handleExport = async () => {
     setExporting(true);
@@ -61,6 +98,7 @@ export function ExportModal({
           onClick={onClose}
         >
           <motion.div
+            ref={dialogRef}
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -75,7 +113,9 @@ export function ExportModal({
             }}
             onClick={(e) => e.stopPropagation()}
             role="dialog"
-            aria-label="Export draft"
+            aria-modal="true"
+            aria-labelledby="export-dialog-title"
+            tabIndex={-1}
           >
             {/* Header */}
             <div
@@ -83,6 +123,7 @@ export function ExportModal({
               style={{ borderColor: "var(--color-sand-200)" }}
             >
               <h2
+                id="export-dialog-title"
                 className="text-lg font-bold flex items-center gap-2"
                 style={{ color: "var(--color-brown-800)" }}
               >
@@ -90,6 +131,7 @@ export function ExportModal({
                 Export Draft
               </h2>
               <button
+                ref={closeButtonRef}
                 onClick={onClose}
                 className="p-1.5 rounded-lg transition-colors duration-200"
                 style={{ color: "var(--color-brown-300)" }}

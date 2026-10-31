@@ -113,7 +113,7 @@ class TestCaseManagerAndAuditTrail:
         updated = case_manager.update_line(
             case_id=case.case_id,
             line_id=line18.line_id,
-            update=RFQLineItemUpdate(
+            update=RFQLineItemUpdate(expected_version=line18.version,
                 quantity=100.0,
                 actor="Operator Bob",
                 reviewer_notes="Confirmed quantity with customer",
@@ -166,7 +166,7 @@ class TestAPIEndpoints:
         line1_id = lines[0]["line_id"]
         patch_resp = client.patch(
             f"/api/rfqs/{case_id}/lines/{line1_id}",
-            json={"review_decision": "APPROVED", "actor": "Test Reviewer"},
+            json={"expected_version": 1, "review_decision": "APPROVED", "actor": "Test Reviewer"},
         )
         assert patch_resp.status_code == 200
         assert patch_resp.json()["review_decision"] == "APPROVED"
