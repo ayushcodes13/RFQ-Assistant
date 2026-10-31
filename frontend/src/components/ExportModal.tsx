@@ -30,7 +30,6 @@ export function ExportModal({
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const returnFocusRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
 
   useEffect(() => {
@@ -39,38 +38,40 @@ export function ExportModal({
 
   useEffect(() => {
     if (!isOpen) return;
-    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
     closeButtonRef.current?.focus();
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
         onCloseRef.current();
         return;
       }
-      if (event.key !== "Tab" || !dialogRef.current) return;
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+      if (event.key !== "Tab" || !dialog) return;
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
         'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-      )).filter((element) => element.offsetParent !== null);
+      )).filter((element) => element.getAttribute("aria-hidden") !== "true");
       if (!focusable.length) {
         event.preventDefault();
-        dialogRef.current.focus();
+        dialog.focus();
         return;
       }
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      if (event.shiftKey && (document.activeElement === first || !dialogRef.current.contains(document.activeElement))) {
+      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && (document.activeElement === last || !dialogRef.current.contains(document.activeElement))) {
+      } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
         event.preventDefault();
         first.focus();
       }
     };
-    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown, true);
     return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      returnFocusRef.current?.focus();
+      document.removeEventListener("keydown", onKeyDown, true);
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
     };
   }, [isOpen]);
 
@@ -122,7 +123,7 @@ export function ExportModal({
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
-            aria-label="Export draft"
+            aria-labelledby="export-dialog-title"
             tabIndex={-1}
           >
             {/* Header */}
@@ -131,6 +132,7 @@ export function ExportModal({
               style={{ borderColor: "var(--color-sand-200)" }}
             >
               <h2
+                id="export-dialog-title"
                 className="text-lg font-bold flex items-center gap-2"
                 style={{ color: "var(--color-brown-800)" }}
               >

@@ -10,6 +10,7 @@ from rfq_assistant.ingestion import DocumentStorage
 from rfq_assistant.ingestion.parsers.spreadsheet_parser import SpreadsheetParser
 from rfq_assistant.ingestion.parsers.text_parser import TextParser
 from rfq_assistant.matching.catalog import CatalogRepository
+from rfq_assistant.persistence import SQLiteStateStore
 
 
 def test_headerless_csv_retains_first_row_and_original_row_numbers():
@@ -80,6 +81,25 @@ def test_nonempty_unclassifiable_text_keeps_source_for_manual_review(tmp_path):
     assert any(w.code == "DOCUMENT_EXTRACTION_FAILED" for w in case.document_warnings)
     assert manager.storage.get_file(case.case_id, "no_lines.txt") == content
     assert manager.get_lines(case.case_id) == []
+
+
+def test_header_only_pasted_text_is_rejected_before_case_or_file_creation(tmp_path):
+    storage = DocumentStorage(base_dir=tmp_path / "files")
+    manager = CaseManager(catalog=CatalogRepository(), storage=storage)
+    with pytest.raises(DocumentParserError, match="only table headers"):
+        manager.create_case_from_text("Part Number | Manufacturer | Quantity\n")
+    assert manager.list_cases() == []
+    assert not list(storage.uploads_dir.glob("**/*"))
+
+
+def test_async_header_only_paste_is_rejected_before_enqueue_or_file_creation(tmp_path):
+    storage = DocumentStorage(base_dir=tmp_path / "files")
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    manager = CaseManager(catalog=CatalogRepository(state_store=store), storage=storage, state_store=store)
+    with pytest.raises(DocumentParserError, match="only table headers"):
+        manager.enqueue_case_from_text("Part Number | Manufacturer | Quantity\n")
+    assert manager.list_cases() == []
+    assert not list(storage.uploads_dir.glob("**/*"))
 
 
 def test_csv_parser_surfaces_explicit_error_for_no_items():

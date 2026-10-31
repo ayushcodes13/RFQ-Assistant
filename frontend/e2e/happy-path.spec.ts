@@ -58,7 +58,7 @@ test("paste RFQ, approve every line, export and download a draft worksheet", asy
 
   const exportTrigger = page.getByRole("button", { name: /Export draft/i });
   await exportTrigger.click();
-  const exportDialog = page.getByRole("dialog", { name: "Export draft" });
+  const exportDialog = page.getByRole("dialog", { name: /Export draft/i });
   await expect(exportDialog).toBeVisible();
   await expect(exportDialog).toHaveAttribute("aria-modal", "true");
   const headerClose = exportDialog.locator('button[aria-label="Close"]');
