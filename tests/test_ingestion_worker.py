@@ -52,7 +52,9 @@ def test_worker_processes_persisted_upload_without_api_request_waiting(tmp_path)
     completed = manager.get_case(pending.case_id)
     assert completed.status == CaseStatus.NEEDS_REVIEW
     assert completed.processing_stage == ProcessingStage.READY_FOR_REVIEW
-    persisted = next(row for row in store.load_cases() if row["case_id"] == pending.case_id)
+    persisted = next(
+        row for row in store.load_cases() if row["case_id"] == pending.case_id
+    )
     assert persisted["processing_stage"] == ProcessingStage.READY_FOR_REVIEW.value
     assert len(manager.get_lines(pending.case_id)) == 1
     assert store.get_ingestion_job(pending.case_id)["state"] == "completed"
@@ -83,9 +85,11 @@ def test_live_worker_stage_is_saved_while_extraction_is_running(tmp_path, monkey
     monkeypatch.setattr(
         manager_module,
         "get_parser",
-        lambda source_type: BlockingParser(real_get_parser(source_type))
-        if source_type == SourceType.CSV
-        else real_get_parser(source_type),
+        lambda source_type: (
+            BlockingParser(real_get_parser(source_type))
+            if source_type == SourceType.CSV
+            else real_get_parser(source_type)
+        ),
     )
     worker = RFQIngestionWorker(
         manager, store, poll_seconds=0.005, lease_seconds=2, heartbeat_seconds=0.1
@@ -93,14 +97,22 @@ def test_live_worker_stage_is_saved_while_extraction_is_running(tmp_path, monkey
     worker.start()
     try:
         assert entered_parser.wait(timeout=2)
-        assert manager.get_case(pending.case_id).processing_stage == ProcessingStage.EXTRACTING
-        persisted = next(row for row in store.load_cases() if row["case_id"] == pending.case_id)
+        assert (
+            manager.get_case(pending.case_id).processing_stage
+            == ProcessingStage.EXTRACTING
+        )
+        persisted = next(
+            row for row in store.load_cases() if row["case_id"] == pending.case_id
+        )
         assert persisted["processing_stage"] == ProcessingStage.EXTRACTING.value
     finally:
         continue_parser.set()
         worker.stop()
 
-    assert manager.get_case(pending.case_id).processing_stage == ProcessingStage.READY_FOR_REVIEW
+    assert (
+        manager.get_case(pending.case_id).processing_stage
+        == ProcessingStage.READY_FOR_REVIEW
+    )
 
 
 def test_queue_claim_is_atomic_and_expired_lease_is_recovered(tmp_path):
@@ -158,8 +170,12 @@ def test_duplicate_enqueue_for_one_case_keeps_a_single_durable_job(tmp_path):
         "request.csv", b"MPN,Qty\nLC1D09BD,2\n", _defer_processing=True
     )
 
-    first_job_id = store.enqueue_ingestion_job(case.case_id, case.source_file.sha256_digest)
-    repeated_job_id = store.enqueue_ingestion_job(case.case_id, case.source_file.sha256_digest)
+    first_job_id = store.enqueue_ingestion_job(
+        case.case_id, case.source_file.sha256_digest
+    )
+    repeated_job_id = store.enqueue_ingestion_job(
+        case.case_id, case.source_file.sha256_digest
+    )
 
     assert repeated_job_id == first_job_id
     assert store.get_ingestion_job(case.case_id)["state"] == "queued"
