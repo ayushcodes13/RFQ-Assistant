@@ -8,7 +8,7 @@ import time
 import uuid
 
 from rfq_assistant.cases.manager import CaseManager
-from rfq_assistant.persistence import SQLiteStateStore
+from rfq_assistant.persistence import StateStore
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class RFQIngestionWorker:
     def __init__(
         self,
         manager: CaseManager,
-        state_store: SQLiteStateStore,
+        state_store: StateStore,
         *,
         poll_seconds: float = 0.5,
         lease_seconds: float = 90.0,

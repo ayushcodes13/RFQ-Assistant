@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from rfq_assistant.matching.normalizer import normalize_manufacturer, normalize_mpn
 from rfq_assistant.schemas.models import CatalogItem
-from rfq_assistant.persistence import SQLiteStateStore
+from rfq_assistant.persistence import StateStore
 
 
 class CatalogImportError(Exception):
@@ -19,7 +19,7 @@ class CatalogImportError(Exception):
 class CatalogRepository:
     """Indexed item master with optional durable SQLite backing."""
 
-    def __init__(self, state_store: Optional[SQLiteStateStore] = None):
+    def __init__(self, state_store: Optional[StateStore] = None):
         self.state_store = state_store
         self._items_by_sku: Dict[str, CatalogItem] = {}
         self._items_by_normalized_mpn: Dict[str, List[CatalogItem]] = {}

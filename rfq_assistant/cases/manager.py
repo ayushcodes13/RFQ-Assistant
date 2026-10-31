@@ -27,7 +27,7 @@ from rfq_assistant.ingestion.parsers.base import ParsedDocumentResult, ParsedLin
 from rfq_assistant.ingestion.source_segments import source_segments
 from rfq_assistant.matching import CatalogRepository, ExactMatchEngine
 from rfq_assistant.quotation.line_rules import blocking_line_issues
-from rfq_assistant.persistence import SQLiteStateStore
+from rfq_assistant.persistence import StateStore
 from rfq_assistant.schemas.enums import (
     AuditAction,
     CaseStatus,
@@ -64,7 +64,7 @@ class CaseManager:
         self,
         catalog: CatalogRepository,
         storage: Optional[DocumentStorage] = None,
-        state_store: Optional[SQLiteStateStore] = None,
+        state_store: Optional[StateStore] = None,
         llm_extractor: Optional[GroundedLLMExtractor] = None,
     ):
         self.catalog = catalog
@@ -128,7 +128,14 @@ class CaseManager:
             raise ValueError("Both ingestion job ID and worker ID are required for a fenced processing attempt.")
 
         def require_lease() -> None:
-            if _job_id and self.state_store and not self.state_store.owns_ingestion_job(_job_id, _worker_id):
+            if (
+                _job_id
+                and self.state_store
+                and (
+                    not _worker_id
+                    or not self.state_store.owns_ingestion_job(_job_id, _worker_id)
+                )
+            ):
                 raise IngestionLeaseLostError("This worker no longer owns the RFQ processing lease.")
 
         stage_started = time.perf_counter()

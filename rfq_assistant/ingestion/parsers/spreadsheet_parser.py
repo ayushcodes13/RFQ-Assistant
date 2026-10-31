@@ -5,7 +5,7 @@ import io
 import itertools
 import re
 from bisect import bisect_right
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 import openpyxl
 from openpyxl.utils import get_column_letter
 
@@ -366,7 +366,7 @@ class SpreadsheetParser(BaseDocumentParser):
 
                 if cached_wb is not None:
                     cached_ws = cached_wb[sheet_name]
-                    worksheet_rows = zip(
+                    worksheet_rows: Iterable[Tuple[Tuple[Any, ...], Tuple[Any, ...]]] = zip(
                         ws.iter_rows(values_only=False),
                         cached_ws.iter_rows(values_only=False),
                     )
