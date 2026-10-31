@@ -1,5 +1,6 @@
 """Unit and API tests for quotation worksheet export, draft banners, and email generation."""
 
+import csv
 from pathlib import Path
 import openpyxl
 import pytest
@@ -70,6 +71,45 @@ class TestExportEngine:
         csv_text = file_path.read_text(encoding="utf-8")
         assert "DRAFT QUOTATION WORKSHEET" in csv_text
         assert "line_number,review_status,requested_oem" in csv_text
+
+    def test_pricing_stays_blank_without_authorization_in_xlsx_and_csv(
+        self, test_case_and_lines
+    ):
+        case, lines = test_case_and_lines
+        assert any(
+            item.selected_catalog_sku
+            and catalog_repo.get_by_sku(item.selected_catalog_sku).list_price is not None
+            for item in lines
+        )
+
+        xlsx_manifest = export_generator.generate_export(
+            case, lines, ExportRequest(case_id=case.case_id, allow_partial=True, format="xlsx")
+        )
+        xlsx_path = export_generator.base_export_dir / xlsx_manifest.export_id / xlsx_manifest.file_name
+        workbook = openpyxl.load_workbook(xlsx_path)
+        sheet = workbook.active
+        assert "DRAFT QUOTATION WORKSHEET" in str(sheet["A1"].value)
+        assert sheet["B5"].value == "Review Status"
+        assert "Sales must supply and authorize" in sheet["K4"].value
+        assert all(sheet.cell(row, 2).value == "PENDING" for row in range(6, 6 + len(lines)))
+        assert all(
+            sheet.cell(row, column).value in (None, "")
+            for row in range(6, 6 + len(lines))
+            for column in (11, 12)
+        )
+        workbook.close()
+
+        csv_manifest = export_generator.generate_export(
+            case, lines, ExportRequest(case_id=case.case_id, allow_partial=True, format="csv")
+        )
+        csv_path = export_generator.base_export_dir / csv_manifest.export_id / csv_manifest.file_name
+        with csv_path.open(newline="", encoding="utf-8") as handle:
+            rows = list(csv.reader(handle))
+        assert any("Pricing intentionally blank" in row[0] for row in rows if row)
+        data_rows = [row for row in rows if row and row[0].isdigit()]
+        assert len(data_rows) == len(lines)
+        assert all(row[1] == "PENDING" for row in data_rows)
+        assert all(row[10] == "" and row[11] == "" for row in data_rows)
 
     def test_manual_override_with_oem_contradiction_remains_blocked(self, test_case_and_lines):
         case, lines = test_case_and_lines

@@ -186,6 +186,14 @@ class ExportGenerator:
             "Notes / Source Locator",
         ]
         ws.append([])  # blank row 4
+        ws.merge_cells("K4:M4")
+        pricing_note = ws["K4"]
+        pricing_note.value = (
+            "Pricing intentionally blank. Sales must supply and authorize current pricing."
+        )
+        pricing_note.font = Font(name="Arial", size=9, italic=True, color="64748B")
+        pricing_note.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        ws.row_dimensions[4].height = 30
         ws.append(headers)
         ws.row_dimensions[5].height = 22
 
@@ -199,9 +207,6 @@ class ExportGenerator:
         # Line item rows
         for row_num, item in enumerate(lines, start=6):
             catalog_item = self.catalog.get_by_sku(item.selected_catalog_sku) if item.selected_catalog_sku else None
-
-            price_val = catalog_item.list_price if (catalog_item and catalog_item.list_price is not None) else None
-            ext_price = (price_val * item.quantity) if (price_val is not None and item.quantity is not None) else None
 
             locator_str = f"File: {item.source_locator.file_name}"
             if item.source_locator.sheet_name:
@@ -222,8 +227,8 @@ class ExportGenerator:
                 catalog_item.description if catalog_item else item.description or "--",
                 item.quantity if item.quantity is not None else "MISSING",
                 item.unit or "EA",
-                price_val if price_val is not None else "",
-                ext_price if ext_price is not None else "",
+                "",
+                "",
                 f"{item.notes or ''} [{locator_str}]".strip(),
             ]
 
@@ -246,6 +251,10 @@ class ExportGenerator:
             max_len = max(len(str(cell.value or "")) for cell in col)
             col_letter = openpyxl.utils.get_column_letter(col[0].column)
             ws.column_dimensions[col_letter].width = max(max_len + 3, 10)
+        # The merged pricing note crosses these columns; keep price columns
+        # compact so it does not turn the numeric fields into wide text areas.
+        ws.column_dimensions["K"].width = 14
+        ws.column_dimensions["L"].width = 14
 
         # openpyxl infers executable formulas from strings beginning with "=".
         # Save untrusted spreadsheet-like strings as literal text cells instead.
@@ -269,6 +278,7 @@ class ExportGenerator:
             _safe_csv_row(writer, ["# DRAFT QUOTATION WORKSHEET - INTERNAL USE ONLY - NOT A FINAL COMMITMENT"])
             _safe_csv_row(writer, [f"# Case ID: {case.case_id}", f"Customer: {case.customer_label or 'Unspecified'}", f"Date: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"])
             _safe_csv_row(writer, [f"# Reviewer: {actor}", f"Mode: {'Partial Draft' if is_partial else 'Standard Validated'}"])
+            _safe_csv_row(writer, ["# Pricing intentionally blank; sales must supply and authorize current pricing."])
             _safe_csv_row(writer, [])
             headers = [
                 "line_number",
@@ -289,12 +299,6 @@ class ExportGenerator:
 
             for item in lines:
                 catalog_item = self.catalog.get_by_sku(item.selected_catalog_sku) if item.selected_catalog_sku else None
-                price_val = catalog_item.list_price if (catalog_item and catalog_item.list_price is not None) else ""
-                ext_price = (
-                    f"{catalog_item.list_price * item.quantity:.2f}"
-                    if (catalog_item and catalog_item.list_price is not None and item.quantity is not None)
-                    else ""
-                )
                 locator_str = f"File: {item.source_locator.file_name} Row: {item.source_locator.row_number}"
                 _safe_csv_row(writer, [
                     item.line_number,
@@ -307,7 +311,7 @@ class ExportGenerator:
                     catalog_item.description if catalog_item else item.description or "",
                     item.quantity if item.quantity is not None else "MISSING",
                     item.unit or "EA",
-                    price_val,
-                    ext_price,
+                    "",
+                    "",
                     f"{item.notes or ''} [{locator_str}]".strip(),
                 ])
