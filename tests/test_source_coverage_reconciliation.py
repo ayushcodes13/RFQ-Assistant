@@ -81,3 +81,19 @@ def test_coverage_receipts_reject_unknown_dispositions():
     )
     with pytest.raises(ValueError, match="Unknown source coverage disposition"):
         accumulator.append(receipt)
+
+
+def test_structured_and_unstructured_sources_report_different_coverage_basis():
+    workbook_unit = SourceCoverageUnit(
+        unit_id="sheet:Parts",
+        locator=SourceLocator(file_name="synthetic.xlsx", sheet_name="Parts"),
+        unit_kind="workbook_sheet",
+    )
+    text_unit = SourceCoverageUnit(
+        unit_id="document",
+        locator=SourceLocator(file_name="synthetic.txt"),
+        unit_kind="text_document",
+    )
+
+    assert workbook_unit.coverage_basis == "structured_rows"
+    assert text_unit.coverage_basis == "heuristic_regions"

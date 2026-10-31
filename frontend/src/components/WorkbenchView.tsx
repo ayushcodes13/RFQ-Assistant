@@ -462,6 +462,7 @@ export function WorkbenchView({
               {coverage.map((unit) => (
                 <li key={unit.unit_id}>
                   {unit.unit_id}: {unit.nonempty_regions} regions · {unit.structured_regions} parsed · {unit.review_regions} review · {unit.filtered_regions} filtered
+                  {unit.coverage_basis === "structured_rows" ? " · deterministic row accounting" : " · heuristic region accounting"}
                   {unit.ocr_failures > 0 && ` · ${unit.ocr_failures} OCR failures`}
                   {unit.ocr_status && unit.ocr_status !== "not_needed" && ` · OCR ${unit.ocr_status}`}
                   {unit.ocr_duration_ms != null && ` · ${Math.round(unit.ocr_duration_ms)} ms`}
@@ -478,6 +479,9 @@ export function WorkbenchView({
                 </li>
               ))}
             </ul>
+            <div className="mt-2 text-xs text-[#52656b]">
+              Spreadsheet rows and cells are counted deterministically, but row classification may still need review. PDF, email, and text region counts are heuristic. These counts do not prove that every requested item was found; compare them with the original source.
+            </div>
             <div className="mt-2 text-xs text-[#52656b]">
               {caseData.parse_cache_hit && <span>Deterministic extraction reused from the same source and parser profile. </span>}
               {caseData.llm_cache_hit && <span>Luna result reused for its pinned deployment version. </span>}

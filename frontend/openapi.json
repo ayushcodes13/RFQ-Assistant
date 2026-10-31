@@ -1351,6 +1351,12 @@
             ],
             "title": "Content Sha256"
           },
+          "coverage_basis": {
+            "description": "Distinguish deterministic spreadsheet scanning from heuristic text regions.",
+            "readOnly": true,
+            "title": "Coverage Basis",
+            "type": "string"
+          },
           "error_code": {
             "anyOf": [
               {
@@ -1487,7 +1493,8 @@
         },
         "required": [
           "unit_id",
-          "locator"
+          "locator",
+          "coverage_basis"
         ],
         "title": "SourceCoverageUnit",
         "type": "object"

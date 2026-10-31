@@ -54,6 +54,12 @@ test("paste RFQ, approve every line, export and download a draft worksheet", asy
     page.getByRole("heading", { name: "E2E synthetic happy path" })
   ).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/2 lines · 2 need review/i)).toBeVisible({ timeout: 30_000 });
+  const sourceAccounting = page.getByText(/Source accounting ·/);
+  await sourceAccounting.click();
+  await expect(page.getByText(/heuristic region accounting/i)).toBeVisible();
+  await expect(
+    page.getByText(/These counts do not prove that every requested item was found/i),
+  ).toBeVisible();
 
   // Approve each extracted line. Refetch after each approval replaces the row,
   // so always target the first remaining Approve button and wait for the badge.
