@@ -314,6 +314,15 @@ The following issues have been fixed and verified in the current working tree:
   API responses include warnings; frontend displays them in the workbench.
 - **Verified by:** OpenAPI contract check, E2E corpus, frontend build.
 
+### F-11. [FIXED] Legacy XLS conversion test fails when LibreOffice is not installed
+- **Was:** `test_legacy_xls_upload_runs_through_case_matching_and_keeps_original` monkeypatched
+  `subprocess.run` but not `shutil.which("libreoffice")`. In environments without LibreOffice,
+  `convert_legacy_xls` raises before reaching the mocked subprocess.
+- **Now:** Both tests that rely on a mocked converter also monkeypatch
+  `shutil.which` to return a fake path, allowing the conversion to proceed with the
+  mocked subprocess.
+- **Verified by:** `tests/test_legacy_xls.py` (7 tests pass)
+
 ---
 
 ## Test Suite Status
