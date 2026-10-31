@@ -8,11 +8,8 @@ import {
   AlertTriangle,
   XCircle,
   Search,
-  ChevronDown,
-  ChevronRight,
   Check,
   X as XIcon,
-  FileText,
   Info,
 } from "lucide-react";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -115,8 +112,29 @@ export function WorkbenchView({
   }, [caseData.case_id]);
 
   useEffect(() => {
-    fetchLines();
-  }, [fetchLines]);
+    let cancelled = false;
+    getCaseLines(caseData.case_id)
+      .then((data) => {
+        if (cancelled) return;
+        setLines(data);
+        setSelectedLine((current) =>
+          current
+            ? data.find((line) => line.line_id === current.line_id) ?? null
+            : null
+        );
+      })
+      .catch((e: unknown) => {
+        const message = e instanceof Error ? e.message : "Unknown error";
+        console.error("Failed to load lines", message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [caseData.case_id]);
 
   const filteredLines = lines.filter((l) => {
     // Filter by match/extraction state using backend enum values.

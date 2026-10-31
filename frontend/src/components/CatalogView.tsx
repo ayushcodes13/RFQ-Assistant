@@ -6,9 +6,6 @@ import {
   Upload,
   CheckCircle,
   XCircle,
-  AlertTriangle,
-  FileSpreadsheet,
-  Info,
 } from "lucide-react";
 import { importCatalogCSV } from "@/services/api";
 import { CatalogImportSummary } from "@/types";
