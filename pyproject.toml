@@ -9,9 +9,11 @@ description = "Human-reviewed RFQ intake and quotation preparation assistant for
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "fastapi>=0.115.0",
+    # OpenAPI output is checked into the frontend contract. Keep schema
+    # generation deterministic across local and CI environments.
+    "fastapi==0.128.8",
     "uvicorn>=0.30.0",
-    "pydantic>=2.8.0",
+    "pydantic==2.13.5",
     "openpyxl>=3.1.5",
     "pypdf>=5.0.0",
     "python-multipart>=0.0.12",
