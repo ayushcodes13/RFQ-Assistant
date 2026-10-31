@@ -1211,6 +1211,20 @@ class CaseManager:
                 rematch.candidates, rematch.selected_sku
             )
 
+        # A vague source reference is no longer unresolved once the reviewer
+        # has supplied both identifiers. Keep other extraction warnings
+        # intact; match status and candidates continue to represent catalog
+        # lookup failures or collisions.
+        if (
+            ("requested_mpn" in material_changes or "requested_manufacturer" in material_changes)
+            and line.requested_mpn
+            and line.requested_manufacturer
+        ):
+            line.extraction_warnings = [
+                warning for warning in line.extraction_warnings
+                if warning.code != "UNKNOWN_PART_REFERENCE"
+            ]
+
         if update.selected_catalog_sku is not None and update.selected_catalog_sku != line.selected_catalog_sku:
             material_changes.append("selected_catalog_sku")
             self._record_audit(
@@ -1229,14 +1243,44 @@ class CaseManager:
 
         if update.unit is not None and update.unit != line.unit:
             material_changes.append("unit")
+            self._record_audit(
+                case_id=case_id,
+                line_id=line_id,
+                actor=update.actor,
+                action=AuditAction.LINE_EDITED,
+                field_name="unit",
+                old_value=line.unit,
+                new_value=update.unit,
+                notes=update.reviewer_notes,
+            )
             line.unit = update.unit
 
         if update.description is not None and update.description != line.description:
             material_changes.append("description")
+            self._record_audit(
+                case_id=case_id,
+                line_id=line_id,
+                actor=update.actor,
+                action=AuditAction.LINE_EDITED,
+                field_name="description",
+                old_value=line.description,
+                new_value=update.description,
+                notes=update.reviewer_notes,
+            )
             line.description = update.description
 
         if update.notes is not None and update.notes != line.notes:
             material_changes.append("notes")
+            self._record_audit(
+                case_id=case_id,
+                line_id=line_id,
+                actor=update.actor,
+                action=AuditAction.LINE_EDITED,
+                field_name="notes",
+                old_value=line.notes,
+                new_value=update.notes,
+                notes=update.reviewer_notes,
+            )
             line.notes = update.notes
 
         # Contradiction check: verify selected SKU against requested OEM
