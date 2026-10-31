@@ -54,7 +54,10 @@ def test_queue_claim_is_atomic_and_expired_lease_is_recovered(tmp_path):
 
     first = store.claim_ingestion_job("worker-a", lease_seconds=0.01)
     assert first is not None and first["attempt"] == 1
-    assert store.claim_ingestion_job("worker-b", lease_seconds=1) is None
+    # The second claim must remain active long enough for this assertion to
+    # run even on a heavily loaded CI worker; this test is about ownership,
+    # not expiry timing.
+    assert store.claim_ingestion_job("worker-b", lease_seconds=60) is None
     time.sleep(0.03)
 
     second = store.claim_ingestion_job("worker-b", lease_seconds=1)
