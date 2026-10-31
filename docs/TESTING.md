@@ -64,7 +64,7 @@ available after the original manager objects are discarded.
 
 **Contract:** `frontend/openapi.json` is checked in and verified against the live FastAPI app by `tests/test_openapi_contract.py`. Frontend wire types are generated from that schema with `npm run gen:types`; `npm run check:types` fails CI if the generated file is stale.
 
-**Browser E2E:** one deterministic Playwright happy path (`frontend/e2e/happy-path.spec.ts`) pastes a synthetic RFQ, extracts exact-match lines, approves every line, generates a draft worksheet and downloads it. It runs against a real FastAPI process and the Next.js dev server. It proves the UI/backend contract for that path only; it is not an accuracy benchmark.
+**Browser E2E:** one deterministic Playwright happy path (`frontend/e2e/happy-path.spec.ts`) pastes a synthetic RFQ, extracts exact-match lines, approves every line, confirms the case status changes from needs-review to ready, confirms the export dialog uses the refreshed status, generates a draft worksheet, and downloads it. It runs against a real FastAPI process and the Next.js dev server. It proves the UI/backend contract for that path only; it is not an accuracy benchmark.
 
 ## Local synthetic verification — 2026-10-31
 

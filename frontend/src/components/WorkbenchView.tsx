@@ -33,6 +33,7 @@ import {
 interface WorkbenchViewProps {
   caseData: RFQCase;
   onOpenExport: () => void;
+  onCaseUpdated: () => Promise<void>;
 }
 
 type FilterType = "all" | "exact" | "ambiguous" | "missing";
@@ -81,6 +82,7 @@ function hasBlockingIssue(line: RFQLineItem): boolean {
 export function WorkbenchView({
   caseData,
   onOpenExport,
+  onCaseUpdated,
 }: WorkbenchViewProps) {
   const [lines, setLines] = useState<RFQLineItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -192,6 +194,7 @@ export function WorkbenchView({
         prev.map((l) => (l.line_id === updated.line_id ? updated : l))
       );
       setEditingCell(null);
+      await onCaseUpdated();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Save failed";
       alert(`Save failed: ${msg}`);
@@ -211,6 +214,7 @@ export function WorkbenchView({
         actor: "Inside Sales",
       });
       await fetchLines();
+      await onCaseUpdated();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Approve failed";
       alert(`Approve failed: ${msg}`);

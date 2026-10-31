@@ -54,10 +54,12 @@ test("paste RFQ, approve every line, export and download a draft worksheet", asy
 
   await page.getByRole("button", { name: /^Approve line \d+$/ }).first().click();
   await expect(page.getByText("Approved", { exact: true })).toHaveCount(2);
+  await expect(page.getByText("Ready", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: /Export draft/i }).click();
   const exportDialog = page.getByRole("dialog", { name: "Export draft" });
   await expect(exportDialog).toBeVisible();
+  await expect(exportDialog.getByText("READY_TO_EXPORT", { exact: true })).toBeVisible();
   await exportDialog
     .getByRole("button", { name: /Generate draft export/i })
     .click();
