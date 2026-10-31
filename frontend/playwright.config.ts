@@ -40,7 +40,7 @@ export default defineConfig({
         RFQ_E2E_BACKEND_PORT: backendPort,
         RFQ_ASSISTANT_STORAGE_DIR: path.join(e2eDataDir, "storage"),
         RFQ_ASSISTANT_DB_PATH: path.join(e2eDataDir, "rfq_assistant.sqlite3"),
-        RFQ_ASYNC_INGEST_ENABLED: "false",
+        RFQ_ASYNC_INGEST_ENABLED: "true",
       },
       timeout: 120_000,
       stdout: "pipe",

@@ -13,6 +13,7 @@ import {
   Info,
 } from "lucide-react";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { ProcessingProgress } from "@/components/ProcessingProgress";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { MotionWrapper } from "@/components/ui/MotionWrapper";
 import { SourcePreviewDialog } from "@/components/SourcePreviewDialog";
@@ -449,9 +450,9 @@ export function WorkbenchView({
         );
       })()}
 
-      {caseData.status === "PROCESSING" && lines.length === 0 && (
-        <div role="status" className="mb-4 rounded-lg border border-[#cbd6d9] bg-white px-4 py-3 text-sm text-[#33464c]">
-          The original request is saved. Document processing is running in the background; this view will update when the review rows are ready.
+      {(caseData.status === "PROCESSING" || caseData.status === "FAILED") && (
+        <div className="mb-4">
+          <ProcessingProgress caseData={caseData} />
         </div>
       )}
 

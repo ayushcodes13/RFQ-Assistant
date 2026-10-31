@@ -164,7 +164,9 @@ test("Rehearsal F — export dialog does not carry a prior case download into a 
   });
   await expect(firstApproveButtons).toHaveCount(2);
   await firstApproveButtons.first().click();
+  await expect(page.getByText("Approved", { exact: true })).toHaveCount(1);
   await page.getByRole("button", { name: /^Approve line \d+$/ }).first().click();
+  await expect(page.getByText("Approved", { exact: true })).toHaveCount(2);
   await page.getByRole("button", { name: /Export draft/i }).click();
 
   const firstExportDialog = page.getByRole("dialog", { name: "Export draft" });
@@ -436,7 +438,16 @@ test("Rehearsal D — send route is simulated-only (no external transport)", asy
     return { status: res.status, body: await res.text() };
   });
   expect(createResult.status).toBe(200);
-  const createdCase = JSON.parse(createResult.body) as ApiCase;
+  const createdCase = JSON.parse(createResult.body) as ApiCase & { status: string; processing_stage: string };
+  expect(createdCase.status).toBe("PROCESSING");
+  expect(createdCase.processing_stage).toBe("QUEUED");
+
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/proxy/api/rfqs/${createdCase.case_id}`);
+    expect(response.status()).toBe(200);
+    const current = await response.json() as { status: string };
+    return current.status;
+  }, { timeout: 30_000 }).not.toBe("PROCESSING");
 
   // Step 2: Approve all lines via browser-side fetch.
   const linesResult = await page.evaluate(

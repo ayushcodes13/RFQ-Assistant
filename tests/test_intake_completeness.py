@@ -78,6 +78,7 @@ def test_nonempty_unclassifiable_text_keeps_source_for_manual_review(tmp_path):
     case = manager.create_case_from_upload(filename="no_lines.txt", content=content)
 
     assert case.status.value == "FAILED"
+    assert case.processing_stage.value == "FAILED"
     assert any(w.code == "DOCUMENT_EXTRACTION_FAILED" for w in case.document_warnings)
     assert manager.storage.get_file(case.case_id, "no_lines.txt") == content
     assert manager.get_lines(case.case_id) == []

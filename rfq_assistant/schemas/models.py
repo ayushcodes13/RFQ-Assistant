@@ -10,6 +10,7 @@ from rfq_assistant.schemas.enums import (
     CaseStatus,
     ExtractionStatus,
     MatchStatus,
+    ProcessingStage,
     ReviewDecision,
     SourceType,
 )
@@ -203,6 +204,7 @@ class RFQCase(BaseModel):
     title: str
     customer_label: Optional[str] = None
     status: CaseStatus = CaseStatus.NEW
+    processing_stage: Optional[ProcessingStage] = None
     source_type: SourceType
     source_file: Optional[SourceFileMetadata] = None
     source_coverage: List[SourceCoverageUnit] = Field(default_factory=list)

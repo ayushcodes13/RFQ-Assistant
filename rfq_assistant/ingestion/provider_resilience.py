@@ -88,25 +88,32 @@ class ProviderCallGate:
     def acquire(self) -> ProviderPermit:
         """Acquire one paced wire-call permit or fail promptly for human review."""
         started = self._clock()
-        globally_paced = False
-        if self._shared_pacer is not None:
-            globally_paced = self._shared_pacer.acquire(self._admission_timeout_seconds)
-        if not globally_paced:
-            with self._lock:
-                now = self._clock()
-                scheduled = max(now, self._next_request_at)
-                delay = scheduled - now
-                if delay > self._admission_timeout_seconds:
-                    raise ProviderCallRejected("Provider request pacing queue is full.")
-                self._next_request_at = scheduled + self._interval_seconds
-
-            if delay:
-                self._sleeper(delay)
-        remaining = max(0.0, self._admission_timeout_seconds - (self._clock() - started))
-        if not self._semaphore.acquire(timeout=remaining):
+        if not self._semaphore.acquire(timeout=self._admission_timeout_seconds):
             raise ProviderCallRejected("Provider concurrency limit is busy.")
 
         try:
+            # Take a concurrency slot before reserving a global/local pacing
+            # turn. Otherwise a caller can reserve a turn, wait behind a busy
+            # semaphore, then send late and bunch up with other stale turns.
+            remaining = max(0.0, self._admission_timeout_seconds - (self._clock() - started))
+            globally_paced = (
+                self._shared_pacer.acquire(remaining)
+                if self._shared_pacer is not None
+                else False
+            )
+            if not globally_paced:
+                with self._lock:
+                    now = self._clock()
+                    scheduled = max(now, self._next_request_at)
+                    delay = scheduled - now
+                    remaining = max(0.0, self._admission_timeout_seconds - (self._clock() - started))
+                    if delay > remaining:
+                        raise ProviderCallRejected("Provider request pacing queue is full.")
+                    self._next_request_at = scheduled + self._interval_seconds
+
+                if delay:
+                    self._sleeper(delay)
+
             with self._lock:
                 now = self._clock()
                 if self._open_until and now < self._open_until:

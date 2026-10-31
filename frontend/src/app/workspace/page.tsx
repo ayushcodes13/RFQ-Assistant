@@ -44,10 +44,13 @@ export default function Home() {
     void fetchCases();
   }, [fetchCases]);
 
-  const hasProcessingCases = cases.some((item) => item.status === "PROCESSING");
+  // Keep polling the selected case as well as the inbox list. An initial list
+  // request can race an upload and return a snapshot from just before that case
+  // was created; the selected case must still advance to its persisted result.
+  const hasProcessingCases = activeCase?.status === "PROCESSING" || cases.some((item) => item.status === "PROCESSING");
   useEffect(() => {
     if (!hasProcessingCases) return;
-    const timer = window.setInterval(() => void fetchCases(), 1200);
+    const timer = window.setInterval(() => void fetchCases(), 500);
     return () => window.clearInterval(timer);
   }, [fetchCases, hasProcessingCases]);
 

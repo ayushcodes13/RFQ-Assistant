@@ -38,6 +38,7 @@ from rfq_assistant.schemas.enums import (
     CaseStatus,
     ExtractionStatus,
     MatchStatus,
+    ProcessingStage,
     ReviewDecision,
     SourceType,
 )
@@ -145,15 +146,31 @@ class CaseManager:
             ):
                 raise IngestionLeaseLostError("This worker no longer owns the RFQ processing lease.")
 
-        stage_started = time.perf_counter()
-        clean_name, src_type, digest = validate_file_upload(filename, content)
-        self._validate_intake_regions(clean_name, src_type, content)
-        timings["validate_ms"] = (time.perf_counter() - stage_started) * 1000
+        def set_processing_stage(stage: ProcessingStage) -> None:
+            active_case = self._cases.get(case_id)
+            if active_case is None:
+                return
+            active_case.processing_stage = stage
+            active_case.updated_at = datetime.utcnow()
+            self._persist_case(case_id, job_id=_job_id, worker_id=_worker_id)
+
+        # The queued case already exists durably, so expose the real first
+        # worker stage before the second, defensive upload validation pass.
         if _existing_case_id:
             case_id = _existing_case_id
             case = self._cases.get(case_id)
             if case is None:
                 raise DocumentParserError("The queued RFQ case no longer exists.")
+            if case.status != CaseStatus.PROCESSING:
+                return case
+            require_lease()
+            set_processing_stage(ProcessingStage.VALIDATING)
+
+        stage_started = time.perf_counter()
+        clean_name, src_type, digest = validate_file_upload(filename, content)
+        self._validate_intake_regions(clean_name, src_type, content)
+        timings["validate_ms"] = (time.perf_counter() - stage_started) * 1000
+        if _existing_case_id:
             if case.status != CaseStatus.PROCESSING:
                 return case
             if not case.source_file or case.source_file.sha256_digest != digest:
@@ -176,6 +193,7 @@ class CaseManager:
                 title=title or f"RFQ Intake - {clean_name}",
                 customer_label=customer_label,
                 status=CaseStatus.PROCESSING,
+                processing_stage=ProcessingStage.QUEUED if _defer_processing else ProcessingStage.EXTRACTING,
                 source_type=src_type,
                 source_file=file_meta,
             )
@@ -194,6 +212,7 @@ class CaseManager:
 
         try:
             require_lease()
+            set_processing_stage(ProcessingStage.EXTRACTING)
             # Parse document
             parser = get_parser(src_type)
             parser_profile = {
@@ -237,6 +256,7 @@ class CaseManager:
             if case.parse_cache_hit:
                 timings["parse_ms"] = (time.perf_counter() - stage_started) * 1000
             require_lease()
+            set_processing_stage(ProcessingStage.CHECKING_FIELDS)
             if self.llm_extractor and self._needs_llm_fallback(parse_result):
                 case.llm_cache_hit = False
                 stage_started = time.perf_counter()
@@ -371,6 +391,7 @@ class CaseManager:
 
             # Match lines against catalog
             lines: List[RFQLineItem] = []
+            set_processing_stage(ProcessingStage.MATCHING)
             stage_started = time.perf_counter()
             for draft in parse_result.lines:
                 line_id = f"line-{uuid.uuid4().hex[:8]}"
@@ -417,6 +438,7 @@ class CaseManager:
             )
 
             self._refresh_case_metrics(case_id, job_id=_job_id, worker_id=_worker_id)
+            set_processing_stage(ProcessingStage.READY_FOR_REVIEW)
             case.stage_timings_ms = dict(timings)
             self._persist_case(case_id, job_id=_job_id, worker_id=_worker_id)
             log.info(
@@ -433,6 +455,7 @@ class CaseManager:
             # failures. Do not turn a processing failure into a lost upload.
             failed_case = self._cases[case_id]
             failed_case.status = CaseStatus.FAILED
+            failed_case.processing_stage = ProcessingStage.FAILED
             failed_case.source_coverage = exc.source_coverage or failed_case.source_coverage or [SourceCoverageUnit(
                 unit_id="document",
                 locator=SourceLocator(file_name=clean_name),
@@ -469,6 +492,7 @@ class CaseManager:
                 raise
             failed_case = self._cases[case_id]
             failed_case.status = CaseStatus.FAILED
+            failed_case.processing_stage = ProcessingStage.FAILED
             if not failed_case.source_coverage:
                 failed_case.source_coverage = [SourceCoverageUnit(
                     unit_id="document",
@@ -569,6 +593,7 @@ class CaseManager:
         if case is None or case.status != CaseStatus.PROCESSING:
             return
         case.status = CaseStatus.FAILED
+        case.processing_stage = ProcessingStage.FAILED
         case.document_warnings.append(ExtractionWarning(
             code=error_code,
             message="Background document processing stopped after its retry limit. The original upload is retained for manual review.",

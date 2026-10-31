@@ -56,6 +56,10 @@ review work without claiming that a five-row sample proves accuracy.
              v
     worker claims job with lease/heartbeat and bounded retries
              |
+    persisted stage: VALIDATING -> EXTRACTING -> CHECKING_FIELDS -> MATCHING
+             |                                  |
+             |                                  +--> candidate Luna fallback
+             v
      +-------+------------------------+
      |                                |
      v                                v
@@ -164,3 +168,5 @@ cd frontend && npm run gen:types
 ## Scaling policy
 
 The prototype's single-host SQLite queue is implemented to keep slow document work out of the request path. Do not treat it as multi-host production infrastructure. Before multi-host deployment, move queue/state to shared durable services and add worker supervision, health monitoring, retention/deletion controls, and load testing. Defer pgvector, semantic search, ERP connectors, background crawlers, and enterprise multi-tenant billing until evidence shows they solve a pilot bottleneck.
+
+The asynchronous API persists `processing_stage` with each case snapshot. New uploads start at `QUEUED`; the worker records `VALIDATING`, `EXTRACTING`, `CHECKING_FIELDS`, and `MATCHING` at the actual stage boundaries, then records `READY_FOR_REVIEW` or `FAILED`. Writes during worker processing are fenced by the active job lease. The workspace polls while a listed or selected case is processing and renders the stage supplied by the API; it does not estimate percentage completion. Failed cases retain their original upload and expose the stored failure warning. These states describe the local worker path and are not a promise of a particular processing time.

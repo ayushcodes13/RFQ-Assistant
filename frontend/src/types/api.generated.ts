@@ -715,6 +715,12 @@ export interface components {
          */
         MatchStatus: "EXACT_MATCH" | "COLLISION" | "NO_MATCH" | "MANUAL_OVERRIDE";
         /**
+         * ProcessingStage
+         * @description Persisted, user-facing stages for an active ingestion job.
+         * @enum {string}
+         */
+        ProcessingStage: "QUEUED" | "VALIDATING" | "EXTRACTING" | "CHECKING_FIELDS" | "MATCHING" | "READY_FOR_REVIEW" | "FAILED";
+        /**
          * RFQCase
          * @description An RFQ quotation case containing metadata and processing status.
          */
@@ -786,6 +792,7 @@ export interface components {
             parser_version: string;
             /** Processing Profile Sha256 */
             processing_profile_sha256?: string | null;
+            processing_stage?: components["schemas"]["ProcessingStage"] | null;
             /** Raw Text */
             raw_text?: string | null;
             /** Source Coverage */
