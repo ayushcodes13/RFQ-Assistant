@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import List
 
+import pytest
+
 from rfq_assistant.cases.manager import CaseManager
 from rfq_assistant.ingestion.ai_extraction import (
     EvidenceSegment,
@@ -478,6 +480,93 @@ def test_provider_telemetry_records_latency_and_tokens_without_source_or_secret(
     assert client.last_usage == {"input_tokens": 321, "output_tokens": 11}
     assert "synthetic-secret" not in caplog.text
     assert "PRIVATE RFQ SOURCE TEXT" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "first_response,expected_delay",
+    [
+        (503, 0.2),
+        (429, 0.4),
+    ],
+)
+def test_provider_retries_transient_status_once_with_bounded_backoff(first_response, expected_delay):
+    import httpx
+
+    attempts = []
+    delays = []
+
+    def respond(request):
+        attempts.append(request)
+        if len(attempts) == 1:
+            headers = {"retry-after": "0.4"} if first_response == 429 else None
+            return httpx.Response(first_response, headers=headers, json={"error": "temporary"})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    client = OpenAICompatibleClient(
+        "synthetic-secret", "gpt-6-luna", "https://example.invalid",
+        transport=httpx.MockTransport(respond), sleeper=delays.append,
+    )
+    try:
+        assert client.complete(system="system", user="synthetic") == "ok"
+        assert client.last_http_attempts == 2
+        assert len(attempts) == 2
+        assert delays == [expected_delay]
+    finally:
+        client.close()
+
+
+def test_provider_retries_transport_timeout_once_without_real_sleep():
+    import httpx
+
+    attempts = 0
+    delays = []
+
+    def respond(request):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ReadTimeout("synthetic timeout", request=request)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    client = OpenAICompatibleClient(
+        "synthetic-secret", "gpt-6-luna", "https://example.invalid",
+        transport=httpx.MockTransport(respond), sleeper=delays.append,
+    )
+    try:
+        assert client.complete(system="system", user="synthetic") == "ok"
+        assert attempts == 2
+        assert delays == [0.2]
+    finally:
+        client.close()
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        (400, {}),
+        (429, {"retry-after": "30"}),
+    ],
+)
+def test_provider_does_not_retry_permanent_or_over_budget_errors(response):
+    import httpx
+
+    status, headers = response
+    attempts = []
+
+    def respond(request):
+        attempts.append(request)
+        return httpx.Response(status, headers=headers, json={"error": "synthetic"})
+
+    client = OpenAICompatibleClient(
+        "synthetic-secret", "gpt-6-luna", "https://example.invalid",
+        transport=httpx.MockTransport(respond), sleeper=lambda _: None,
+    )
+    try:
+        with pytest.raises(httpx.HTTPStatusError):
+            client.complete(system="system", user="synthetic")
+        assert len(attempts) == 1
+    finally:
+        client.close()
 
 def test_source_segment_limit_prevents_accidental_large_model_upload():
     client = ScriptedClient([])

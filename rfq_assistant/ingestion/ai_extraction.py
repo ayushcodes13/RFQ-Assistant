@@ -108,6 +108,10 @@ class OpenAICompatibleClient:
         timeout_seconds: float = 20.0, api_version: str = "2024-05-01-preview",
         transport: Optional[httpx.BaseTransport] = None,
         deployment_version: Optional[str] = None,
+        max_attempts: int = 2,
+        retry_base_seconds: float = 0.2,
+        retry_max_delay_seconds: float = 2.0,
+        sleeper=time.sleep,
     ):
         if not api_key or not model or not base_url:
             raise ValueError("LLM API key, model, and base URL must all be configured")
@@ -119,6 +123,12 @@ class OpenAICompatibleClient:
         self.deployment_version = deployment_version
         if self.timeout_seconds <= 0:
             raise ValueError("LLM timeout must be positive")
+        if max_attempts < 1 or retry_base_seconds < 0 or retry_max_delay_seconds < 0:
+            raise ValueError("LLM retry settings are invalid")
+        self.max_attempts = max_attempts
+        self.retry_base_seconds = retry_base_seconds
+        self.retry_max_delay_seconds = retry_max_delay_seconds
+        self._sleeper = sleeper
         parsed = urlparse(self.base_url)
         if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
             raise ValueError("LLM endpoint must use HTTPS (except for a local test endpoint)")
@@ -130,8 +140,14 @@ class OpenAICompatibleClient:
         """Thread-local token usage for the immediately preceding model call."""
         return getattr(self._usage, "last_usage", None)
 
+    @property
+    def last_http_attempts(self):
+        """Wire attempts for the immediately preceding logical model call."""
+        return getattr(self._usage, "last_http_attempts", 0)
+
     def complete(self, *, system: str, user: str) -> str:
         self._usage.last_usage = None
+        self._usage.last_http_attempts = 0
         endpoint = self._completion_url(self.base_url, self.api_version)
         is_azure = (urlparse(endpoint).hostname or "").endswith((".openai.azure.com", ".services.ai.azure.com"))
         request = {
@@ -147,62 +163,87 @@ class OpenAICompatibleClient:
         if not self.model.casefold().startswith("gpt-6"):
             request["temperature"] = 0
         started = time.perf_counter()
-        try:
-            response = self._http.post(
-                endpoint,
-                headers={"api-key" if is_azure else "Authorization": self.api_key if is_azure else f"Bearer {self.api_key}"},
-                json=request,
-                timeout=self.timeout_seconds,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            content = payload["choices"][0]["message"]["content"]
-            usage = payload.get("usage") or {}
-            input_tokens = usage.get("prompt_tokens")
-            output_tokens = usage.get("completion_tokens")
-            if not isinstance(input_tokens, int) or isinstance(input_tokens, bool):
-                input_tokens = "unknown"
-            if not isinstance(output_tokens, int) or isinstance(output_tokens, bool):
-                output_tokens = "unknown"
-            if isinstance(input_tokens, int) and isinstance(output_tokens, int):
-                self._usage.last_usage = {
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                }
-            log.info(
-                "[rfq_llm_call] model=%s outcome=ok latency_ms=%.1f input_tokens=%s output_tokens=%s",
-                self.model,
-                (time.perf_counter() - started) * 1000,
-                input_tokens,
-                output_tokens,
-            )
-            return content
-        except httpx.HTTPStatusError as exc:
-            log.warning(
-                "[rfq_llm_call] model=%s outcome=http_error status=%d latency_ms=%.1f",
-                self.model,
-                exc.response.status_code,
-                (time.perf_counter() - started) * 1000,
-            )
-            raise
-        except httpx.RequestError as exc:
-            log.warning(
-                "[rfq_llm_call] model=%s outcome=request_error error=%s latency_ms=%.1f",
-                self.model,
-                type(exc).__name__,
-                (time.perf_counter() - started) * 1000,
-            )
-            raise
-        except Exception as exc:
-            # A malformed provider response is diagnostic, but its body may
-            # contain sensitive or source-derived content; never log it.
-            log.warning(
-                "[rfq_llm_call] model=%s outcome=response_error error=%s latency_ms=%.1f",
-                self.model,
-                type(exc).__name__,
-                (time.perf_counter() - started) * 1000,
-            )
-            raise
+        for attempt in range(1, self.max_attempts + 1):
+            self._usage.last_http_attempts = attempt
+            try:
+                response = self._http.post(
+                    endpoint,
+                    headers={"api-key" if is_azure else "Authorization": self.api_key if is_azure else f"Bearer {self.api_key}"},
+                    json=request,
+                    timeout=self.timeout_seconds,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                content = payload["choices"][0]["message"]["content"]
+                usage = payload.get("usage") or {}
+                input_tokens = usage.get("prompt_tokens")
+                output_tokens = usage.get("completion_tokens")
+                if not isinstance(input_tokens, int) or isinstance(input_tokens, bool):
+                    input_tokens = "unknown"
+                if not isinstance(output_tokens, int) or isinstance(output_tokens, bool):
+                    output_tokens = "unknown"
+                if isinstance(input_tokens, int) and isinstance(output_tokens, int):
+                    self._usage.last_usage = {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                    }
+                log.info(
+                    "[rfq_llm_call] model=%s outcome=ok attempts=%d latency_ms=%.1f input_tokens=%s output_tokens=%s",
+                    self.model,
+                    attempt,
+                    (time.perf_counter() - started) * 1000,
+                    input_tokens,
+                    output_tokens,
+                )
+                return content
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                retryable = status in {408, 429} or status >= 500
+                delay = self._retry_delay(attempt, exc.response.headers.get("retry-after"))
+                if retryable and attempt < self.max_attempts and delay is not None:
+                    log.warning(
+                        "[rfq_llm_call] model=%s outcome=retry status=%d attempt=%d delay_s=%.2f",
+                        self.model, status, attempt, delay,
+                    )
+                    self._sleeper(delay)
+                    continue
+                log.warning(
+                    "[rfq_llm_call] model=%s outcome=http_error status=%d attempts=%d latency_ms=%.1f",
+                    self.model, status, attempt, (time.perf_counter() - started) * 1000,
+                )
+                raise
+            except httpx.RequestError as exc:
+                delay = self._retry_delay(attempt, None)
+                if attempt < self.max_attempts and delay is not None:
+                    log.warning(
+                        "[rfq_llm_call] model=%s outcome=retry error=%s attempt=%d delay_s=%.2f",
+                        self.model, type(exc).__name__, attempt, delay,
+                    )
+                    self._sleeper(delay)
+                    continue
+                log.warning(
+                    "[rfq_llm_call] model=%s outcome=request_error error=%s attempts=%d latency_ms=%.1f",
+                    self.model, type(exc).__name__, attempt, (time.perf_counter() - started) * 1000,
+                )
+                raise
+            except Exception as exc:
+                # Malformed response data is not a transport failure. The
+                # extractor's single repair call handles it without a retry.
+                log.warning(
+                    "[rfq_llm_call] model=%s outcome=response_error error=%s attempts=%d latency_ms=%.1f",
+                    self.model, type(exc).__name__, attempt, (time.perf_counter() - started) * 1000,
+                )
+                raise
+
+    def _retry_delay(self, attempt: int, retry_after: Optional[str]) -> Optional[float]:
+        if retry_after:
+            try:
+                delay = float(retry_after)
+            except ValueError:
+                return None
+            return delay if 0 <= delay <= self.retry_max_delay_seconds else None
+        delay = self.retry_base_seconds * (2 ** (attempt - 1))
+        return delay if delay <= self.retry_max_delay_seconds else None
 
     @staticmethod
     def _completion_url(base_url: str, api_version: str) -> str:
@@ -366,9 +407,15 @@ class GroundedLLMExtractor:
             return None
         try:
             timeout = float(os.getenv("RFQ_LLM_TIMEOUT_SECONDS", "12"))
+            max_attempts = max(1, min(3, int(os.getenv("RFQ_LLM_MAX_ATTEMPTS", "2"))))
+            retry_base = max(0.0, min(2.0, float(os.getenv("RFQ_LLM_RETRY_BASE_SECONDS", "0.2"))))
+            retry_max_delay = max(0.0, min(5.0, float(os.getenv("RFQ_LLM_RETRY_MAX_DELAY_SECONDS", "2"))))
             return cls(OpenAICompatibleClient(
                 key, model, base_url, timeout_seconds=timeout, api_version=api_version,
                 deployment_version=deployment_version,
+                max_attempts=max_attempts,
+                retry_base_seconds=retry_base,
+                retry_max_delay_seconds=retry_max_delay,
             ))
         except (ValueError, httpx.InvalidURL):
             return None

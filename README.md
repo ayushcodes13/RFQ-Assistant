@@ -114,6 +114,14 @@ When enabling the optional Luna fallback, `RFQ_LLM_DEPLOYMENT_VERSION` may be
 set to an immutable provider deployment revision to enable retry-safe caching
 of validated model results. If the provider offers only a mutable model alias,
 leave this unset; deterministic parse/OCR retry caching still works.
+Set `RFQ_LLM_TIMEOUT_SECONDS` to bound each provider request (default 12),
+`RFQ_LLM_MAX_ATTEMPTS` to bound transport retries (default 2, maximum 3), and
+`RFQ_LLM_RETRY_BASE_SECONDS` / `RFQ_LLM_RETRY_MAX_DELAY_SECONDS` to control
+transient-error backoff (defaults 0.2 / 2 seconds). Only timeouts, HTTP 408,
+429, and 5xx are retried; permanent errors and malformed responses are not.
+If a provider's `Retry-After` is longer than the configured maximum, the call
+fails promptly and unresolved fields go to human review instead of waiting
+through a long quota pause.
 Open `http://localhost:3000` for the product landing page and `http://localhost:3000/workspace` for the RFQ workspace. The workspace supports RFQ intake, line-level provenance review, catalog browsing, approval, and draft worksheet export.
 
 ### Local persistence

@@ -158,6 +158,84 @@ class TestSpreadsheetParser:
         assert sheet_coverage.header_row_number == 1
         assert sheet_coverage.formula_backed_fields == 1
 
+    def test_xlsx_formula_cached_value_is_shown_but_never_used_as_quantity(self):
+        import io
+        import zipfile
+        from xml.etree import ElementTree
+
+        import openpyxl
+        from rfq_assistant.ingestion.parsers.spreadsheet_parser import SpreadsheetParser
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.append(["MPN", "Manufacturer", "Quantity"])
+        sheet.append(["LC1D09BD", "Schneider Electric", "=5+5"])
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        # openpyxl writes formulas without cached results. Insert a synthetic
+        # workbook cache value into the generated fixture's XML for this test.
+        cached_fixture = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(output.getvalue())) as source_zip:
+            with zipfile.ZipFile(cached_fixture, "w", zipfile.ZIP_DEFLATED) as target_zip:
+                for entry in source_zip.infolist():
+                    data = source_zip.read(entry.filename)
+                    if entry.filename == "xl/worksheets/sheet1.xml":
+                        root = ElementTree.fromstring(data)
+                        ns = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+                        cell = root.find(".//x:c[@r='C2']", ns)
+                        assert cell is not None
+                        value = cell.find("x:v", ns)
+                        assert value is not None
+                        value.text = "10"
+                        data = ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
+                    target_zip.writestr(entry, data)
+
+        parsed = SpreadsheetParser().parse(cached_fixture.getvalue(), "formula_quantity.xlsx")
+        line = parsed.lines[0]
+        warning = next(w for w in line.extraction_warnings if w.code == "FORMULA_VALUE_NOT_EVALUATED")
+        assert line.quantity is None
+        assert "cached value" not in line.raw_text
+        assert "quantity=10" in warning.message
+
+    def test_xlsx_zero_padding_format_preserves_numeric_mpn_leading_zeroes(self):
+        import io
+        import openpyxl
+        from rfq_assistant.ingestion.parsers.spreadsheet_parser import SpreadsheetParser
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.append(["MPN", "Manufacturer", "Quantity"])
+        sheet.append([2900364, "Phoenix Contact", 2])
+        sheet["A2"].number_format = "00000000"
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        parsed = SpreadsheetParser().parse(output.getvalue(), "numeric_mpn.xlsx")
+        assert parsed.lines[0].requested_mpn == "02900364"
+        assert "02900364" in parsed.lines[0].raw_text
+
+    def test_xlsx_numeric_mpn_over_excel_precision_limit_is_flagged(self):
+        import io
+        import openpyxl
+        from rfq_assistant.ingestion.parsers.spreadsheet_parser import SpreadsheetParser
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.append(["MPN", "Manufacturer", "Quantity"])
+        sheet.append([1234567890123456, "Synthetic Manufacturer", 1])
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        parsed = SpreadsheetParser().parse(output.getvalue(), "long_numeric_mpn.xlsx")
+        assert any(
+            warning.code == "NUMERIC_MPN_EXCEL_PRECISION_RISK"
+            for warning in parsed.lines[0].extraction_warnings
+        )
+
 
 class TestPDFParser:
     """Verifies native PDF parsing and safe detection of corrupt/scanned documents."""

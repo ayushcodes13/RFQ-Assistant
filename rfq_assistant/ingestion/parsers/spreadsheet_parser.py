@@ -18,6 +18,11 @@ from rfq_assistant.ingestion.parsers.base import (
     SourceCoverageAccumulator,
 )
 from rfq_assistant.schemas.models import ExtractionWarning, SourceLocator
+from rfq_assistant.ingestion.excel_values import (
+    format_excel_value,
+    numeric_identifier_precision_risk,
+    render_excel_cell,
+)
 
 
 def parse_quantity_and_unit(raw_val) -> Tuple[Optional[float], Optional[str]]:
@@ -289,10 +294,14 @@ class SpreadsheetParser(BaseDocumentParser):
     def _parse_xlsx(self, content: bytes, filename: str) -> ParsedDocumentResult:
         try:
             wb = openpyxl.load_workbook(io.BytesIO(content), data_only=False, read_only=True)
+            cached_wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True, read_only=True)
         except Exception as exc:
+            if "wb" in locals():
+                wb.close()
             raise DocumentParserError(f"Workbook could not be opened safely: {type(exc).__name__}") from exc
         if len(wb.sheetnames) > 20:
             wb.close()
+            cached_wb.close()
             raise DocumentParserError(f"Spreadsheet sheet count ({len(wb.sheetnames)}) exceeds maximum permitted limit (20 sheets).")
 
         lines: List[ParsedLineDraft] = []
@@ -331,7 +340,11 @@ class SpreadsheetParser(BaseDocumentParser):
                         source_coverage=source_coverage.build(),
                     )
 
-                row_iterator = iter(ws.iter_rows(values_only=False))
+                cached_ws = cached_wb[sheet_name]
+                row_iterator = iter(zip(
+                    ws.iter_rows(values_only=False),
+                    cached_ws.iter_rows(values_only=False),
+                ))
                 header_sample = list(itertools.islice(row_iterator, 10))
                 if not header_sample:
                     source_coverage.record_unit(
@@ -341,7 +354,7 @@ class SpreadsheetParser(BaseDocumentParser):
                     continue
                 header_row_idx = -1
                 col_map: Dict[str, int] = {}
-                for idx, row in enumerate(header_sample):
+                for idx, (row, _) in enumerate(header_sample):
                     col_map = identify_columns([str(c.value) if c.value is not None else "" for c in row])
                     if "mpn" in col_map or ("description" in col_map and "quantity" in col_map):
                         header_row_idx = idx
@@ -354,11 +367,10 @@ class SpreadsheetParser(BaseDocumentParser):
                     header_row_number=(header_row_idx + 1 if header_row_idx >= 0 else None),
                 )
                 if not guessed_layout:
-                    for skipped_idx, skipped_row in enumerate(header_sample[: header_row_idx + 1], start=1):
-                        skipped_text = " | ".join(
-                            str(cell.value).strip() for cell in skipped_row
-                            if cell.value is not None and str(cell.value).strip()
-                        )
+                    for skipped_idx, (skipped_row, _) in enumerate(
+                        header_sample[: header_row_idx + 1], start=1
+                    ):
+                        skipped_text = self._row_text(skipped_row)
                         if skipped_text:
                             source_coverage.append(make_coverage_entry(
                                 f"xlsx-{sheet_name}-row-{skipped_idx}",
@@ -375,16 +387,12 @@ class SpreadsheetParser(BaseDocumentParser):
                         severity="warning",
                     ))
                 if guessed_layout:
-                    col_map = self._infer_xlsx_columns(header_sample)
+                    col_map = self._infer_xlsx_columns([row for row, _ in header_sample])
                     if not col_map:
-                        for source_row_number, row in enumerate(
+                        for source_row_number, (row, _) in enumerate(
                             itertools.chain(header_sample, row_iterator), start=1
                         ):
-                            row_text = " | ".join(
-                                str(cell.value).strip()
-                                for cell in row
-                                if cell.value is not None and str(cell.value).strip()
-                            )
+                            row_text = self._row_text(row)
                             if row_text and not self._is_known_non_item_metadata(row_text):
                                 locator = SourceLocator(
                                     file_name=filename, sheet_name=sheet_name,
@@ -430,10 +438,10 @@ class SpreadsheetParser(BaseDocumentParser):
                     data_rows = itertools.chain(header_sample[header_row_idx + 1:], row_iterator)
                     first_row_number = header_row_idx + 2
 
-                for row_idx, row in enumerate(data_rows, start=first_row_number):
+                for row_idx, (row, cached_row) in enumerate(data_rows, start=first_row_number):
                     if not row or all(c.value is None or str(c.value).strip() == "" for c in row):
                         continue
-                    row_text = " | ".join(str(c.value).strip() for c in row if c.value is not None and str(c.value).strip())
+                    row_text = self._row_text(row)
                     region_id = f"xlsx-{sheet_name}-row-{row_idx}"
                     locator = SourceLocator(file_name=filename, sheet_name=sheet_name,
                                             row_number=row_idx, text_snippet=row_text[:120])
@@ -465,6 +473,18 @@ class SpreadsheetParser(BaseDocumentParser):
                             message=f"Column roles were guessed for sheet '{sheet_name}', row {row_idx}.",
                             severity="warning",
                         ))
+                    if (
+                        mpn_idx is not None and mpn_idx < len(row)
+                        and numeric_identifier_precision_risk(row[mpn_idx].value)
+                    ):
+                        line_warnings.append(ExtractionWarning(
+                            code="NUMERIC_MPN_EXCEL_PRECISION_RISK",
+                            message=(
+                                f"The part identifier in row {row_idx} of sheet '{sheet_name}' is stored as a number with more than 15 significant digits. "
+                                "Excel may already have rounded it; verify the exact identifier in the original source."
+                            ),
+                            severity="warning",
+                        ))
                     if hidden_sheet:
                         line_warnings.append(ExtractionWarning(
                             code="HIDDEN_SHEET_REVIEW",
@@ -472,9 +492,28 @@ class SpreadsheetParser(BaseDocumentParser):
                             severity="warning",
                         ))
                     if formula_fields:
+                        cached_values = {
+                            name: format_excel_value(cached_row[idx].value, cached_row[idx].number_format)
+                            for name, idx in (
+                                ("mpn", mpn_idx), ("manufacturer", oem_idx),
+                                ("description", desc_idx), ("quantity", qty_idx),
+                                ("unit", unit_idx),
+                            )
+                            if name in formula_fields and idx is not None
+                            and idx < len(cached_row) and cached_row[idx].value is not None
+                        }
+                        cached_detail = (
+                            " Cached workbook values (not recalculated): "
+                            + ", ".join(f"{name}={value}" for name, value in sorted(cached_values.items()))
+                            + "."
+                            if cached_values else " No cached result was stored in the workbook."
+                        )
                         line_warnings.append(ExtractionWarning(
                             code="FORMULA_VALUE_NOT_EVALUATED",
-                            message=f"Formula-backed fields ({', '.join(sorted(formula_fields))}) were preserved as formula text and not calculated.",
+                            message=(
+                                f"Formula-backed fields ({', '.join(sorted(formula_fields))}) were preserved as formula text and not calculated."
+                                + cached_detail
+                            ),
                             severity="warning",
                         ))
                         if "quantity" in formula_fields:
@@ -561,6 +600,7 @@ class SpreadsheetParser(BaseDocumentParser):
                     line_counter += 1
         finally:
             wb.close()
+            cached_wb.close()
 
         if not lines:
             warnings.append(ExtractionWarning(
@@ -587,6 +627,15 @@ class SpreadsheetParser(BaseDocumentParser):
             text.strip(),
             re.IGNORECASE,
         ))
+
+    @staticmethod
+    def _row_text(row) -> str:
+        """Render literal cell values and formula text only, never cached formula results."""
+        return " | ".join(
+            rendered for rendered in (
+                render_excel_cell(cell) for cell in row
+            ) if rendered
+        )
 
     @staticmethod
     def _infer_xlsx_columns(rows: List[Tuple]) -> Dict[str, int]:
@@ -627,8 +676,9 @@ class SpreadsheetParser(BaseDocumentParser):
     def _get_col_value(row: Tuple, col_idx: Optional[int]) -> Optional[str]:
         if col_idx is None or col_idx >= len(row):
             return None
-        val = getattr(row[col_idx], "value", row[col_idx])
+        cell = row[col_idx]
+        val = getattr(cell, "value", cell)
         if val is None:
             return None
-        val_str = str(val).strip()
+        val_str = format_excel_value(val, getattr(cell, "number_format", None))
         return val_str if val_str != "" else None
