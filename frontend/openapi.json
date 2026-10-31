@@ -1385,6 +1385,13 @@
       "SourceLocator": {
         "description": "Pinpoints where a line was extracted from within original source document.",
         "properties": {
+          "field_source_cells": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Field Source Cells",
+            "type": "object"
+          },
           "file_name": {
             "title": "File Name",
             "type": "string"

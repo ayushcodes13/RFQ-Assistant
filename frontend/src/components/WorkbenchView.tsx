@@ -59,6 +59,10 @@ function formatLocator(locator: SourceLocator): string {
   if (locator.ocr_confidence != null) {
     parts.push(`OCR ${Math.round(locator.ocr_confidence)}% confidence`);
   }
+  const sourceCells = Object.entries(locator.field_source_cells ?? {});
+  if (sourceCells.length > 0) {
+    parts.push(`cells ${sourceCells.map(([field, cell]) => `${field} ${cell}`).join(", ")}`);
+  }
   if (locator.row_number != null) parts.push(`row ${locator.row_number}`);
   return parts.join(" · ");
 }

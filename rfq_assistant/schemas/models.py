@@ -25,6 +25,7 @@ class SourceLocator(BaseModel):
     # Normalized 0..1 PDF page coordinates, after applying page rotation.
     page_bbox: Optional[Tuple[float, float, float, float]] = None
     ocr_confidence: Optional[float] = None
+    field_source_cells: Dict[str, str] = Field(default_factory=dict)
 
     @field_validator("page_bbox")
     @classmethod

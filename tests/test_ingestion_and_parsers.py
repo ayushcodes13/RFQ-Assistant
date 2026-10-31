@@ -261,6 +261,39 @@ class TestSpreadsheetParser:
         assert coverage.hidden_row_count == 1
         assert coverage.hidden_column_count == 1
 
+    def test_xlsx_vertical_merged_manufacturer_is_inherited_with_cell_provenance(self):
+        import io
+        import openpyxl
+        from rfq_assistant.ingestion.parsers.spreadsheet_parser import SpreadsheetParser
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.append(["MPN", "Manufacturer", "Quantity"])
+        sheet.append(["6ES7214-1AG40-0XB0", "Siemens", 2])
+        sheet.append(["6ES7214-1AG40-0XB1", None, 4])
+        sheet.merge_cells("B2:B3")
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        parsed = SpreadsheetParser().parse(output.getvalue(), "merged_manufacturer.xlsx")
+        inherited = parsed.lines[1]
+        warning_codes = {warning.code for warning in inherited.extraction_warnings}
+
+        assert len(parsed.lines) == 2
+        assert inherited.requested_manufacturer == "Siemens"
+        assert inherited.quantity == 4
+        assert inherited.source_locator.field_source_cells == {
+            "requested_mpn": "A3",
+            "requested_manufacturer": "B2",
+            "quantity": "C3",
+        }
+        assert "MERGED_CELL_VALUE_INHERITED" in warning_codes
+        sheet_coverage = next(
+            unit for unit in parsed.source_coverage if unit.unit_kind == "workbook_sheet"
+        )
+        assert sheet_coverage.locator.field_source_cells == {}
+
 
 class TestPDFParser:
     """Verifies native PDF parsing and safe detection of corrupt/scanned documents."""

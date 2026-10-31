@@ -1002,6 +1002,10 @@ export interface components {
          * @description Pinpoints where a line was extracted from within original source document.
          */
         SourceLocator: {
+            /** Field Source Cells */
+            field_source_cells?: {
+                [key: string]: string;
+            };
             /** File Name */
             file_name: string;
             /** Ocr Confidence */

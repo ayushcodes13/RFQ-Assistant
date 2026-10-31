@@ -1,4 +1,4 @@
-"""Read hidden Excel row/column metadata without loading worksheet cells."""
+"""Read Excel layout metadata without loading worksheet cell values."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import posixpath
 import zipfile
 from dataclasses import dataclass
 from defusedxml import ElementTree
+from openpyxl.utils.cell import range_boundaries, get_column_letter
 
 _MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -17,6 +18,15 @@ _PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 class SheetVisibility:
     hidden_rows: set[int]
     hidden_columns: set[int]
+    vertical_merges: tuple["VerticalMerge", ...] = ()
+
+
+@dataclass(frozen=True)
+class VerticalMerge:
+    column_index: int
+    first_row: int
+    last_row: int
+    anchor_cell: str
 
 
 def _worksheet_paths(archive: zipfile.ZipFile) -> dict[str, str]:
@@ -61,6 +71,7 @@ def read_hidden_dimensions(content: bytes) -> dict[str, SheetVisibility]:
         for sheet_name, path in paths.items():
             hidden_rows: set[int] = set()
             hidden_columns: set[int] = set()
+            vertical_merges: list[VerticalMerge] = []
             with archive.open(path) as xml_stream:
                 for event, element in ElementTree.iterparse(
                     xml_stream, events=("start", "end")
@@ -82,10 +93,38 @@ def read_hidden_dimensions(content: bytes) -> dict[str, SheetVisibility]:
                                 first, last = 0, -1
                             if 1 <= first <= last <= 100:
                                 hidden_columns.update(range(first - 1, last))
+                    elif event == "start" and element.tag == f"{{{_MAIN_NS}}}mergeCell":
+                        reference = element.attrib.get("ref", "")
+                        try:
+                            min_column, min_row, max_column, max_row = range_boundaries(
+                                reference
+                            )
+                        except (TypeError, ValueError):
+                            raise ValueError(
+                                "Workbook contains an invalid merged cell range"
+                            )
+                        if None in (min_column, min_row, max_column, max_row):
+                            raise ValueError(
+                                "Workbook contains an incomplete merged cell range"
+                            )
+                        if max_column > 100 or max_row > 5000:
+                            raise ValueError(
+                                "Merged cell range exceeds workbook parser limits"
+                            )
+                        if min_column == max_column and max_row > min_row:
+                            vertical_merges.append(
+                                VerticalMerge(
+                                    column_index=min_column - 1,
+                                    first_row=min_row,
+                                    last_row=max_row,
+                                    anchor_cell=f"{get_column_letter(min_column)}{min_row}",
+                                )
+                            )
                     elif event == "end":
                         element.clear()
             result[sheet_name] = SheetVisibility(
                 hidden_rows=hidden_rows,
                 hidden_columns=hidden_columns,
+                vertical_merges=tuple(vertical_merges),
             )
         return result

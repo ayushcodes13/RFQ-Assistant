@@ -4,8 +4,10 @@ import csv
 import io
 import itertools
 import re
+from bisect import bisect_right
 from typing import Dict, List, Optional, Tuple
 import openpyxl
+from openpyxl.utils import get_column_letter
 
 from rfq_assistant.ingestion.parsers.base import (
     BaseDocumentParser,
@@ -84,7 +86,7 @@ def identify_columns(headers: List[str]) -> Dict[str, int]:
 class SpreadsheetParser(BaseDocumentParser):
     """Parses CSV and multi-sheet XLSX documents into structured line drafts."""
 
-    artifact_version = "rfq-spreadsheet-v3"
+    artifact_version = "rfq-spreadsheet-v4"
 
     cache_dependencies = ("openpyxl",)
 
@@ -362,6 +364,27 @@ class SpreadsheetParser(BaseDocumentParser):
                     cached_ws.iter_rows(values_only=False),
                 ))
                 header_sample = list(itertools.islice(row_iterator, 10))
+                merges_by_column = {}
+                merges_starting_by_row = {}
+                for merge in visibility.vertical_merges:
+                    merges_by_column.setdefault(merge.column_index, []).append(merge)
+                    merges_starting_by_row.setdefault(merge.first_row, []).append(merge)
+                for merges in merges_by_column.values():
+                    merges.sort(key=lambda merge: merge.first_row)
+                merge_starts_by_column = {
+                    column_index: [merge.first_row for merge in merges]
+                    for column_index, merges in merges_by_column.items()
+                }
+                merge_anchor_cells = {}
+                for sample_row_number, (sample_row, sample_cached_row) in enumerate(
+                    header_sample, start=1
+                ):
+                    for merge in merges_starting_by_row.get(sample_row_number, []):
+                        if merge.column_index < len(sample_row):
+                            merge_anchor_cells[(merge.column_index, merge.first_row)] = (
+                                sample_row[merge.column_index],
+                                sample_cached_row[merge.column_index],
+                            )
                 if not header_sample:
                     source_coverage.record_unit(
                         unit_id, locator, unit_kind="workbook_sheet", is_empty=True,
@@ -455,12 +478,15 @@ class SpreadsheetParser(BaseDocumentParser):
                     first_row_number = header_row_idx + 2
 
                 for row_idx, (row, cached_row) in enumerate(data_rows, start=first_row_number):
+                    for merge in merges_starting_by_row.get(row_idx, []):
+                        if merge.column_index < len(row):
+                            merge_anchor_cells[(merge.column_index, merge.first_row)] = (
+                                row[merge.column_index], cached_row[merge.column_index]
+                            )
                     if not row or all(c.value is None or str(c.value).strip() == "" for c in row):
                         continue
                     row_text = self._row_text(row)
                     region_id = f"xlsx-{sheet_name}-row-{row_idx}"
-                    locator = SourceLocator(file_name=filename, sheet_name=sheet_name,
-                                            row_number=row_idx, text_snippet=row_text[:120])
                     mpn_idx = col_map.get("mpn")
                     qty_idx = col_map.get("quantity")
                     oem_idx = col_map.get("manufacturer")
@@ -468,17 +494,69 @@ class SpreadsheetParser(BaseDocumentParser):
                     unit_idx = col_map.get("unit")
                     notes_idx = col_map.get("notes")
 
+                    field_indexes = {
+                        "requested_mpn": mpn_idx,
+                        "requested_manufacturer": oem_idx,
+                        "description": desc_idx,
+                        "quantity": qty_idx,
+                        "unit": unit_idx,
+                        "notes": notes_idx,
+                    }
+                    effective_cells = {}
+                    effective_cached_cells = {}
+                    field_source_cells = {}
+                    inherited_merges = {}
+                    for field_name, column_index in field_indexes.items():
+                        if column_index is None or column_index >= len(row):
+                            continue
+                        source_cell = row[column_index]
+                        cached_cell = cached_row[column_index] if column_index < len(cached_row) else None
+                        value = getattr(source_cell, "value", None)
+                        if value is None or (isinstance(value, str) and not value.strip()):
+                            merges = merges_by_column.get(column_index, [])
+                            starts = merge_starts_by_column.get(column_index, [])
+                            merge_index = bisect_right(starts, row_idx) - 1
+                            if merge_index >= 0:
+                                merge = merges[merge_index]
+                                if merge.first_row < row_idx <= merge.last_row:
+                                    anchor = merge_anchor_cells.get((column_index, merge.first_row))
+                                    if anchor is not None and getattr(anchor[0], "value", None) not in (None, ""):
+                                        source_cell, cached_cell = anchor
+                                        inherited_merges[field_name] = merge
+                        effective_cells[field_name] = source_cell
+                        if cached_cell is not None:
+                            effective_cached_cells[field_name] = cached_cell
+                        field_source_cells[field_name] = (
+                            inherited_merges[field_name].anchor_cell
+                            if field_name in inherited_merges
+                            else f"{get_column_letter(column_index + 1)}{row_idx}"
+                        )
+
+                    locator = SourceLocator(
+                        file_name=filename,
+                        sheet_name=sheet_name,
+                        row_number=row_idx,
+                        text_snippet=row_text[:120],
+                        field_source_cells=field_source_cells,
+                    )
+
                     formula_fields = {
-                        name for name, idx in (("mpn", mpn_idx), ("manufacturer", oem_idx), ("description", desc_idx), ("quantity", qty_idx), ("unit", unit_idx))
-                        if idx is not None and idx < len(row) and getattr(row[idx], "data_type", None) == "f"
+                        name for name, field_name in (
+                            ("mpn", "requested_mpn"),
+                            ("manufacturer", "requested_manufacturer"),
+                            ("description", "description"),
+                            ("quantity", "quantity"),
+                            ("unit", "unit"),
+                        )
+                        if getattr(effective_cells.get(field_name), "data_type", None) == "f"
                     }
                     source_coverage.add_formula_backed_fields(unit_id, len(formula_fields))
-                    mpn = self._get_col_value(row, mpn_idx)
-                    oem = self._get_col_value(row, oem_idx)
-                    desc = self._get_col_value(row, desc_idx)
-                    raw_qty = self._get_col_value(row, qty_idx)
-                    raw_unit = self._get_col_value(row, unit_idx)
-                    notes = self._get_col_value(row, notes_idx)
+                    mpn = self._get_col_value((effective_cells.get("requested_mpn"),), 0)
+                    oem = self._get_col_value((effective_cells.get("requested_manufacturer"),), 0)
+                    desc = self._get_col_value((effective_cells.get("description"),), 0)
+                    raw_qty = self._get_col_value((effective_cells.get("quantity"),), 0)
+                    raw_unit = self._get_col_value((effective_cells.get("unit"),), 0)
+                    notes = self._get_col_value((effective_cells.get("notes"),), 0)
 
                     qty, parsed_unit = parse_quantity_and_unit(raw_qty)
                     unit = raw_unit or parsed_unit or "EA"
@@ -489,9 +567,32 @@ class SpreadsheetParser(BaseDocumentParser):
                             message=f"Column roles were guessed for sheet '{sheet_name}', row {row_idx}.",
                             severity="warning",
                         ))
+                    if inherited_merges:
+                        inherited_sources = ", ".join(
+                            f"{field_name} from {merge.anchor_cell}"
+                            for field_name, merge in sorted(inherited_merges.items())
+                        )
+                        line_warnings.append(ExtractionWarning(
+                            code="MERGED_CELL_VALUE_INHERITED",
+                            message=(
+                                f"This row uses merged-cell values ({inherited_sources}). "
+                                "Verify that the merged value applies to this line."
+                            ),
+                            severity="warning",
+                        ))
+                        if any(
+                            merge.first_row in visibility.hidden_rows
+                            for merge in inherited_merges.values()
+                        ):
+                            line_warnings.append(ExtractionWarning(
+                                code="MERGED_VALUE_FROM_HIDDEN_ROW",
+                                message="An inherited value originates in a hidden row; verify it against the original workbook.",
+                                severity="warning",
+                            ))
                     if (
-                        mpn_idx is not None and mpn_idx < len(row)
-                        and numeric_identifier_precision_risk(row[mpn_idx].value)
+                        numeric_identifier_precision_risk(
+                            getattr(effective_cells.get("requested_mpn"), "value", None)
+                        )
                     ):
                         line_warnings.append(ExtractionWarning(
                             code="NUMERIC_MPN_EXCEL_PRECISION_RISK",
@@ -524,16 +625,23 @@ class SpreadsheetParser(BaseDocumentParser):
                             severity="warning",
                         ))
                     if formula_fields:
-                        cached_values = {
-                            name: format_excel_value(cached_row[idx].value, cached_row[idx].number_format)
-                            for name, idx in (
-                                ("mpn", mpn_idx), ("manufacturer", oem_idx),
-                                ("description", desc_idx), ("quantity", qty_idx),
-                                ("unit", unit_idx),
-                            )
-                            if name in formula_fields and idx is not None
-                            and idx < len(cached_row) and cached_row[idx].value is not None
-                        }
+                        cached_values = {}
+                        for name, field_name in (
+                            ("mpn", "requested_mpn"),
+                            ("manufacturer", "requested_manufacturer"),
+                            ("description", "description"),
+                            ("quantity", "quantity"),
+                            ("unit", "unit"),
+                        ):
+                            cached_cell = effective_cached_cells.get(field_name)
+                            if (
+                                name in formula_fields
+                                and cached_cell is not None
+                                and cached_cell.value is not None
+                            ):
+                                cached_values[name] = format_excel_value(
+                                    cached_cell.value, cached_cell.number_format
+                                )
                         cached_detail = (
                             " Cached workbook values (not recalculated): "
                             + ", ".join(f"{name}={value}" for name, value in sorted(cached_values.items()))
