@@ -1,6 +1,23 @@
 {
   "components": {
     "schemas": {
+      "ApproveRemainingRequest": {
+        "description": "Snapshot versions for every line when approving a review-plan remainder.",
+        "properties": {
+          "expected_versions": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Expected Versions",
+            "type": "object"
+          }
+        },
+        "required": [
+          "expected_versions"
+        ],
+        "title": "ApproveRemainingRequest",
+        "type": "object"
+      },
       "AuditAction": {
         "enum": [
           "CASE_CREATED",
@@ -105,7 +122,7 @@
         "type": "object"
       },
       "BatchReviewRequest": {
-        "description": "Batch approve or flag multiple lines with actor attribution.",
+        "description": "Batch approve or flag lines only from the reviewer\u2019s visible versions.",
         "properties": {
           "actor": {
             "default": "Inside Sales",
@@ -114,6 +131,13 @@
           },
           "decision": {
             "$ref": "#/components/schemas/ReviewDecision"
+          },
+          "expected_versions": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Expected Versions",
+            "type": "object"
           },
           "line_ids": {
             "items": {
@@ -136,6 +160,7 @@
         },
         "required": [
           "line_ids",
+          "expected_versions",
           "decision"
         ],
         "title": "BatchReviewRequest",
@@ -2983,6 +3008,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveRemainingRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {

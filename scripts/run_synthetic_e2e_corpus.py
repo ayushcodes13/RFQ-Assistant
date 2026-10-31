@@ -241,10 +241,21 @@ def _check_document(client: TestClient, number: int, kind: str) -> dict[str, Any
         return {"number": number, "format": kind, "step": "review-plan", "status": plan_response.status_code, "stage_latency_ms": timings}
     plan = plan_response.json()
     if plan["sample_line_ids"]:
+        current_lines = client.get(f"/api/rfqs/{case_id}/lines").json()
+        sample_versions = {
+            line["line_id"]: line["version"]
+            for line in current_lines
+            if line["line_id"] in plan["sample_line_ids"]
+        }
         review = _timed_request(
             timings, "sample_review", lambda: client.post(
                 f"/api/rfqs/{case_id}/review",
-                json={"line_ids": plan["sample_line_ids"], "decision": "APPROVED", "actor": "Synthetic reviewer"},
+                json={
+                    "line_ids": plan["sample_line_ids"],
+                    "expected_versions": sample_versions,
+                    "decision": "APPROVED",
+                    "actor": "Synthetic reviewer",
+                },
             ),
         )
         if review.status_code != 200:
@@ -253,9 +264,14 @@ def _check_document(client: TestClient, number: int, kind: str) -> dict[str, Any
         timings, "review_plan_after_sample", lambda: client.get(f"/api/rfqs/{case_id}/review-plan")
     ).json()
     if plan["can_batch_approve"]:
+        current_lines = client.get(f"/api/rfqs/{case_id}/lines").json()
+        expected_versions = {
+            line["line_id"]: line["version"] for line in current_lines
+        }
         batch_result = _timed_request(
             timings, "batch_approve_remaining", lambda: client.post(
-                f"/api/rfqs/{case_id}/review-plan/approve-remaining", json={}
+                f"/api/rfqs/{case_id}/review-plan/approve-remaining",
+                json={"expected_versions": expected_versions},
             ),
         )
         if batch_result.status_code != 200:

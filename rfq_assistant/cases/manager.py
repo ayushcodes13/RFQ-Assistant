@@ -92,6 +92,8 @@ class CaseManager:
         self._audit_events: Dict[str, List[AuditEvent]] = {}
         self._processing_locks: Dict[str, threading.Lock] = {}
         self._processing_locks_guard = threading.Lock()
+        self._review_locks: Dict[str, threading.RLock] = {}
+        self._review_locks_guard = threading.Lock()
         if self.state_store:
             for payload in self.state_store.load_cases():
                 case = RFQCase.model_validate(payload)
@@ -129,6 +131,10 @@ class CaseManager:
 
     def get_audit_trail(self, case_id: str) -> List[AuditEvent]:
         return self._audit_events.get(case_id, [])
+
+    def _review_lock(self, case_id: str) -> threading.RLock:
+        with self._review_locks_guard:
+            return self._review_locks.setdefault(case_id, threading.RLock())
 
     def create_case_from_upload(
         self,
@@ -1098,6 +1104,12 @@ class CaseManager:
     def update_line(
         self, case_id: str, line_id: str, update: RFQLineItemUpdate
     ) -> Optional[RFQLineItem]:
+        with self._review_lock(case_id):
+            return self._update_line_locked(case_id, line_id, update)
+
+    def _update_line_locked(
+        self, case_id: str, line_id: str, update: RFQLineItemUpdate
+    ) -> Optional[RFQLineItem]:
         """Applies a human reviewer edit or decision to a line item with full audit trail."""
         lines = self._lines_by_case.get(case_id, [])
         line = next((l for l in lines if l.line_id == line_id), None)
@@ -1109,6 +1121,22 @@ class CaseManager:
             raise ValueError(
                 f"Stale state / conflict: Line item version is {line.version}, but client expected version {update.expected_version}. Please refresh."
             )
+
+        # A request that repeats the currently visible values is not a write.
+        # In particular, it must not invalidate another reviewer's snapshot.
+        editable_values = (
+            ("requested_manufacturer", update.requested_manufacturer),
+            ("requested_mpn", update.requested_mpn),
+            ("description", update.description),
+            ("quantity", update.quantity),
+            ("unit", update.unit),
+            ("notes", update.notes),
+            ("selected_catalog_sku", update.selected_catalog_sku),
+            ("review_decision", update.review_decision),
+            ("reviewer_notes", update.reviewer_notes),
+        )
+        if not any(value is not None and value != getattr(line, field) for field, value in editable_values):
+            return line
 
         current_matcher = ExactMatchEngine(self.catalog.snapshot())
 
@@ -1308,6 +1336,27 @@ class CaseManager:
 
     def batch_review(self, case_id: str, request: BatchReviewRequest) -> int:
         """Batch decisions are limited to the server-selected clean sample."""
+        with self._review_lock(case_id):
+            return self._batch_review_locked(case_id, request)
+
+    def _batch_review_locked(self, case_id: str, request: BatchReviewRequest) -> int:
+        if len(set(request.line_ids)) != len(request.line_ids):
+            raise ValueError("Batch review contains duplicate line IDs.")
+        if set(request.expected_versions) != set(request.line_ids):
+            raise ValueError("Expected versions must be supplied for exactly the selected lines.")
+        lines_by_id = {line.line_id: line for line in self.get_lines(case_id)}
+        # Validate the whole batch before mutating any row, so stale snapshots
+        # cannot produce a partially applied review.
+        for line_id in request.line_ids:
+            line = lines_by_id.get(line_id)
+            if line is None:
+                raise ValueError(f"Line item not found: {line_id}.")
+            expected_version = request.expected_versions[line_id]
+            if expected_version != line.version:
+                raise ValueError(
+                    f"Stale state / conflict: Line item version is {line.version}, "
+                    f"but client expected version {expected_version}. Please refresh."
+                )
         if request.decision == ReviewDecision.APPROVED:
             plan = self.get_review_plan(case_id)
             allowed = set(plan.sample_line_ids)
@@ -1317,11 +1366,9 @@ class CaseManager:
                 )
         updated = 0
         for lid in request.line_ids:
-            line = next((item for item in self.get_lines(case_id) if item.line_id == lid), None)
-            if line is None:
-                continue
+            line = lines_by_id[lid]
             upd = RFQLineItemUpdate(
-                expected_version=line.version,
+                expected_version=request.expected_versions[lid],
                 review_decision=request.decision,
                 actor=request.actor,
                 reviewer_notes=request.notes,
@@ -1471,8 +1518,27 @@ class CaseManager:
             can_batch_approve=sample_approved and not sample_correction_found and bool(remaining),
         )
 
-    def approve_remaining_clean(self, case_id: str, actor: str) -> int:
+    def approve_remaining_clean(
+        self, case_id: str, actor: str, expected_versions: Dict[str, int]
+    ) -> int:
         """Approve only clean non-sample rows after every sampled row is approved."""
+        with self._review_lock(case_id):
+            return self._approve_remaining_clean_locked(case_id, actor, expected_versions)
+
+    def _approve_remaining_clean_locked(
+        self, case_id: str, actor: str, expected_versions: Dict[str, int]
+    ) -> int:
+        lines = self._lines_by_case.get(case_id, [])
+        current_versions = {line.line_id: line.version for line in lines}
+        if set(expected_versions) != set(current_versions):
+            raise ValueError("Expected versions must cover every line in the current case.")
+        for line_id, current_version in current_versions.items():
+            expected_version = expected_versions[line_id]
+            if expected_version != current_version:
+                raise ValueError(
+                    f"Stale state / conflict: Line item version is {current_version}, "
+                    f"but client expected version {expected_version}. Please refresh."
+                )
         plan = self.get_review_plan(case_id)
         if plan.sample_correction_found:
             raise ValueError("A sampled row needed correction. Review the remaining clean rows individually.")
@@ -1481,7 +1547,7 @@ class CaseManager:
         now = datetime.utcnow()
         remaining_ids = set(plan.remaining_line_ids)
         updated = 0
-        for line in self._lines_by_case.get(case_id, []):
+        for line in lines:
             if line.line_id not in remaining_ids:
                 continue
             old_decision = line.review_decision

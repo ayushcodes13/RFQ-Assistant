@@ -497,6 +497,16 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * ApproveRemainingRequest
+         * @description Snapshot versions for every line when approving a review-plan remainder.
+         */
+        ApproveRemainingRequest: {
+            /** Expected Versions */
+            expected_versions: {
+                [key: string]: number;
+            };
+        };
+        /**
          * AuditAction
          * @enum {string}
          */
@@ -531,7 +541,7 @@ export interface components {
         };
         /**
          * BatchReviewRequest
-         * @description Batch approve or flag multiple lines with actor attribution.
+         * @description Batch approve or flag lines only from the reviewer’s visible versions.
          */
         BatchReviewRequest: {
             /**
@@ -540,6 +550,10 @@ export interface components {
              */
             actor: string;
             decision: components["schemas"]["ReviewDecision"];
+            /** Expected Versions */
+            expected_versions: {
+                [key: string]: number;
+            };
             /** Line Ids */
             line_ids: string[];
             /** Notes */
@@ -1784,7 +1798,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveRemainingRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

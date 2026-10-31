@@ -37,6 +37,12 @@ def _case(tmp_path, row_count=12):
     return manager, case
 
 
+def _versions(manager, case_id, line_ids=None):
+    lines = manager.get_lines(case_id)
+    selected = set(line_ids) if line_ids is not None else {line.line_id for line in lines}
+    return {line.line_id: line.version for line in lines if line.line_id in selected}
+
+
 def test_review_plan_selects_a_stable_per_case_randomized_sample_and_batches_rest(tmp_path):
     manager, case = _case(tmp_path)
     first = manager.get_review_plan(case.case_id)
@@ -50,6 +56,7 @@ def test_review_plan_selects_a_stable_per_case_randomized_sample_and_batches_res
 
     manager.batch_review(case.case_id, BatchReviewRequest(
         line_ids=first.sample_line_ids,
+        expected_versions=_versions(manager, case.case_id, first.sample_line_ids),
         decision=ReviewDecision.APPROVED,
         actor="Synthetic reviewer",
         notes="Source cross-check passed",
@@ -57,7 +64,9 @@ def test_review_plan_selects_a_stable_per_case_randomized_sample_and_batches_res
     after_sample = manager.get_review_plan(case.case_id)
     assert after_sample.sample_approved
     assert after_sample.can_batch_approve
-    assert manager.approve_remaining_clean(case.case_id, "Synthetic reviewer") == 7
+    assert manager.approve_remaining_clean(
+        case.case_id, "Synthetic reviewer", _versions(manager, case.case_id)
+    ) == 7
     assert all(line.review_decision == ReviewDecision.APPROVED for line in manager.get_lines(case.case_id))
     assert len([event for event in manager.get_audit_trail(case.case_id) if event.action == "LINE_APPROVED"]) == 12
 
@@ -78,10 +87,13 @@ def test_clean_rows_cannot_be_batch_approved_before_sample(tmp_path):
     with pytest.raises(ValueError, match="current review sample"):
         manager.batch_review(case.case_id, BatchReviewRequest(
             line_ids=[line.line_id for line in manager.get_lines(case.case_id)],
+            expected_versions=_versions(manager, case.case_id),
             decision=ReviewDecision.APPROVED,
         ))
     with pytest.raises(ValueError, match="Approve every sampled row"):
-        manager.approve_remaining_clean(case.case_id, "Synthetic reviewer")
+        manager.approve_remaining_clean(
+            case.case_id, "Synthetic reviewer", _versions(manager, case.case_id)
+        )
 
 
 def test_sample_correction_disables_batch_approval_for_the_case(tmp_path):
@@ -97,7 +109,9 @@ def test_sample_correction_disables_batch_approval_for_the_case(tmp_path):
     assert updated.sample_correction_found
     assert not updated.can_batch_approve
     with pytest.raises(ValueError, match="needed correction"):
-        manager.approve_remaining_clean(case.case_id, "Synthetic reviewer")
+        manager.approve_remaining_clean(
+            case.case_id, "Synthetic reviewer", _versions(manager, case.case_id)
+        )
 
 
 def test_small_cases_sample_every_otherwise_clean_row(tmp_path):
@@ -184,9 +198,14 @@ def test_exceptions_stay_outside_the_sample_and_batch_approval(tmp_path):
     assert len(plan.sample_line_ids) == 5
     assert len(plan.remaining_line_ids) == 2
     manager.batch_review(case.case_id, BatchReviewRequest(
-        line_ids=plan.sample_line_ids, decision=ReviewDecision.APPROVED, actor="Synthetic reviewer"
+        line_ids=plan.sample_line_ids,
+        expected_versions=_versions(manager, case.case_id, plan.sample_line_ids),
+        decision=ReviewDecision.APPROVED,
+        actor="Synthetic reviewer",
     ))
-    assert manager.approve_remaining_clean(case.case_id, "Synthetic reviewer") == 2
+    assert manager.approve_remaining_clean(
+        case.case_id, "Synthetic reviewer", _versions(manager, case.case_id)
+    ) == 2
     still_unreviewed = [
         line for line in manager.get_lines(case.case_id)
         if line.line_id in plan.exception_line_ids and line.review_decision == ReviewDecision.PENDING

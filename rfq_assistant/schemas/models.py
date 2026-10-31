@@ -200,11 +200,17 @@ class RematchLineRequest(BaseModel):
 
 
 class BatchReviewRequest(BaseModel):
-    """Batch approve or flag multiple lines with actor attribution."""
+    """Batch approve or flag lines only from the reviewer’s visible versions."""
     line_ids: List[str]
+    expected_versions: Dict[str, int]
     decision: ReviewDecision
     actor: str = "Inside Sales"
     notes: Optional[str] = None
+
+
+class ApproveRemainingRequest(BaseModel):
+    """Snapshot versions for every line when approving a review-plan remainder."""
+    expected_versions: Dict[str, int]
 
 
 class ReviewPlan(BaseModel):
