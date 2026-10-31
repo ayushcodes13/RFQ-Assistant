@@ -12,7 +12,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from decimal import Decimal
 from rfq_assistant.agents.tools import ApprovalGateError, QuotationCommercialService
-from rfq_assistant.auth import PilotUser, get_current_user, require_role
+from rfq_assistant.auth import (
+    PilotUser,
+    env_flag,
+    get_current_user,
+    initialize_authentication,
+    require_role,
+)
 from rfq_assistant.cases.manager import CaseManager
 from rfq_assistant.exports import ExportGenerator, ExportValidationError
 from rfq_assistant.ingestion.excel import ExcelBOMInspector
@@ -68,7 +74,7 @@ export_generator = ExportGenerator(catalog=catalog_repo, base_export_dir=_storag
 clamav_scanner = ClamAVScanner()
 rapidfuzz_engine = RapidFuzzCandidateEngine()
 commercial_service = QuotationCommercialService()
-ASYNC_INGEST_ENABLED = os.getenv("RFQ_ASYNC_INGEST_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
+ASYNC_INGEST_ENABLED = env_flag("RFQ_ASYNC_INGEST_ENABLED", default=True)
 try:
     INGEST_WORKER_CONCURRENCY = max(1, min(4, int(os.getenv("RFQ_INGEST_WORKER_CONCURRENCY", "2"))))
 except ValueError:
@@ -131,6 +137,7 @@ app = FastAPI(
     version="0.2.0",
     description="Human-reviewed RFQ intake and quotation preparation assistant with OSS stack",
 )
+app.add_event_handler("startup", initialize_authentication)
 
 if case_manager.llm_extractor:
     app.add_event_handler("shutdown", case_manager.llm_extractor.close)
