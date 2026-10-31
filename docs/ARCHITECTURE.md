@@ -14,7 +14,7 @@ This is a **proposed** implementation, not a claim that the app exists.
 
 - Frontend: Next.js / TypeScript and a compact accessible data grid.
 - Backend: Python / FastAPI with Pydantic schemas and background task queue only when required.
-- Storage: SQLite for local prototype; PostgreSQL for customer deployments. Private file storage with per-workspace keys/paths later.
+- Storage: SQLite for local prototype; PostgreSQL for customer deployments. The local API persists cases, lines, audit events, and catalog rows in `storage/rfq_assistant.sqlite3`; original files and exports remain in local storage directories. Private file storage with per-workspace keys/paths is still required for customer deployments.
 - Data extraction: openpyxl/CSV parser for spreadsheets, text extraction for native PDFs, OCR/vision behind a single optional provider interface for scans.
 - Match service: canonicalized *exact* part number + manufacturer matching over an imported catalog; possible collisions remain unresolved.
 - Export: deterministic XLSX/CSV, quote-preparation template, plain text **unsent** email draft.

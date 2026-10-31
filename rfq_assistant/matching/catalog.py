@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from rfq_assistant.matching.normalizer import normalize_manufacturer, normalize_mpn
 from rfq_assistant.schemas.models import CatalogItem
+from rfq_assistant.persistence import SQLiteStateStore
 
 
 class CatalogImportError(Exception):
@@ -16,15 +17,21 @@ class CatalogImportError(Exception):
 
 
 class CatalogRepository:
-    """In-memory item master repository with indexed normalized MPN lookups."""
+    """Indexed item master with optional durable SQLite backing."""
 
-    def __init__(self):
+    def __init__(self, state_store: Optional[SQLiteStateStore] = None):
+        self.state_store = state_store
         self._items_by_sku: Dict[str, CatalogItem] = {}
         self._items_by_normalized_mpn: Dict[str, List[CatalogItem]] = {}
+        if self.state_store:
+            for payload in self.state_store.load_catalog():
+                self.add_item(CatalogItem.model_validate(payload))
 
     def clear(self):
         self._items_by_sku.clear()
         self._items_by_normalized_mpn.clear()
+        if self.state_store:
+            self.state_store.delete_catalog()
 
     def add_item(self, item: CatalogItem):
         self._items_by_sku[item.internal_sku] = item
@@ -142,6 +149,8 @@ class CatalogRepository:
         # Commit only after every input row has passed validation.
         for item in staged:
             self.add_item(item)
+        if self.state_store:
+            self.state_store.replace_catalog(self.list_all())
 
         collision_count = sum(
             1 for items in self._items_by_normalized_mpn.values()
