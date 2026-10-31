@@ -566,6 +566,20 @@
         "title": "MatchStatus",
         "type": "string"
       },
+      "ProcessingStage": {
+        "description": "Persisted, user-facing stages for an active ingestion job.",
+        "enum": [
+          "QUEUED",
+          "VALIDATING",
+          "EXTRACTING",
+          "CHECKING_FIELDS",
+          "MATCHING",
+          "READY_FOR_REVIEW",
+          "FAILED"
+        ],
+        "title": "ProcessingStage",
+        "type": "string"
+      },
       "RFQCase": {
         "description": "An RFQ quotation case containing metadata and processing status.",
         "properties": {
@@ -730,6 +744,16 @@
               }
             ],
             "title": "Processing Profile Sha256"
+          },
+          "processing_stage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProcessingStage"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "raw_text": {
             "anyOf": [

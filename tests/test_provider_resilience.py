@@ -62,6 +62,44 @@ def test_concurrency_limit_holds_the_second_request_until_the_first_finishes():
     assert not thread.is_alive()
 
 
+def test_shared_pacing_turn_is_not_reserved_while_waiting_for_concurrency_slot():
+    class RecordingPacer:
+        def __init__(self):
+            self.called = threading.Event()
+
+        def acquire(self, _timeout_seconds):
+            self.called.set()
+            return True
+
+        def hold(self, _seconds):
+            pass
+
+    pacer = RecordingPacer()
+    gate = ProviderCallGate(
+        max_concurrent=1,
+        requests_per_minute=60000,
+        shared_pacer=pacer,
+    )
+    entered = threading.Event()
+
+    def second_request():
+        entered.set()
+        with gate.acquire() as permit:
+            permit.report_success()
+
+    with gate.acquire() as first:
+        pacer.called.clear()
+        thread = threading.Thread(target=second_request)
+        thread.start()
+        assert entered.wait(timeout=1)
+        assert not pacer.called.wait(timeout=0.05)
+        first.report_success()
+
+    assert pacer.called.wait(timeout=1)
+    thread.join(timeout=1)
+    assert not thread.is_alive()
+
+
 def test_repeated_transient_failures_open_breaker_until_one_recovery_probe():
     now = [10.0]
     gate = ProviderCallGate(

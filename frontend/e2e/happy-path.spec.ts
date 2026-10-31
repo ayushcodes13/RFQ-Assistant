@@ -36,13 +36,21 @@ test("paste RFQ, approve every line, export and download a draft worksheet", asy
   await ingestDialog
     .getByPlaceholder("Optional customer label")
     .fill("Synthetic Customer");
+  const createResponse = page.waitForResponse((response) =>
+    response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/api/rfqs"),
+  );
   await ingestDialog.getByRole("button", { name: /Extract line items/i }).click();
+  const queuedResponse = await createResponse;
+  expect(queuedResponse.status()).toBe(200);
+  const queuedCase = await queuedResponse.json();
+  expect(queuedCase.status).toBe("PROCESSING");
+  expect(queuedCase.processing_stage).toBe("QUEUED");
 
   await expect(ingestDialog).toBeHidden({ timeout: 30_000 });
   await expect(
     page.getByRole("heading", { name: "E2E synthetic happy path" })
   ).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(/2 lines · 2 need review/i)).toBeVisible();
+  await expect(page.getByText(/2 lines · 2 need review/i)).toBeVisible({ timeout: 30_000 });
 
   // Approve each extracted line. Refetch after each approval replaces the row,
   // so always target the first remaining Approve button and wait for the badge.

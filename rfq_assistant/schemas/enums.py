@@ -12,6 +12,18 @@ class CaseStatus(str, Enum):
     FAILED = "FAILED"
 
 
+class ProcessingStage(str, Enum):
+    """Persisted, user-facing stages for an active ingestion job."""
+
+    QUEUED = "QUEUED"
+    VALIDATING = "VALIDATING"
+    EXTRACTING = "EXTRACTING"
+    CHECKING_FIELDS = "CHECKING_FIELDS"
+    MATCHING = "MATCHING"
+    READY_FOR_REVIEW = "READY_FOR_REVIEW"
+    FAILED = "FAILED"
+
+
 class SourceType(str, Enum):
     EMAIL_TEXT = "EMAIL_TEXT"
     CSV = "CSV"

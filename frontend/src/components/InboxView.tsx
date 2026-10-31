@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, FilePlus2, RefreshCw, Search, SlidersHorizontal } from "lucide-react";
 import { RFQCase } from "@/types";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { processingStageLabel } from "@/components/ProcessingProgress";
 
 interface InboxViewProps {
   cases: RFQCase[];
@@ -99,6 +100,7 @@ export function InboxView({ cases, loading, error, onSelectCase, onRefresh, onOp
                 <span className="min-w-0">
                   <span className="block truncate text-[14px] font-medium text-[#1d2b30]">{item.title || item.case_id}</span>
                   <span className="mt-0.5 block truncate text-[12px] text-[#52656b]">{item.customer_label || "Customer not specified"}{item.source_file?.file_name ? ` · ${item.source_file.file_name}` : ""}</span>
+                  {item.status === "PROCESSING" && <span className="mt-1 block truncate text-[12px] font-medium text-[#1d465f]">{processingStageLabel(item.processing_stage)}</span>}
                 </span>
                 <span className="hidden justify-self-start sm:inline-flex"><StatusBadge status={item.status} size="sm" /></span>
                 <span className="hidden justify-self-end text-right text-[13px] tabular-nums text-[#2b3b40] sm:block">{item.line_count}</span>

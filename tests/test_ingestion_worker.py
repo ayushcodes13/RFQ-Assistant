@@ -12,7 +12,7 @@ from rfq_assistant.ingestion.storage import DocumentStorage
 from rfq_assistant.ingestion.worker import RFQIngestionWorker
 from rfq_assistant.matching.catalog import CatalogRepository
 from rfq_assistant.persistence import SQLiteStateStore
-from rfq_assistant.schemas.enums import CaseStatus
+from rfq_assistant.schemas.enums import CaseStatus, ProcessingStage, SourceType
 
 
 def _services(tmp_path):
@@ -30,6 +30,7 @@ def test_worker_processes_persisted_upload_without_api_request_waiting(tmp_path)
     pending = manager.enqueue_case_from_upload("request.csv", content)
 
     assert pending.status == CaseStatus.PROCESSING
+    assert pending.processing_stage == ProcessingStage.QUEUED
     assert manager.get_lines(pending.case_id) == []
     assert manager.storage.get_file(pending.case_id, "request.csv") == content
     assert store.get_ingestion_job(pending.case_id)["state"] == "queued"
@@ -50,8 +51,68 @@ def test_worker_processes_persisted_upload_without_api_request_waiting(tmp_path)
 
     completed = manager.get_case(pending.case_id)
     assert completed.status == CaseStatus.NEEDS_REVIEW
+    assert completed.processing_stage == ProcessingStage.READY_FOR_REVIEW
+    persisted = next(
+        row for row in store.load_cases() if row["case_id"] == pending.case_id
+    )
+    assert persisted["processing_stage"] == ProcessingStage.READY_FOR_REVIEW.value
     assert len(manager.get_lines(pending.case_id)) == 1
     assert store.get_ingestion_job(pending.case_id)["state"] == "completed"
+
+
+def test_live_worker_stage_is_saved_while_extraction_is_running(tmp_path, monkeypatch):
+    import rfq_assistant.cases.manager as manager_module
+
+    manager, store = _services(tmp_path)
+    pending = manager.enqueue_case_from_upload(
+        "request.csv", b"MPN,Manufacturer,Qty\nLC1D09BD,Schneider Electric,2\n"
+    )
+    real_get_parser = manager_module.get_parser
+    entered_parser = threading.Event()
+    continue_parser = threading.Event()
+
+    class BlockingParser:
+        def __init__(self, delegate):
+            self.delegate = delegate
+            self.cache_profile = delegate.cache_profile
+            self.cache_dependencies = delegate.cache_dependencies
+
+        def parse(self, content, filename):
+            entered_parser.set()
+            assert continue_parser.wait(timeout=3)
+            return self.delegate.parse(content, filename)
+
+    monkeypatch.setattr(
+        manager_module,
+        "get_parser",
+        lambda source_type: (
+            BlockingParser(real_get_parser(source_type))
+            if source_type == SourceType.CSV
+            else real_get_parser(source_type)
+        ),
+    )
+    worker = RFQIngestionWorker(
+        manager, store, poll_seconds=0.005, lease_seconds=2, heartbeat_seconds=0.1
+    )
+    worker.start()
+    try:
+        assert entered_parser.wait(timeout=2)
+        assert (
+            manager.get_case(pending.case_id).processing_stage
+            == ProcessingStage.EXTRACTING
+        )
+        persisted = next(
+            row for row in store.load_cases() if row["case_id"] == pending.case_id
+        )
+        assert persisted["processing_stage"] == ProcessingStage.EXTRACTING.value
+    finally:
+        continue_parser.set()
+        worker.stop()
+
+    assert (
+        manager.get_case(pending.case_id).processing_stage
+        == ProcessingStage.READY_FOR_REVIEW
+    )
 
 
 def test_queue_claim_is_atomic_and_expired_lease_is_recovered(tmp_path):
@@ -100,6 +161,23 @@ def test_startup_reconciles_case_saved_before_queue_insert(tmp_path):
     assert store.get_ingestion_job(case.case_id) is None
     assert store.reconcile_processing_cases() == 1
     assert store.reconcile_processing_cases() == 0
+    assert store.get_ingestion_job(case.case_id)["state"] == "queued"
+
+
+def test_duplicate_enqueue_for_one_case_keeps_a_single_durable_job(tmp_path):
+    manager, store = _services(tmp_path)
+    case = manager.create_case_from_upload(
+        "request.csv", b"MPN,Qty\nLC1D09BD,2\n", _defer_processing=True
+    )
+
+    first_job_id = store.enqueue_ingestion_job(
+        case.case_id, case.source_file.sha256_digest
+    )
+    repeated_job_id = store.enqueue_ingestion_job(
+        case.case_id, case.source_file.sha256_digest
+    )
+
+    assert repeated_job_id == first_job_id
     assert store.get_ingestion_job(case.case_id)["state"] == "queued"
 
 
