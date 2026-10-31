@@ -41,11 +41,29 @@ client = TestClient(app)
 class TestClamAVAndAttachmentSecurity:
     """Tests attachment malware scanning and quarantine behaviors."""
 
-    def test_clean_file_passes(self, tmp_path):
+    def test_clean_file_passes(self, tmp_path, monkeypatch):
         scanner = ClamAVScanner(quarantine_dir=tmp_path / "quarantine")
+        class CleanDaemonSocket:
+            def __init__(self):
+                self.responses = [b"stream: OK\0", b""]
+
+            def settimeout(self, _timeout):
+                pass
+
+            def sendall(self, _data):
+                pass
+
+            def recv(self, _size):
+                return self.responses.pop(0)
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(scanner, "_get_socket", CleanDaemonSocket)
         clean_content = b"PartNumber,Quantity\nLC1D09BD,10\n"
         result = scanner.scan_bytes(clean_content, filename="clean_bom.csv")
         assert result.is_clean is True
+        assert result.scanned is True
         assert result.threat_name is None
         assert result.quarantined is False
 
@@ -370,7 +388,12 @@ class TestV1APIEndpoints:
         assert extract_resp.status_code == 200
         data = extract_resp.json()
         case_id = data["case"]["case_id"]
-        assert data["security_scan"]["is_clean"] is True
+        assert data["security_scan"]["is_clean"] is data["security_scan"]["scanned"]
+        if not data["security_scan"]["scanned"]:
+            assert any(
+                warning["code"] == "ANTIVIRUS_SCAN_UNAVAILABLE"
+                for warning in data["case"]["document_warnings"]
+            )
 
         # 2. Match
         match_resp = client.post(f"/v1/rfqs/{case_id}/match")

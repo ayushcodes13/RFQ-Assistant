@@ -152,7 +152,7 @@ part number, never a spec token).
 2. Added `export_id` format validation (`EXP-[A-F0-9]{8}`) in the `download_export`
    endpoint before constructing any filesystem path.
 
-**Verified by:** `test_document_storage_rejects_sibling_prefix_traversal` and full test suite (319 passed).
+**Verified by:** `test_document_storage_rejects_sibling_prefix_traversal` and the current full test suite (468 passed).
 
 ---
 
@@ -239,11 +239,12 @@ are not allowed when credentials are involved — browsers reject the preflight 
 In production, this would either allow any origin (security risk) or cause all
 credentialed requests to fail (browser bug).
 
-**Fix applied:** Replaced `allow_origins=["*"]` with an explicit list of local
-development origins (`http://localhost:3000`, etc.). In production deployments,
-`RFQ_ASSISTANT_CORS_ORIGINS` should be set via environment variable (future enhancement).
+**Fix applied:** Replaced `allow_origins=["*"]` with explicit local origins and added
+`RFQ_CORS_ORIGINS` for deployment-specific comma-separated origins. The prior local list
+remains the default; wildcard and malformed origins fail startup validation.
 
-**Verified by:** Full test suite (319 passed). The latest PR CI production build passed and prerendered 5/5 pages.
+**Verified by:** `tests/test_cors_configuration.py`, including a preflight from the demo
+origin `http://localhost:3010`; current full suite: 468 passed.
 
 ---
 
@@ -330,11 +331,11 @@ The following issues have been fixed and verified in the current working tree:
 
 | Metric | Working Tree |
 |---|---|
-| Total tests | 319 passed |
-| Warnings | 6 (all deprecation, non-blocking) |
+| Total tests | 468 passed |
+| Warnings | 3,481 (deprecation warnings, primarily repeated `datetime.utcnow()` notices) |
 | E2E corpus | 30/30 full flows (8 CSV, 7 PDF, 8 text, 7 XLSX) |
-| Concurrent burst | 128/128 unique case IDs (latest measured run: 0.50 s) |
+| Concurrent burst | 128/128 unique case IDs (latest measured run: 1.24 s) |
 | Synthetic demo scorecard | 20/20 lines, 80/80 field checks, 20/20 match checks |
 | OpenAPI contract | Up to date |
-| Browser E2E | 7/7 passed on isolated synthetic services |
+| Browser E2E | 12/12 passed on isolated synthetic services |
 | Frontend production build | 5/5 pages prerendered |

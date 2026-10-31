@@ -148,6 +148,7 @@ class CaseManager:
         _job_id: Optional[str] = None,
         _worker_id: Optional[str] = None,
         _queue_wait_ms: Optional[float] = None,
+        intake_warnings: Optional[List[ExtractionWarning]] = None,
     ) -> RFQCase:
         """Validates, stores, parses, and matches an uploaded RFQ document.
 
@@ -222,6 +223,7 @@ class CaseManager:
                 processing_stage=ProcessingStage.QUEUED if _defer_processing else ProcessingStage.EXTRACTING,
                 source_type=src_type,
                 source_file=file_meta,
+                document_warnings=list(intake_warnings or []),
             )
             self._cases[case_id] = case
             self._audit_events[case_id] = []
@@ -413,7 +415,11 @@ class CaseManager:
                     source_coverage=parse_result.source_coverage,
                 )
             require_lease()
-            case.document_warnings = parse_result.warnings
+            intake_warnings = [
+                warning for warning in case.document_warnings
+                if warning.code == "ANTIVIRUS_SCAN_UNAVAILABLE"
+            ]
+            case.document_warnings = intake_warnings + parse_result.warnings
 
             # Match lines against catalog
             lines: List[RFQLineItem] = []
@@ -555,6 +561,7 @@ class CaseManager:
     def enqueue_case_from_upload(
         self, filename: str, content: bytes, title: Optional[str] = None,
         customer_label: Optional[str] = None, actor: str = "Inside Sales",
+        intake_warnings: Optional[List[ExtractionWarning]] = None,
     ) -> RFQCase:
         """Persist the source and case immediately, then enqueue durable processing."""
         if self.state_store is None:
@@ -562,6 +569,7 @@ class CaseManager:
         case = self.create_case_from_upload(
             filename, content, title=title, customer_label=customer_label,
             actor=actor, _defer_processing=True,
+            intake_warnings=intake_warnings,
         )
         self.state_store.enqueue_ingestion_job(case.case_id, case.source_file.sha256_digest)
         return case
@@ -569,12 +577,13 @@ class CaseManager:
     def enqueue_case_from_text(
         self, raw_text: str, title: Optional[str] = None,
         customer_label: Optional[str] = None, actor: str = "Inside Sales",
+        intake_warnings: Optional[List[ExtractionWarning]] = None,
     ) -> RFQCase:
         """Durably store pasted email text as a case-scoped source before queueing it."""
         content = self._preflight_text_input(raw_text)
         case = self.enqueue_case_from_upload(
             "pasted_inquiry.txt", content, title=title or "RFQ Intake - Pasted Email",
-            customer_label=customer_label, actor=actor,
+            customer_label=customer_label, actor=actor, intake_warnings=intake_warnings,
         )
         case.source_type = SourceType.EMAIL_TEXT
         case.raw_text = raw_text
@@ -1014,6 +1023,7 @@ class CaseManager:
         title: Optional[str] = None,
         customer_label: Optional[str] = None,
         actor: str = "Inside Sales",
+        intake_warnings: Optional[List[ExtractionWarning]] = None,
     ) -> RFQCase:
         """Parses and matches plain pasted email or inquiry text."""
         content = self._preflight_text_input(raw_text)
@@ -1023,6 +1033,7 @@ class CaseManager:
             title=title or "RFQ Intake - Pasted Email",
             customer_label=customer_label,
             actor=actor,
+            intake_warnings=intake_warnings,
         )
         case.source_type = SourceType.EMAIL_TEXT
         case.raw_text = raw_text

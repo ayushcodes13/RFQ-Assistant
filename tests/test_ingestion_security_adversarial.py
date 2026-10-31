@@ -62,12 +62,69 @@ def test_clamav_protected_mode_fail_closed_on_outage():
     assert result.engine == "clamav-fail-closed"
 
 
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on"])
+def test_require_antivirus_accepts_common_true_flags(monkeypatch, value):
+    monkeypatch.setenv("REQUIRE_ANTIVIRUS", value)
+    scanner = ClamAVScanner(host="127.0.0.1", port=65534, timeout=0.1)
+    result = scanner.scan_bytes(b"Synthetic RFQ content")
+    assert scanner.protected_mode
+    assert not result.is_clean
+    assert not result.scanned
+
+
 def test_clamav_development_fallback_when_unprotected():
-    """When protected_mode is disabled, daemon unavailability falls back cleanly for local dev."""
+    """An offline development fallback must not claim that content was scanned clean."""
     scanner = ClamAVScanner(host="127.0.0.1", port=65534, protected_mode=False, timeout=0.1)
     result = scanner.scan_bytes(b"Clean safe commercial RFQ document text", filename="rfq.txt")
-    assert result.is_clean
+    assert not result.is_clean
+    assert not result.scanned
     assert result.engine == "clamav-offline-fallback"
+
+
+def test_local_unscanned_intake_is_flagged_and_protected_intake_is_blocked(monkeypatch, tmp_path):
+    """Local fallback remains usable but marks the case; protected mode blocks it."""
+    import importlib
+    from types import SimpleNamespace
+
+    from rfq_assistant.cases.manager import CaseManager
+    from rfq_assistant.ingestion.storage import DocumentStorage
+    from rfq_assistant.matching.catalog import CatalogRepository
+
+    api = importlib.import_module("rfq_assistant.api.app")
+    manager = CaseManager(
+        CatalogRepository(), storage=DocumentStorage(tmp_path / "uploads")
+    )
+    monkeypatch.setattr(api, "case_manager", manager)
+    monkeypatch.setattr(api, "ASYNC_INGEST_ENABLED", False)
+    monkeypatch.setattr(
+        api, "clamav_scanner",
+        SimpleNamespace(
+            protected_mode=False,
+            scan_bytes=lambda *_args, **_kwargs: SimpleNamespace(
+                is_clean=False, scanned=False, quarantined=False,
+                threat_name=None, engine="clamav-offline-fallback",
+            ),
+        ),
+    )
+    client = TestClient(api.app)
+    response = client.post(
+        "/api/rfqs",
+        data={"pasted_text": "Please quote 2 EA LC1D09BD Schneider Electric"},
+    )
+    assert response.status_code == 200
+    assert any(
+        warning["code"] == "ANTIVIRUS_SCAN_UNAVAILABLE"
+        for warning in response.json()["document_warnings"]
+    )
+
+    monkeypatch.setattr(api.clamav_scanner, "protected_mode", True)
+    blocked = client.post(
+        "/api/rfqs",
+        data={"pasted_text": "Please quote 2 EA LC1D09BD Schneider Electric"},
+    )
+    assert blocked.status_code == 400
+    assert "scan unavailable" in blocked.json()["detail"].lower()
+    assert len(manager.list_cases()) == 1
 
 
 def test_parsing_failure_keeps_source_and_failed_case_for_manual_review(tmp_path, monkeypatch):
