@@ -22,7 +22,10 @@ class DocumentStorage:
         # Defense-in-depth: ensure the resolved path stays within the case directory
         # to prevent path traversal even if caller forgets to sanitize the filename.
         resolved = file_path.resolve()
-        if not str(resolved).startswith(str(case_dir.resolve())):
+        resolved_case_dir = case_dir.resolve()
+        try:
+            resolved.relative_to(resolved_case_dir)
+        except ValueError:
             raise ValueError(f"Path traversal blocked for filename: {filename}")
         file_path.write_bytes(content)
         return file_path

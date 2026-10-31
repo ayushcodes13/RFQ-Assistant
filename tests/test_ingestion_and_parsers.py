@@ -60,6 +60,16 @@ class TestUploadValidationAndStorage:
         storage.delete_case("case-123")
         assert not saved_path.exists()
 
+    def test_document_storage_rejects_sibling_prefix_traversal(self, tmp_path):
+        storage = DocumentStorage(base_dir=tmp_path)
+        sibling = storage.uploads_dir / "case-123-escape"
+        sibling.mkdir()
+
+        with pytest.raises(ValueError, match="Path traversal blocked"):
+            storage.save_file("case-123", "../case-123-escape/payload.txt", b"synthetic")
+
+        assert not (sibling / "payload.txt").exists()
+
 
 class TestSpreadsheetParser:
     """Verifies deterministic parsing of XLSX and CSV files with multi-sheet and edge case handling."""

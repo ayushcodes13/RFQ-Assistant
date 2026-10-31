@@ -147,11 +147,12 @@ part number, never a spec token).
 
 **Fix applied:**
 1. Added path resolution check in `DocumentStorage.save_file` that raises `ValueError`
-   if the resolved path escapes the case directory.
+   if the resolved path escapes the case directory. Containment uses
+   `Path.relative_to()` so sibling paths with the same string prefix are rejected.
 2. Added `export_id` format validation (`EXP-[A-F0-9]{8}`) in the `download_export`
    endpoint before constructing any filesystem path.
 
-**Verified by:** Full test suite (318 passed).
+**Verified by:** `test_document_storage_rejects_sibling_prefix_traversal` and full test suite (319 passed).
 
 ---
 
@@ -242,7 +243,7 @@ credentialed requests to fail (browser bug).
 development origins (`http://localhost:3000`, etc.). In production deployments,
 `RFQ_ASSISTANT_CORS_ORIGINS` should be set via environment variable (future enhancement).
 
-**Verified by:** Full test suite (318 passed). The latest PR CI production build passed and prerendered 5/5 pages.
+**Verified by:** Full test suite (319 passed). The latest PR CI production build passed and prerendered 5/5 pages.
 
 ---
 
@@ -329,7 +330,7 @@ The following issues have been fixed and verified in the current working tree:
 
 | Metric | Working Tree |
 |---|---|
-| Total tests | 318 passed |
+| Total tests | 319 passed |
 | Warnings | 6 (all deprecation, non-blocking) |
 | E2E corpus | 30/30 full flows (8 CSV, 7 PDF, 8 text, 7 XLSX) |
 | Concurrent burst | 128/128 unique case IDs (latest measured run: 0.50 s) |
