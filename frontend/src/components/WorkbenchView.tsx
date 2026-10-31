@@ -380,7 +380,9 @@ export function WorkbenchView({
           review: sum.review + unit.review_regions,
           filtered: sum.filtered + unit.filtered_regions,
           ocrFailures: sum.ocrFailures + unit.ocr_failures,
-        }), { regions: 0, structured: 0, review: 0, filtered: 0, ocrFailures: 0 });
+          hiddenRows: sum.hiddenRows + (unit.hidden_row_count ?? 0),
+          hiddenColumns: sum.hiddenColumns + (unit.hidden_column_count ?? 0),
+        }), { regions: 0, structured: 0, review: 0, filtered: 0, ocrFailures: 0, hiddenRows: 0, hiddenColumns: 0 });
         return (
           <details className="mb-4 rounded-lg border border-[#d7e1e3] bg-white px-3 py-2 text-sm text-[#3d5056]">
             <summary className="cursor-pointer font-medium">
@@ -388,6 +390,7 @@ export function WorkbenchView({
               <span className="ml-2 font-normal text-[#687b81]">
                 {totals.structured} parsed · {totals.review} sent to review · {totals.filtered} metadata filtered
                 {totals.ocrFailures > 0 && ` · ${totals.ocrFailures} OCR failures`}
+                {(totals.hiddenRows > 0 || totals.hiddenColumns > 0) && ` · ${totals.hiddenRows} hidden rows, ${totals.hiddenColumns} hidden columns`}
               </span>
             </summary>
             <ul className="mt-2 space-y-1 pl-5 text-xs text-[#52656b]">
@@ -398,6 +401,8 @@ export function WorkbenchView({
                   {unit.ocr_status && unit.ocr_status !== "not_needed" && ` · OCR ${unit.ocr_status}`}
                   {unit.is_empty && " · no readable content"}
                   {unit.sheet_visibility === "hidden" && " · hidden sheet"}
+                  {(unit.hidden_row_count ?? 0) > 0 && ` · ${unit.hidden_row_count} hidden rows`}
+                  {(unit.hidden_column_count ?? 0) > 0 && ` · ${unit.hidden_column_count} hidden columns`}
                   {unit.header_row_number != null && ` · header row ${unit.header_row_number}`}
                   {unit.formula_backed_fields > 0 && ` · ${unit.formula_backed_fields} formula-backed fields`}
                   {unit.page_rotation_degrees != null && unit.page_rotation_degrees !== 0 && ` · rotated ${unit.page_rotation_degrees}°`}

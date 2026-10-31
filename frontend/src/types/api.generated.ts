@@ -914,6 +914,16 @@ export interface components {
             /** Header Row Number */
             header_row_number?: number | null;
             /**
+             * Hidden Column Count
+             * @default 0
+             */
+            hidden_column_count: number;
+            /**
+             * Hidden Row Count
+             * @default 0
+             */
+            hidden_row_count: number;
+            /**
              * Is Empty
              * @default false
              */

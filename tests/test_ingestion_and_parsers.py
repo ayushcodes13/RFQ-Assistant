@@ -236,6 +236,30 @@ class TestSpreadsheetParser:
             for warning in parsed.lines[0].extraction_warnings
         )
 
+    def test_xlsx_hidden_rows_and_mapped_hidden_columns_are_manifested_and_flagged(self):
+        import io
+        import openpyxl
+        from rfq_assistant.ingestion.parsers.spreadsheet_parser import SpreadsheetParser
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.append(["MPN", "Manufacturer", "Quantity"])
+        sheet.append(["LC1D09BD", "Schneider Electric", 2])
+        sheet.row_dimensions[2].hidden = True
+        sheet.column_dimensions["A"].hidden = True
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        parsed = SpreadsheetParser().parse(output.getvalue(), "hidden_layout.xlsx")
+        warning_codes = {warning.code for warning in parsed.lines[0].extraction_warnings}
+        coverage = next(unit for unit in parsed.source_coverage if unit.unit_kind == "workbook_sheet")
+
+        assert "HIDDEN_ROW_REVIEW" in warning_codes
+        assert "HIDDEN_COLUMN_VALUE_REVIEW" in warning_codes
+        assert coverage.hidden_row_count == 1
+        assert coverage.hidden_column_count == 1
+
 
 class TestPDFParser:
     """Verifies native PDF parsing and safe detection of corrupt/scanned documents."""

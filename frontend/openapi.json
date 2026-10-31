@@ -1230,6 +1230,16 @@
             ],
             "title": "Header Row Number"
           },
+          "hidden_column_count": {
+            "default": 0,
+            "title": "Hidden Column Count",
+            "type": "integer"
+          },
+          "hidden_row_count": {
+            "default": 0,
+            "title": "Hidden Row Count",
+            "type": "integer"
+          },
           "is_empty": {
             "default": false,
             "title": "Is Empty",

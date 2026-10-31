@@ -23,6 +23,9 @@ from rfq_assistant.ingestion.excel_values import (
     numeric_identifier_precision_risk,
     render_excel_cell,
 )
+from rfq_assistant.ingestion.excel_visibility import (
+    read_hidden_dimensions,
+)
 
 
 def parse_quantity_and_unit(raw_val) -> Tuple[Optional[float], Optional[str]]:
@@ -303,6 +306,14 @@ class SpreadsheetParser(BaseDocumentParser):
             wb.close()
             cached_wb.close()
             raise DocumentParserError(f"Spreadsheet sheet count ({len(wb.sheetnames)}) exceeds maximum permitted limit (20 sheets).")
+        try:
+            visibility_by_sheet = read_hidden_dimensions(content)
+        except Exception as exc:
+            wb.close()
+            cached_wb.close()
+            raise DocumentParserError(
+                "Workbook row/column visibility could not be verified safely; the original file is retained for manual review."
+            ) from exc
 
         lines: List[ParsedLineDraft] = []
         warnings: List[ExtractionWarning] = []
@@ -315,9 +326,12 @@ class SpreadsheetParser(BaseDocumentParser):
                 unit_id = f"sheet:{sheet_name}"
                 locator = SourceLocator(file_name=filename, sheet_name=sheet_name)
                 hidden_sheet = ws.sheet_state != "visible"
+                visibility = visibility_by_sheet[sheet_name]
                 source_coverage.record_unit(
                     unit_id, locator, unit_kind="workbook_sheet",
                     is_empty=True, sheet_visibility="hidden" if hidden_sheet else "visible",
+                    hidden_row_count=len(visibility.hidden_rows),
+                    hidden_column_count=len(visibility.hidden_columns),
                 )
                 if ws.max_row and ws.max_row > 5000:
                     source_coverage.record_unit(
@@ -489,6 +503,22 @@ class SpreadsheetParser(BaseDocumentParser):
                         line_warnings.append(ExtractionWarning(
                             code="HIDDEN_SHEET_REVIEW",
                             message=f"This row came from hidden sheet '{sheet_name}'. Verify it is part of the RFQ.",
+                            severity="warning",
+                        ))
+                    if row_idx in visibility.hidden_rows:
+                        line_warnings.append(ExtractionWarning(
+                            code="HIDDEN_ROW_REVIEW",
+                            message=f"This RFQ row is hidden in sheet '{sheet_name}'. Verify it is intended to be quoted.",
+                            severity="warning",
+                        ))
+                    mapped_fields = {
+                        idx for idx in (mpn_idx, oem_idx, desc_idx, qty_idx, unit_idx, notes_idx)
+                        if idx is not None
+                    }
+                    if mapped_fields.intersection(visibility.hidden_columns):
+                        line_warnings.append(ExtractionWarning(
+                            code="HIDDEN_COLUMN_VALUE_REVIEW",
+                            message=f"One or more mapped RFQ fields in row {row_idx} are in hidden columns of sheet '{sheet_name}'. Verify the original workbook layout.",
                             severity="warning",
                         ))
                     if formula_fields:

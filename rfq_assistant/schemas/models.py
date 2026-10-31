@@ -36,6 +36,8 @@ class SourceCoverageUnit(BaseModel):
     ocr_status: Optional[str] = None
     sheet_visibility: Optional[str] = None
     header_row_number: Optional[int] = None
+    hidden_row_count: int = 0
+    hidden_column_count: int = 0
     formula_backed_fields: int = 0
     page_rotation_degrees: Optional[int] = None
     nonempty_regions: int = 0

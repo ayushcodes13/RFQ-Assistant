@@ -93,6 +93,8 @@ class SourceCoverageAccumulator:
         ocr_status: Optional[str] = None,
         sheet_visibility: Optional[str] = None,
         header_row_number: Optional[int] = None,
+        hidden_row_count: Optional[int] = None,
+        hidden_column_count: Optional[int] = None,
         formula_backed_fields: Optional[int] = None,
         page_rotation_degrees: Optional[int] = None,
     ) -> None:
@@ -108,6 +110,8 @@ class SourceCoverageAccumulator:
             "ocr_status": ocr_status,
             "sheet_visibility": sheet_visibility,
             "header_row_number": header_row_number,
+            "hidden_row_count": 0,
+            "hidden_column_count": 0,
             "formula_backed_fields": 0,
             "page_rotation_degrees": page_rotation_degrees,
             "nonempty_regions": 0,
@@ -125,6 +129,8 @@ class SourceCoverageAccumulator:
             "ocr_status": ocr_status,
             "sheet_visibility": sheet_visibility,
             "header_row_number": header_row_number,
+            "hidden_row_count": hidden_row_count,
+            "hidden_column_count": hidden_column_count,
             "page_rotation_degrees": page_rotation_degrees,
         }.items():
             if value is not None and (value is not False or key in {"is_empty", "truncated"}):
@@ -158,6 +164,8 @@ class SourceCoverageAccumulator:
             "ocr_status": None,
             "sheet_visibility": None,
             "header_row_number": None,
+            "hidden_row_count": 0,
+            "hidden_column_count": 0,
             "formula_backed_fields": 0,
             "page_rotation_degrees": None,
         })
@@ -190,6 +198,8 @@ class SourceCoverageAccumulator:
                 ocr_status=group["ocr_status"],
                 sheet_visibility=group["sheet_visibility"],
                 header_row_number=group["header_row_number"],
+                hidden_row_count=group["hidden_row_count"],
+                hidden_column_count=group["hidden_column_count"],
                 formula_backed_fields=group["formula_backed_fields"],
                 page_rotation_degrees=group["page_rotation_degrees"],
                 nonempty_regions=group["nonempty_regions"],

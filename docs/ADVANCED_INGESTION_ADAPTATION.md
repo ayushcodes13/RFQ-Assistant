@@ -136,7 +136,7 @@ flowchart LR
    non-empty regions and records empty page/sheet state, OCR decision/outcome,
    PDF rotation, detected header row, hidden-sheet status, formula-backed fields,
    and explicit limit/parser-failure state. Continue with per-row disposition
-   reconciliation, hidden row/column coverage, and rotated-image OCR fixtures. A failure or
+   reconciliation and rotated-image OCR fixtures. A failure or
    cap must never disappear from the report or permit the clean-row batch path.
 2. **Processing provenance:** the case now saves a parser version and parser/OCR profile hash,
    prompt hash, schema and validator versions, model label, call/repair/review counts, stage
