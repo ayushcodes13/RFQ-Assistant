@@ -3,6 +3,7 @@
 import csv
 import io
 
+import openpyxl
 import pytest
 
 from rfq_assistant.cases.manager import CaseManager
@@ -104,6 +105,55 @@ def test_small_cases_sample_every_otherwise_clean_row(tmp_path):
     plan = manager.get_review_plan(case.case_id)
     assert len(plan.sample_line_ids) == 3
     assert plan.remaining_line_ids == []
+
+
+def test_unrepresented_source_strata_remain_individual_review_exceptions(tmp_path):
+    catalog = CatalogRepository()
+    workbook = openpyxl.Workbook()
+    workbook.remove(workbook.active)
+    for sheet_number in range(6):
+        sheet = workbook.create_sheet(f"Panel {sheet_number + 1}")
+        sheet.append(["MPN", "Manufacturer", "Qty", "Description", "UOM"])
+        for offset in range(2):
+            index = sheet_number * 2 + offset
+            mpn = f"AX-{index:04d}"
+            catalog.add_item(CatalogItem(
+                internal_sku=f"SKU-{index:04d}",
+                manufacturer="Example Controls",
+                manufacturer_part_number=mpn,
+                description=f"Synthetic relay {index}",
+            ))
+            sheet.append([mpn, "Example Controls", 2, f"Synthetic relay {index}", "EA"])
+    output = io.BytesIO()
+    workbook.save(output)
+    workbook.close()
+
+    manager = CaseManager(catalog, storage=DocumentStorage(tmp_path / "files"))
+    case = manager.create_case_from_upload("six-panels.xlsx", output.getvalue())
+    lines_by_id = {line.line_id: line for line in manager.get_lines(case.case_id)}
+    plan = manager.get_review_plan(case.case_id)
+
+    sampled_sheets = {
+        lines_by_id[line_id].source_locator.sheet_name
+        for line_id in plan.sample_line_ids
+    }
+    exception_sheets = {
+        lines_by_id[line_id].source_locator.sheet_name
+        for line_id in plan.exception_line_ids
+    }
+    assert len(plan.sample_line_ids) == 5
+    assert len(sampled_sheets) == 5
+    assert len(exception_sheets) == 1
+    assert plan.remaining_line_ids == [
+        line_id
+        for line_id, line in lines_by_id.items()
+        if line.source_locator.sheet_name in sampled_sheets and line_id not in plan.sample_line_ids
+    ]
+    assert len(plan.remaining_line_ids) == 5
+    assert all(
+        line_id not in plan.remaining_line_ids
+        for line_id in plan.exception_line_ids
+    )
 
 
 def test_exceptions_stay_outside_the_sample_and_batch_approval(tmp_path):

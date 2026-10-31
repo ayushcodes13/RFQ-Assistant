@@ -941,7 +941,6 @@ class CaseManager:
         lines = self._lines_by_case.get(case_id, [])
         eligible = [line for line in lines if self._is_sample_eligible(line, self.catalog)]
         eligible_ids = {line.line_id for line in eligible}
-        exceptions = [line.line_id for line in lines if line.line_id not in eligible_ids]
 
         sample_size = min(5, len(eligible))
         groups: Dict[str, List[RFQLineItem]] = {}
@@ -977,11 +976,25 @@ class CaseManager:
                 allocation[group_keys[index]] = 1
 
         sample_ids: List[str] = []
+        covered_group_keys = {key for key, count in allocation.items() if count > 0}
+        covered_eligible_ids = {
+            line.line_id
+            for key in covered_group_keys
+            for line in groups[key]
+        }
         for key in group_keys:
             group_lines = groups[key]
             count = allocation[key]
             sample_ids.extend(line.line_id for line in group_lines[:count])
         sample_ids = sample_ids[:sample_size]
+        # A clean row from a source stratum that could not fit into the five
+        # sample slots has not been represented by the sample. Keep those rows
+        # as individual-review exceptions instead of silently batch-approving
+        # an unseen extraction path/location.
+        exceptions = [
+            line.line_id for line in lines
+            if line.line_id not in eligible_ids or line.line_id not in covered_eligible_ids
+        ]
         lines_by_id = {line.line_id: line for line in eligible}
         sample_rationale = {}
         for line_id in sample_ids:
@@ -999,7 +1012,9 @@ class CaseManager:
         sampled = set(sample_ids)
         remaining = [
             line.line_id for line in eligible
-            if line.line_id not in sampled and line.review_decision != ReviewDecision.APPROVED
+            if line.line_id in covered_eligible_ids
+            and line.line_id not in sampled
+            and line.review_decision != ReviewDecision.APPROVED
         ]
         sample_approved = bool(sample_ids) and all(
             next(line for line in eligible if line.line_id == line_id).review_decision == ReviewDecision.APPROVED
