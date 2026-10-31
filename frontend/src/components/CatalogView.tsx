@@ -51,47 +51,26 @@ export function CatalogView() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+    <div className="rfq-content">
       <MotionWrapper direction="up">
-        <div className="text-center mb-8">
-          <div
-            className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-4"
-            style={{ backgroundColor: "var(--color-amber-50)" }}
-          >
-            <FileSpreadsheet
-              size={28}
-              style={{ color: "var(--color-amber-500)" }}
-            />
-          </div>
-          <h2
-            className="text-xl sm:text-2xl font-bold mb-2"
-            style={{ color: "var(--color-brown-800)" }}
-          >
-            Catalog Import
-          </h2>
-          <p
-            className="text-sm leading-relaxed max-w-md mx-auto"
-            style={{ color: "var(--color-brown-400)" }}
-          >
-            Upload a CSV file containing your authorized product catalog.
-            Required columns: Internal SKU, Manufacturer, Manufacturer Part
-            Number.
-          </p>
+        <div className="mb-6">
+          <h1 className="rfq-page-title">Catalog</h1>
+          <p className="rfq-subtitle">Import and maintain the customer-authorized item master used for exact matching.</p>
         </div>
       </MotionWrapper>
 
-      <MotionWrapper direction="up" delay={0.1}>
+      <MotionWrapper direction="up" className="max-w-[760px]">
+        <h2 className="rfq-section-title mb-1">Import a catalog CSV</h2>
+        <p className="mb-4 text-[13px] text-[#52656b]">Required columns: Internal SKU, Manufacturer, Manufacturer Part Number. Descriptions do not establish interchangeability.</p>
         {/* Drop zone */}
         <div
-          className={`relative rounded-xl border-2 border-dashed p-8 sm:p-10 text-center cursor-pointer transition-all duration-300 mb-4 ${
-            dragOver ? "scale-[1.01]" : ""
-          }`}
+          className="relative mb-4 cursor-pointer rounded-md border border-dashed p-8 text-center transition-colors duration-100"
           style={{
             borderColor: dragOver
               ? "var(--color-amber-400)"
               : file
                 ? "var(--color-success-500)"
-                : "var(--color-sand-300)",
+                : "var(--color-sand-400)",
             backgroundColor: dragOver
               ? "var(--color-amber-50)"
               : file
@@ -109,6 +88,15 @@ export function CatalogView() {
               "catalog-file-input"
             ) as HTMLInputElement;
             input?.click();
+          }}
+          role="button"
+          tabIndex={0}
+          aria-label="Choose or drop a catalog CSV file"
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              document.getElementById("catalog-file-input")?.click();
+            }
           }}
         >
           <input
@@ -156,7 +144,8 @@ export function CatalogView() {
                 exit={{ opacity: 0, scale: 0.95 }}
               >
                 <Upload
-                  size={36}
+                  size={23}
+                  strokeWidth={1.7}
                   className="mx-auto mb-3"
                   style={{ color: "var(--color-sand-400)" }}
                 />
@@ -178,11 +167,11 @@ export function CatalogView() {
         </div>
 
         {/* Import button */}
-        <div className="flex justify-center mb-6">
+        <div className="mb-6 flex justify-start">
           <button
             onClick={handleImport}
             disabled={!file || importing}
-            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 hover:shadow-md active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed"
+            className="rfq-primary disabled:opacity-50"
             style={{
               backgroundColor: "var(--color-amber-400)",
               color: "var(--color-brown-900)",
@@ -190,9 +179,7 @@ export function CatalogView() {
           >
             {importing ? (
               <>
-                <span className="animate-spin-slow inline-block">
-                  ⏳
-                </span>
+                <LoadingSpinner size="sm" />
                 Importing…
               </>
             ) : (

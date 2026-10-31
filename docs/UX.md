@@ -1,26 +1,35 @@
 # UX and visual design blueprint
 
-**Direction:** Quiet industrial-grade SaaS workbench: fast, legible, keyboard-first and audit-friendly. Not a chat playground, animated agent dashboard or neon AI demo.
+**Direction (redesigned 2026-10-31):** A clear RFQ operations desk: fast, legible, keyboard-first and audit-friendly. Not a chat playground, animated agent dashboard or neon AI demo.
 
 ## Design personality
 
-- Bright neutral background, warm off-white panels, near-black primary text.
-- Restrained slate borders and one subdued blue accent for actionable focus.
+- Cool metal-tint frame around a white work sheet, near-black primary text, and a distinct copper accent used for the product mark, primary action and key data only.
+- IBM Plex Sans for interface text and IBM Plex Mono for IDs and tabular values; both bundled locally.
 - Status uses label + icon + color, never color alone.
 - Dense but readable tables with sticky headers, clear typography and column alignment.
-- Optimized for desktop sales desks (1440px viewport); usable at 1024px, responsive stacking below.
+- Optimized for desktop sales desks (1440px viewport); tablet navigation collapses and the phone uses a menu sheet and stacked list rows.
 - No charts, scores or decorative AI imagery on the critical quote-review screen.
+
+### Operations overview
+
+- The initial screen answers: **which RFQs need a person now?**
+- Summary values and status bars come directly from saved cases and unresolved-line counts. Do not show sales, revenue, price, availability, lead-time or accuracy figures unless their source is authorized and current.
+- Show a short actionable attention queue and a breakdown by actual workflow state. Link to the full RFQ inbox for search and filtering.
+- The persistent sidebar exposes only Overview, RFQ inbox and Catalog. Line review is a case-specific view, not a second global destination.
+- The logo is a custom RFQ document/check mark; do not use emoji or a generic AI symbol.
+- A single primary action appears per screen: New RFQ, Export draft, or Import catalog, depending on context.
 
 ## Information architecture
 
-**Navigation:** RFQs | Catalog | Exports | Settings
+**Navigation:** Overview | RFQ inbox | Catalog. Exports are generated from a reviewed RFQ; they are not a separate global destination in this slice. Settings are outside the local prototype.
 
-**Top bar:** Product name, workspace/demo notice, current user, keyboard shortcuts/help.
+**Top bar:** Current workspace and page context. Product identity and keyboard shortcuts live in the navigation; the local demo and storage notice stays visible in the sidebar.
 
 ### Screen 1 — RFQ inbox
 
-- Empty state: "Start with a sample RFQ. Upload PDF, Excel or CSV, or paste email text."
-- Each card/row: customer label (if provided), source type, upload time, line count, status, unresolved count and last reviewer.
+- Empty state: explain supported input and point to the single "New RFQ" action.
+- Each row: customer label (if provided), source type, upload time, line count, status and unresolved count.
 - Status: New, Processing, Needs review, Ready to export, Exported, Failed.
 - Primary CTA: "New RFQ"; never "Send quote" on this screen.
 
@@ -37,7 +46,7 @@
     |                    [Cancel] [Extract line items]       |
     +-------------------------------------------------------+
 
-Before upload, provide sample dataset/demo mode and clear notice about how third-party AI processors would handle data (if any).
+Before upload, provide a clear notice about local storage and how third-party processors would handle data if they are introduced.
 
 ### Screen 3 — Review workbench (core product)
 

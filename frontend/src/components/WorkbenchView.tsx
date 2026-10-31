@@ -3,9 +3,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  ArrowLeft,
   Download,
-  Filter,
   CheckCircle,
   AlertTriangle,
   XCircle,
@@ -35,28 +33,15 @@ import {
 interface WorkbenchViewProps {
   caseData: RFQCase;
   onOpenExport: () => void;
-  onBackToInbox: () => void;
 }
 
 type FilterType = "all" | "exact" | "ambiguous" | "missing";
 
-const filterConfig: {
-  id: FilterType;
-  label: string;
-  icon: React.ReactNode;
-}[] = [
-  { id: "all", label: "All", icon: <Filter size={14} /> },
-  {
-    id: "exact",
-    label: "Exact",
-    icon: <CheckCircle size={14} />,
-  },
-  {
-    id: "ambiguous",
-    label: "Ambiguous",
-    icon: <AlertTriangle size={14} />,
-  },
-  { id: "missing", label: "Missing", icon: <XCircle size={14} /> },
+const filterConfig: { id: FilterType; label: string }[] = [
+  { id: "all", label: "All lines" },
+  { id: "exact", label: "Exact match" },
+  { id: "ambiguous", label: "Needs review" },
+  { id: "missing", label: "No match" },
 ];
 
 function formatLocator(locator: SourceLocator): string {
@@ -96,7 +81,6 @@ function hasBlockingIssue(line: RFQLineItem): boolean {
 export function WorkbenchView({
   caseData,
   onOpenExport,
-  onBackToInbox,
 }: WorkbenchViewProps) {
   const [lines, setLines] = useState<RFQLineItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -247,29 +231,14 @@ export function WorkbenchView({
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
+    <div className="rfq-content !pt-3">
       {/* Toolbar */}
       <MotionWrapper direction="up">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
-          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-            <button
-              onClick={onBackToInbox}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-all duration-200 active:scale-[0.97]"
-              style={{
-                color: "var(--color-brown-500)",
-                borderColor: "var(--color-sand-200)",
-                backgroundColor: "var(--color-cream-100)",
-              }}
-            >
-              <ArrowLeft size={15} />
-              <span className="hidden sm:inline">Back</span>
-            </button>
-            <h2
-              className="text-base sm:text-lg font-bold truncate max-w-[200px] sm:max-w-[300px]"
-              style={{ color: "var(--color-brown-800)" }}
-            >
+          <div className="flex min-w-0 items-center gap-3 flex-wrap">
+            <h1 className="rfq-page-title min-w-0 max-w-[min(72vw,680px)] truncate">
               {caseData.title || caseData.case_id.slice(0, 12)}
-            </h2>
+            </h1>
             <StatusBadge status={caseData.status} />
             <span
               className="text-xs font-medium"
@@ -281,7 +250,7 @@ export function WorkbenchView({
           <button
             onClick={onOpenExport}
             disabled={lines.length === 0}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 hover:shadow-md active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed self-start sm:self-auto"
+            className="rfq-primary self-start disabled:opacity-50 sm:self-auto"
             style={{
               backgroundColor: "var(--color-amber-400)",
               color: "var(--color-brown-900)",
@@ -300,24 +269,11 @@ export function WorkbenchView({
             {filterConfig.map((f) => (
               <button
                 key={f.id}
+                type="button"
+                aria-pressed={filter === f.id}
                 onClick={() => setFilter(f.id)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all duration-200"
-                style={{
-                  backgroundColor:
-                    filter === f.id
-                      ? "var(--color-amber-50)"
-                      : "var(--color-cream-100)",
-                  color:
-                    filter === f.id
-                      ? "var(--color-amber-700)"
-                      : "var(--color-brown-400)",
-                  borderColor:
-                    filter === f.id
-                      ? "var(--color-amber-200)"
-                      : "var(--color-sand-200)",
-                }}
+                className={`border-b-2 px-2.5 py-2 text-[13px] transition-colors ${filter === f.id ? "border-[#a83e1c] font-medium text-[#1d2b30]" : "border-transparent text-[#52656b] hover:text-[#142126]"}`}
               >
-                {f.icon}
                 {f.label}
               </button>
             ))}
