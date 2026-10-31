@@ -28,12 +28,12 @@ class ScriptedClient:
         return self.responses.pop(0)
 
 
-def response(*, quantity=10, manufacturer="Fabrikam Controls", quote="Fabrikam Controls ABC-123 10 EA relay", segment_id="row-1"):
+def response(*, quantity=10, manufacturer="Fabrikam Controls", description="relay", quote="Fabrikam Controls ABC-123 10 EA relay", segment_id="row-1"):
     return json.dumps({"lines": [{
         "line_number": 1,
         "requested_manufacturer": manufacturer,
         "requested_mpn": "ABC-123",
-        "description": "relay",
+        "description": description,
         "quantity": quantity,
         "unit": "EA",
         "segment_id": segment_id,
@@ -424,6 +424,55 @@ def test_unclassified_text_candidate_becomes_visible_manual_review_row(tmp_path)
     assert unresolved.quantity is None
     assert any(w.code == "SOURCE_REGION_UNCLASSIFIED" for w in unresolved.extraction_warnings)
     assert unresolved.line_id in manager.get_review_plan(case.case_id).exception_line_ids
+
+
+def test_unfamiliar_text_is_sent_to_grounded_fallback_and_can_be_recovered(tmp_path):
+    text = "Please quote our bespoke panel component, 4 EA, described as ABC-123 by Fabrikam Controls"
+    quote = "our bespoke panel component, 4 EA, described as ABC-123 by Fabrikam Controls"
+    proposal = response(
+        quantity=4,
+        manufacturer="Fabrikam Controls",
+        description="bespoke panel component",
+        quote=quote,
+        segment_id="draft-line-1",
+    )
+    client = ScriptedClient([proposal, review_response()])
+    manager = CaseManager(
+        CatalogRepository(),
+        storage=DocumentStorage(base_dir=tmp_path),
+        llm_extractor=GroundedLLMExtractor(client),
+    )
+
+    case = manager.create_case_from_text(text)
+    lines = manager.get_lines(case.case_id)
+
+    assert case.status.value != "FAILED"
+    assert len(lines) == 1
+    assert lines[0].requested_mpn == "ABC-123"
+    assert lines[0].requested_manufacturer == "Fabrikam Controls"
+    assert lines[0].quantity == 4
+    assert len(client.calls) == 2
+
+
+def test_candidate_only_xlsx_is_retained_for_manual_review(tmp_path):
+    import io
+    import openpyxl
+
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Unmapped"
+    sheet.append(["Please quote the custom assembly for our remote panel"])
+    output = io.BytesIO()
+    workbook.save(output)
+
+    manager = CaseManager(CatalogRepository(), storage=DocumentStorage(base_dir=tmp_path))
+    case = manager.create_case_from_upload("unmapped.xlsx", output.getvalue())
+    lines = manager.get_lines(case.case_id)
+
+    assert case.status.value != "FAILED"
+    assert len(lines) == 1
+    assert "custom assembly" in lines[0].raw_text
+    assert any(w.code == "SOURCE_REGION_UNCLASSIFIED" for w in lines[0].extraction_warnings)
 
 
 def test_invalid_model_fallback_preserves_structured_rows_and_candidate_exception(tmp_path):

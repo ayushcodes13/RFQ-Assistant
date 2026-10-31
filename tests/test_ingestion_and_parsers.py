@@ -195,6 +195,40 @@ class TestPDFParser:
         assert candidate.locator.page_number == 1
         assert "disconnect switch" in candidate.text
 
+    def test_unfamiliar_nonempty_pdf_text_is_retained_even_without_product_keywords(self):
+        from fpdf import FPDF
+
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Helvetica", size=12)
+        pdf.multi_cell(0, 10, "Need a custom assembly for the remote panel")
+        result = get_parser(SourceType.PDF_NATIVE, allow_ocr=False).parse(
+            bytes(pdf.output()), "unfamiliar_rfq.pdf"
+        )
+
+        assert len(result.candidate_segments) == 1
+        assert result.candidate_segments[0].locator.page_number == 1
+        assert "custom assembly" in result.candidate_segments[0].text
+
+    def test_unfamiliar_text_region_is_retained_without_known_item_keywords(self):
+        from rfq_assistant.ingestion.parsers.text_parser import TextParser
+
+        result = TextParser().parse(
+            b"Please quote a custom assembly for the remote panel, quantity 7",
+            "unfamiliar_rfq.txt",
+        )
+
+        assert result.lines == []
+        assert len(result.candidate_segments) == 1
+        assert result.candidate_segments[0].locator.row_number == 1
+
+    def test_candidate_region_limit_fails_explicitly(self):
+        from rfq_assistant.ingestion.parsers.text_parser import TextParser
+
+        text = "\n".join(f"Unrecognized request detail {idx}" for idx in range(501))
+        with pytest.raises(DocumentParserError, match="more than 500 unresolved"):
+            TextParser().parse(text.encode(), "many_regions.txt")
+
     def test_sparse_image_page_uses_bounded_local_ocr(self, monkeypatch):
         """Only image-heavy pages are OCRed and every OCR-derived row stays reviewable."""
         import io

@@ -528,6 +528,15 @@ class CaseManager:
                 severity="warning",
             ))
         parse_result.lines.extend(output)
+        if parse_result.lines:
+            # Parsers may report that deterministic extraction found no rows
+            # before the grounded fallback has processed candidate regions.
+            # Once those regions are either recovered or retained for review,
+            # that earlier empty-result error is stale.
+            parse_result.warnings = [
+                warning for warning in parse_result.warnings
+                if warning.code != "NO_LINES_EXTRACTED"
+            ]
         # A failed LLM fallback is attached to unresolved/coverage rows, but it
         # must not erase structured rows that already passed deterministic
         # extraction. Whole-document failure remains visible when no rows exist.

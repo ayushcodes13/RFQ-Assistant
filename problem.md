@@ -151,7 +151,7 @@ part number, never a spec token).
 2. Added `export_id` format validation (`EXP-[A-F0-9]{8}`) in the `download_export`
    endpoint before constructing any filesystem path.
 
-**Verified by:** Full test suite (313 passed).
+**Verified by:** Full test suite (318 passed).
 
 ---
 
@@ -242,7 +242,7 @@ credentialed requests to fail (browser bug).
 development origins (`http://localhost:3000`, etc.). In production deployments,
 `RFQ_ASSISTANT_CORS_ORIGINS` should be set via environment variable (future enhancement).
 
-**Verified by:** Full test suite (313 passed). A frontend build previously prerendered 5/5 pages; it was not rerun in the latest verification pass.
+**Verified by:** Full test suite (318 passed). The latest PR CI production build passed and prerendered 5/5 pages.
 
 ---
 
@@ -329,10 +329,10 @@ The following issues have been fixed and verified in the current working tree:
 
 | Metric | Working Tree |
 |---|---|
-| Total tests | 313 passed |
+| Total tests | 318 passed |
 | Warnings | 6 (all deprecation, non-blocking) |
 | E2E corpus | 30/30 full flows (8 CSV, 7 PDF, 8 text, 7 XLSX) |
-| Concurrent burst | 128/128 unique case IDs |
+| Concurrent burst | 128/128 unique case IDs (latest measured run: 0.50 s) |
 | Synthetic demo scorecard | 20/20 lines, 80/80 field checks, 20/20 match checks |
 | OpenAPI contract | Up to date |
 | Browser E2E | 7/7 passed on isolated synthetic services |

@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 
 from rfq_assistant.schemas.models import ExtractionWarning, SourceLocator
 
+MAX_CANDIDATE_REGIONS = 500
+
 
 class EvidenceSegment(BaseModel):
     """Bounded source text retained for a later model fallback."""
@@ -47,6 +49,15 @@ class ParsedDocumentResult(BaseModel):
 class DocumentParserError(Exception):
     """Base exception for parsing failures."""
     pass
+
+
+def enforce_candidate_region_limit(segments: List[EvidenceSegment]) -> None:
+    """Fail explicitly rather than create an unbounded manual-review queue."""
+    if len(segments) > MAX_CANDIDATE_REGIONS:
+        raise DocumentParserError(
+            f"Document contains more than {MAX_CANDIDATE_REGIONS} unresolved non-empty regions. "
+            "Split the source into smaller files or use manual review; the original upload is retained."
+        )
 
 
 class BaseDocumentParser(ABC):

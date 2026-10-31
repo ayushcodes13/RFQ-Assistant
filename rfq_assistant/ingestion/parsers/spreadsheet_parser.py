@@ -11,6 +11,7 @@ from rfq_assistant.ingestion.parsers.base import (
     BaseDocumentParser,
     DocumentParserError,
     EvidenceSegment,
+    enforce_candidate_region_limit,
     ParsedDocumentResult,
     ParsedLineDraft,
 )
@@ -137,6 +138,7 @@ class SpreadsheetParser(BaseDocumentParser):
             first_row_number = header_row_idx + 2
 
         lines: List[ParsedLineDraft] = []
+        candidate_segments: List[EvidenceSegment] = []
         line_counter = 1
 
         for row_idx, row in enumerate(data_rows, start=first_row_number):
@@ -183,6 +185,16 @@ class SpreadsheetParser(BaseDocumentParser):
 
             if not mpn and not desc:
                 if not oem and qty is None and not notes:
+                    candidate_segments.append(EvidenceSegment(
+                        segment_id=f"candidate-csv-row-{row_idx}",
+                        locator=locator,
+                        text=row_text,
+                        warnings=[ExtractionWarning(
+                            code="SOURCE_ROW_UNCLASSIFIED",
+                            message=f"Non-empty CSV row {row_idx} did not map to recognized RFQ fields; classify it or review it.",
+                            severity="warning",
+                        )],
+                    ))
                     continue
                 line_warnings.append(
                     ExtractionWarning(
@@ -215,7 +227,13 @@ class SpreadsheetParser(BaseDocumentParser):
                 severity="error",
             ))
 
-        return ParsedDocumentResult(lines=lines, warnings=warnings, total_lines_detected=len(lines))
+        enforce_candidate_region_limit(candidate_segments)
+        return ParsedDocumentResult(
+            lines=lines,
+            warnings=warnings,
+            total_lines_detected=len(lines),
+            candidate_segments=candidate_segments,
+        )
 
     def _parse_xlsx(self, content: bytes, filename: str) -> ParsedDocumentResult:
         try:
@@ -269,7 +287,7 @@ class SpreadsheetParser(BaseDocumentParser):
                                 for cell in row
                                 if cell.value is not None and str(cell.value).strip()
                             )
-                            if row_text and self._looks_like_product_row(row_text):
+                            if row_text and not self._is_known_non_item_metadata(row_text):
                                 candidate_segments.append(EvidenceSegment(
                                     segment_id=f"candidate-{sheet_name}-row-{source_row_number}",
                                     locator=SourceLocator(
@@ -355,6 +373,23 @@ class SpreadsheetParser(BaseDocumentParser):
                         ))
                     if not mpn and not desc:
                         if not oem and qty is None and not notes:
+                            if self._is_known_non_item_metadata(row_text):
+                                continue
+                            candidate_segments.append(EvidenceSegment(
+                                segment_id=f"candidate-{sheet_name}-row-{row_idx}",
+                                locator=SourceLocator(
+                                    file_name=filename,
+                                    sheet_name=sheet_name,
+                                    row_number=row_idx,
+                                    text_snippet=row_text[:120],
+                                ),
+                                text=row_text,
+                                warnings=[ExtractionWarning(
+                                    code="SOURCE_ROW_UNCLASSIFIED",
+                                    message=f"Non-empty row {row_idx} in sheet '{sheet_name}' did not map to recognized RFQ fields; classify it or review it.",
+                                    severity="warning",
+                                )],
+                            ))
                             continue
                         line_warnings.append(ExtractionWarning(
                             code="MISSING_PART_REFERENCE",
@@ -362,10 +397,10 @@ class SpreadsheetParser(BaseDocumentParser):
                             severity="warning",
                         ))
 
-                    # Headerless inference should not promote titles and notes to
-                    # product rows. A likely part reference or quantity must exist.
+                    # Headerless rows that could not be mapped remain visible
+                    # as candidates; heuristics must not silently discard them.
                     if guessed_layout and not mpn and qty is None:
-                        if row_text and self._looks_like_product_row(row_text):
+                        if row_text:
                             candidate_segments.append(EvidenceSegment(
                                 segment_id=f"candidate-{sheet_name}-row-{row_idx}",
                                 locator=SourceLocator(
@@ -384,7 +419,7 @@ class SpreadsheetParser(BaseDocumentParser):
                         continue
                     if (
                         not mpn and not desc and not oem and qty is None and not notes
-                        and row_text and self._looks_like_product_row(row_text)
+                        and row_text
                     ):
                         candidate_segments.append(EvidenceSegment(
                             segment_id=f"candidate-{sheet_name}-row-{row_idx}",
@@ -419,12 +454,24 @@ class SpreadsheetParser(BaseDocumentParser):
                 message="No valid part lines could be extracted from workbook sheets.",
                 severity="error",
             ))
+        enforce_candidate_region_limit(candidate_segments)
         return ParsedDocumentResult(
             lines=lines,
             warnings=warnings,
             total_lines_detected=len(lines),
             candidate_segments=candidate_segments,
         )
+
+    @staticmethod
+    def _is_known_non_item_metadata(text: str) -> bool:
+        """Recognize narrow workbook title/footer rows, not product keywords."""
+        return bool(re.match(
+            r"^(?:confidential\b|internal pricing\b|pricing data\b|prepared by\b|"
+            r"synthetic\b|total\b|subtotal\b|grand total\b|page\s+\d+\b|"
+            r"terms and conditions\b)",
+            text.strip(),
+            re.IGNORECASE,
+        ))
 
     @staticmethod
     def _infer_xlsx_columns(rows: List[Tuple]) -> Dict[str, int]:
@@ -460,22 +507,6 @@ class SpreadsheetParser(BaseDocumentParser):
         if available_desc:
             result["description"] = max(available_desc, key=available_desc.get)
         return result
-
-    @staticmethod
-    def _looks_like_product_row(text: str) -> bool:
-        """Avoid turning footers/metadata into fallback rows while retaining BOM-like text."""
-        return bool(
-            re.search(r"\b\d+(?:\.\d+)?\s*(?:EA|PCS|UNITS?|SET|FT|M)\b", text, re.IGNORECASE)
-            or re.search(
-                r"\b(?:[A-Z]{2,}[A-Z0-9]*[-_/][A-Z0-9][A-Z0-9._/-]*|[A-Z0-9]{4,})\b",
-                text,
-            )
-            or re.search(
-                r"\b(?:sensor|relay|switch|module|contactor|breaker|motor|cable|terminal|disconnect|assembly|assemblies|connector|valve|bearing|plc|pushbutton|fuse|lamp|light|transformer|power supply|auxiliary\s+contacts?)\b",
-                text,
-                re.IGNORECASE,
-            )
-        )
 
     @staticmethod
     def _get_col_value(row: Tuple, col_idx: Optional[int]) -> Optional[str]:

@@ -5,6 +5,7 @@ from typing import List, Optional, Tuple
 
 from rfq_assistant.ingestion.parsers.base import (
     BaseDocumentParser,
+    enforce_candidate_region_limit,
     EvidenceSegment,
     ParsedDocumentResult,
     ParsedLineDraft,
@@ -37,6 +38,7 @@ class TextParser(BaseDocumentParser):
         warnings: List[ExtractionWarning] = []
         candidate_segments: List[EvidenceSegment] = []
         line_counter = 1
+        in_signature = False
 
         for row_idx, rline in enumerate(raw_lines, start=1):
             clean = rline.strip()
@@ -62,6 +64,11 @@ class TextParser(BaseDocumentParser):
                 clean,
                 re.IGNORECASE,
             ):
+                if re.match(r"^(?:thanks|best regards|sincerely)\b", clean, re.IGNORECASE):
+                    in_signature = True
+                continue
+
+            if in_signature or self._is_known_non_item_text(clean):
                 continue
 
             # Check if this line contains component, quantity, or item clues
@@ -74,13 +81,14 @@ class TextParser(BaseDocumentParser):
             )
 
             if not has_item_indicator:
-                # Discard conversational email headers/salutations/closings without items
-                if self._looks_like_candidate(clean):
-                    candidate_segments.append(EvidenceSegment(
-                        segment_id=f"candidate-text-{row_idx}",
-                        locator=SourceLocator(file_name=filename, row_number=row_idx, text_snippet=clean[:120]),
-                        text=clean,
-                    ))
+                # Narrow email metadata/salutations were filtered above. Keep
+                # every other non-empty region so unfamiliar wording reaches
+                # grounded fallback or the explicit manual-review path.
+                candidate_segments.append(EvidenceSegment(
+                    segment_id=f"candidate-text-{row_idx}",
+                    locator=SourceLocator(file_name=filename, row_number=row_idx, text_snippet=clean[:120]),
+                    text=clean,
+                ))
                 continue
 
 
@@ -119,7 +127,7 @@ class TextParser(BaseDocumentParser):
             if parsed:
                 lines.append(parsed)
                 line_counter += 1
-            elif self._looks_like_candidate(clean):
+            else:
                 candidate_segments.append(EvidenceSegment(
                     segment_id=f"candidate-text-{row_idx}",
                     locator=SourceLocator(file_name=filename, row_number=row_idx, text_snippet=clean[:120]),
@@ -135,21 +143,14 @@ class TextParser(BaseDocumentParser):
                 )
             )
 
+        enforce_candidate_region_limit(candidate_segments)
+
         return ParsedDocumentResult(
             lines=lines,
             warnings=warnings,
             total_lines_detected=len(lines),
             candidate_segments=candidate_segments,
         )
-
-    @staticmethod
-    def _looks_like_candidate(text: str) -> bool:
-        """Keep plausible product requests the fixed OEM/MPN rules cannot parse."""
-        return bool(re.search(
-            r"\b(?:sensor|relay|switch|module|contactor|breaker|motor|cable|terminal|disconnect|assembly|assemblies|connector|valve|bearing|plc|pushbutton|fuse|lamp|light|transformer|power supply)\b",
-            text,
-            re.IGNORECASE,
-        ))
 
     def _parse_item_line(
         self, raw_line: str, filename: str, row_idx: int, line_counter: int
@@ -200,6 +201,19 @@ class TextParser(BaseDocumentParser):
             unit=unit or "EA",
             extraction_warnings=line_warnings,
         )
+
+    @staticmethod
+    def _is_known_non_item_text(text: str) -> bool:
+        """Discard narrow email context patterns while retaining unknown prose."""
+        return bool(re.match(
+            r"^(?:synthetic\b|could you please quote .*following items|please quote the following items:?|"
+            r"also,? our .* added:?|i can confirm the above\b|please include pricing\b|"
+            r"the following(?::| items:)?|find below the list\b|some items may have alternative manufacturers\b|"
+            r"for the exact mpns listed\b|please confirm (?:current )?pricing\b|confirm current pricing\b|please let us know\b|"
+            r"please provide pricing and lead time\b|[-_ ]{3,})",
+            text,
+            re.IGNORECASE,
+        ))
 
     @staticmethod
     def _extract_quantity_unit(text: str) -> Tuple[Optional[float], Optional[str]]:

@@ -12,6 +12,7 @@ from rfq_assistant.ingestion.parsers.base import (
     BaseDocumentParser,
     DocumentParserError,
     EvidenceSegment,
+    enforce_candidate_region_limit,
     ParsedDocumentResult,
     ParsedLineDraft,
 )
@@ -189,7 +190,9 @@ class PDFParser(BaseDocumentParser):
 
                 # Skip header/title lines
                 if re.search(
-                    r"request for quotation|issue date|ref:|line\s+oem|^\s*(?:line|item)\s*(?:\||\s).*(?:oem|brand).*(?:part number|mpn).*(?:qty|quantity)",
+                    r"request for quotation|issue date|ref:|customer:|^\s*(?:rfq|synthetic rfq)[-\s#]|"
+                    r"^\s*(?:line|item)\s*(?:\||\s).*(?:oem|brand|description).*(?:part number|mpn|qty|quantity)|"
+                    r"^\s*(?:---\s*page\s+\d+\s*---|total\b|subtotal\b|prepared by:)",
                     rline_clean,
                     re.IGNORECASE,
                 ):
@@ -206,7 +209,7 @@ class PDFParser(BaseDocumentParser):
                         ))
                     lines.append(parsed_draft)
                     line_counter += 1
-                elif self._looks_like_candidate_line(rline_clean):
+                else:
                     candidate_warnings = []
                     if page_num in ocr_text_by_page:
                         candidate_warnings.append(ExtractionWarning(
@@ -260,21 +263,13 @@ class PDFParser(BaseDocumentParser):
             )
             for page_number, page_text in page_texts if page_text.strip()
         ]
+        enforce_candidate_region_limit(candidate_segments)
         return ParsedDocumentResult(
             lines=lines,
             warnings=warnings,
             total_lines_detected=len(lines),
             evidence_segments=evidence_segments,
             candidate_segments=candidate_segments,
-        )
-
-    @staticmethod
-    def _looks_like_candidate_line(text: str) -> bool:
-        """Identify row-like text missed by the known-OEM/MPN parser."""
-        return bool(
-            re.match(r"^\s*(?:\d+[.)]|[-*•])\s+", text)
-            or re.search(r"\b\d+(?:\.\d+)?\s*(?:EA|PCS|UNITS?|SET|FT|M)\b", text, re.IGNORECASE)
-            or re.search(r"\b(?:part number|mpn|sku|sensor|relay|switch|module|contactor|breaker|motor|cable|terminal|disconnect|assembly|assemblies|connector|valve|bearing|plc|pushbutton|fuse|lamp|light|transformer|power supply)\b", text, re.IGNORECASE)
         )
 
     def _parse_pdf_line(
