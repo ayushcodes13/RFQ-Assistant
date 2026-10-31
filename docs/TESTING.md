@@ -55,6 +55,11 @@ Reported results require fixture count, sample distribution, annotation method, 
 
 **Integration:** upload -> parse -> catalog lookup -> human review -> export; ingest failures/retries, permission checks, idempotency and version changes.
 
+The local persistence integration check reconstructs the catalog and case
+manager over the same SQLite file and verifies that case fields, corrected line
+values, version numbers, audit events, catalog rows, and source files remain
+available after the original manager objects are discarded.
+
 **UI:** keyboard-only editing, source navigation, warning notices, export confirmation, empty/loading/error states and prevention of accidental approval.
 
 **Security:** dangerous uploads, oversized sheets, path traversal, prompt injection, tenant isolation, retention/deletion and leaked logs.

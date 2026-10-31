@@ -12,6 +12,7 @@ from rfq_assistant.ingestion import (
 )
 from rfq_assistant.matching import CatalogRepository, ExactMatchEngine
 from rfq_assistant.quotation.line_rules import blocking_line_issues
+from rfq_assistant.persistence import SQLiteStateStore
 from rfq_assistant.schemas.enums import (
     AuditAction,
     CaseStatus,
@@ -37,15 +38,31 @@ from rfq_assistant.schemas.models import (
 class CaseManager:
     """Orchestrates case ingestion, catalog matching, line updates, and audit logging."""
 
-    def __init__(self, catalog: CatalogRepository, storage: Optional[DocumentStorage] = None):
+    def __init__(
+        self,
+        catalog: CatalogRepository,
+        storage: Optional[DocumentStorage] = None,
+        state_store: Optional[SQLiteStateStore] = None,
+    ):
         self.catalog = catalog
         self.storage = storage or DocumentStorage()
+        self.state_store = state_store
         self.matcher = ExactMatchEngine(self.catalog)
 
-        # In-memory stores
+        # Runtime caches backed by SQLite when persistence is configured.
         self._cases: Dict[str, RFQCase] = {}
         self._lines_by_case: Dict[str, List[RFQLineItem]] = {}
         self._audit_events: Dict[str, List[AuditEvent]] = {}
+        if self.state_store:
+            for payload in self.state_store.load_cases():
+                case = RFQCase.model_validate(payload)
+                self._cases[case.case_id] = case
+                self._lines_by_case[case.case_id] = [
+                    RFQLineItem.model_validate(item) for item in self.state_store.load_lines(case.case_id)
+                ]
+                self._audit_events[case.case_id] = [
+                    AuditEvent.model_validate(item) for item in self.state_store.load_audit_events(case.case_id)
+                ]
 
     def get_case(self, case_id: str) -> Optional[RFQCase]:
         return self._cases.get(case_id)
@@ -187,6 +204,7 @@ class CaseManager:
         )
         case.source_type = SourceType.EMAIL_TEXT
         case.raw_text = raw_text
+        self._persist_case(case.case_id)
         return case
 
     def update_line(
@@ -384,6 +402,8 @@ class CaseManager:
             self._lines_by_case.pop(case_id, None)
             self._audit_events.pop(case_id, None)
             self.storage.delete_case(case_id)
+            if self.state_store:
+                self.state_store.delete_case(case_id)
             return True
         return False
 
@@ -404,6 +424,15 @@ class CaseManager:
             case.status = CaseStatus.READY_TO_EXPORT
         else:
             case.status = CaseStatus.NEEDS_REVIEW
+        self._persist_case(case_id)
+
+    def _persist_case(self, case_id: str) -> None:
+        if self.state_store and case_id in self._cases:
+            self.state_store.save_case_snapshot(
+                self._cases[case_id],
+                self._lines_by_case.get(case_id, []),
+                self._audit_events.get(case_id, []),
+            )
 
     def _record_audit(
         self,

@@ -95,6 +95,16 @@ npm run dev     # Starts web app at http://localhost:3000
 ```
 Open `http://localhost:3000` to access the Review Workbench, upload RFQs, browse the catalog, inspect line-level provenance, batch approve, and export draft quotation worksheets.
 
+### Local persistence
+
+The API stores RFQ cases, extracted lines, audit events, and the imported catalog
+in `storage/rfq_assistant.sqlite3`; uploaded source files and generated exports
+remain under `storage/`. These local files are ignored by Git. Set
+`RFQ_ASSISTANT_DB_PATH` to place the SQLite database elsewhere. This supports
+restart recovery for a single local/demo workspace; it does not provide
+production backup, encryption, tenant isolation, or a customer data-retention
+policy.
+
 
 ## Engineering principles
 

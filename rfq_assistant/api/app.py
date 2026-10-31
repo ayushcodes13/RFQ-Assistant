@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import List, Optional
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
@@ -17,6 +18,7 @@ from rfq_assistant.ingestion.parsers.base import DocumentParserError
 from rfq_assistant.ingestion.validator import UploadValidationError
 from rfq_assistant.matching.catalog import CatalogImportError, CatalogRepository
 from rfq_assistant.matching.fuzzy import RapidFuzzCandidateEngine
+from rfq_assistant.persistence import SQLiteStateStore
 from rfq_assistant.quotation.validate import ProposedQuote, QuoteLine, SourceRef, validate_proposed_quote
 from rfq_assistant.schemas.enums import AuditAction
 from rfq_assistant.schemas.models import (
@@ -34,15 +36,17 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_CATALOG_PATH = ROOT / "fixtures" / "catalogs" / "industrial_components_sample_catalog.csv"
 
 # Global repositories and services
-catalog_repo = CatalogRepository()
-case_manager = CaseManager(catalog=catalog_repo)
+_database_path = Path(os.environ.get("RFQ_ASSISTANT_DB_PATH", "storage/rfq_assistant.sqlite3"))
+state_store = SQLiteStateStore(_database_path)
+catalog_repo = CatalogRepository(state_store=state_store)
+case_manager = CaseManager(catalog=catalog_repo, state_store=state_store)
 export_generator = ExportGenerator(catalog=catalog_repo)
 clamav_scanner = ClamAVScanner()
 rapidfuzz_engine = RapidFuzzCandidateEngine()
 commercial_service = QuotationCommercialService()
 
 # Pre-load default synthetic catalog if available
-if DEFAULT_CATALOG_PATH.exists():
+if DEFAULT_CATALOG_PATH.exists() and catalog_repo.count() == 0:
     try:
         catalog_repo.import_csv(DEFAULT_CATALOG_PATH.read_bytes(), version="v1-synth")
         rapidfuzz_engine.index_catalog(catalog_repo.list_all())
