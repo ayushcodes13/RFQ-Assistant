@@ -38,6 +38,10 @@ flowchart TD
     BATCH --> T[Blocked or draft-labeled worksheet + unsent email]
 ```
 
+Synthetic browser review of the coverage summary and five-row worklist:
+
+![Synthetic RFQ review workbench](advanced-ingestion-review.jpeg)
+
 The deterministic path is deliberate. A workbook cell under a recognized
 `Quantity` heading is already structured evidence; re-asking a model to read it
 adds latency and cost without adding useful information. The model is reserved
