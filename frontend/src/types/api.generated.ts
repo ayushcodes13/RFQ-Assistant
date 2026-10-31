@@ -487,11 +487,6 @@ export interface components {
         };
         /** Body_create_rfq_api_rfqs_post */
         Body_create_rfq_api_rfqs_post: {
-            /**
-             * Actor
-             * @default Inside Sales
-             */
-            actor: string;
             /** Customer Label */
             customer_label?: string | null;
             /** File */

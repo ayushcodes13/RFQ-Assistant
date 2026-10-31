@@ -191,7 +191,6 @@ async def create_rfq(
     pasted_text: Optional[str] = Form(None),
     title: Optional[str] = Form(None),
     customer_label: Optional[str] = Form(None),
-    actor: str = Form("Inside Sales"),
     current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     """Creates draft case from an uploaded file or pasted email text with malware defense."""

@@ -142,11 +142,6 @@
       },
       "Body_create_rfq_api_rfqs_post": {
         "properties": {
-          "actor": {
-            "default": "Inside Sales",
-            "title": "Actor",
-            "type": "string"
-          },
           "customer_label": {
             "anyOf": [
               {

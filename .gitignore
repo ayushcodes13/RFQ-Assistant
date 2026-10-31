@@ -39,3 +39,5 @@ frontend/AGENTS.md
 .DS_Store
 .idea/
 .vscode/
+/.demo-runtime/
+/frontend/.next-demo/
