@@ -32,6 +32,7 @@ from rfq_assistant.ingestion.parsers.base import ParsedDocumentResult, ParsedLin
 from rfq_assistant.ingestion.parsers.spreadsheet_parser import identify_columns
 from rfq_assistant.ingestion.source_segments import source_segments
 from rfq_assistant.matching import CatalogRepository, ExactMatchEngine
+from rfq_assistant.matching.normalizer import normalize_manufacturer, normalize_mpn
 from rfq_assistant.quotation.line_rules import blocking_line_issues
 from rfq_assistant.persistence import StateStore
 from rfq_assistant.schemas.enums import (
@@ -459,6 +460,7 @@ class CaseManager:
             timings["match_ms"] = (time.perf_counter() - stage_started) * 1000
 
             self._lines_by_case[case_id] = lines
+            self._refresh_source_quantity_conflicts(lines)
             for line in lines:
                 line.catalog_rematch_required = self._line_requires_catalog_rematch(line)
             self._record_audit(
@@ -712,6 +714,85 @@ class CaseManager:
                 line.candidates, line.selected_catalog_sku
             )
         return line.matched_catalog_version != active_item.catalog_version
+
+    @staticmethod
+    def _refresh_source_quantity_conflicts(
+        lines: List[RFQLineItem], *, changed_line_id: Optional[str] = None
+    ) -> None:
+        """Flag repeated exact items whose source regions disagree on quantity.
+
+        Repeated items are retained as separate requests. A disagreement is a
+        reviewer blocker because the parser cannot know whether it is a typo
+        or two distinct requests. Correcting the source-backed quantities
+        removes the warning on the next reconciliation.
+        """
+        conflict_code = "SOURCE_QUANTITY_CONFLICT"
+        groups: Dict[tuple, List[RFQLineItem]] = {}
+        previous_warnings = {
+            line.line_id: [
+                (warning.code, warning.message, warning.severity)
+                for warning in line.extraction_warnings
+                if warning.code == conflict_code
+            ]
+            for line in lines
+        }
+        for line in lines:
+            line.extraction_warnings = [
+                warning for warning in line.extraction_warnings
+                if warning.code != conflict_code
+            ]
+            manufacturer = normalize_manufacturer(line.requested_manufacturer)
+            mpn = normalize_mpn(line.requested_mpn)
+            if not manufacturer or not mpn or line.quantity is None:
+                continue
+            key = (manufacturer.casefold(), mpn, (line.unit or "").strip().casefold())
+            groups.setdefault(key, []).append(line)
+
+        for related in groups.values():
+            quantities = {line.quantity for line in related}
+            if len(related) < 2 or len(quantities) < 2:
+                continue
+            # A repeated line in one document can be a legitimate separate
+            # request. Only label a cross-source disagreement when the text
+            # explicitly identifies both an email/message and an attachment
+            # or workbook region. Multi-file-per-case intake is not supported
+            # yet, so never infer document identity from duplicate MPN alone.
+            source_labels = set()
+            for related_line in related:
+                text = related_line.raw_text.casefold()
+                if re.search(r"\b(email|message)\b", text):
+                    source_labels.add("message")
+                if re.search(r"\b(attachment|attached|spreadsheet|workbook)\b", text):
+                    source_labels.add("attachment")
+            if source_labels != {"message", "attachment"}:
+                continue
+            evidence = "; ".join(
+                f"line {line.line_number}: {line.quantity:g} {line.unit or 'EA'}"
+                for line in related
+            )
+            for line in related:
+                line.extraction_warnings.append(ExtractionWarning(
+                    code=conflict_code,
+                    message=(
+                        "Possible quantity conflict for the same manufacturer and part number "
+                        f"across source regions ({evidence}). Verify the original request."
+                    ),
+                    severity="error",
+                ))
+
+        for line in lines:
+            current_warnings = [
+                (warning.code, warning.message, warning.severity)
+                for warning in line.extraction_warnings
+                if warning.code == conflict_code
+            ]
+            if (
+                line.line_id != changed_line_id
+                and current_warnings != previous_warnings[line.line_id]
+            ):
+                # Warning changes are part of line state, so invalidate any
+                # editor holding a snapshot from before reconciliation.
+                line.version += 1
 
     def _sync_case_catalog_metrics(self, case_id: str, *, force_persist: bool = False) -> int:
         """Recompute stale-match flags and readiness after restart or catalog edits."""
@@ -1217,6 +1298,8 @@ class CaseManager:
 
         if update.reviewer_notes is not None:
             line.reviewer_notes = update.reviewer_notes
+
+        self._refresh_source_quantity_conflicts(lines, changed_line_id=line.line_id)
 
         line.version += 1
         self._refresh_case_metrics(case_id)

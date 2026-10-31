@@ -508,6 +508,43 @@ class TestPDFParser:
         assert "Siemens" in page_evidence.text
         assert any(w.code == "OCR_TEXT_REVIEW" for w in page_evidence.warnings)
 
+    def test_mixed_pdf_ocr_runs_only_on_the_scanned_page(self, monkeypatch):
+        """Native text is retained while OCR is limited to the unreadable page."""
+        import io
+        import fitz
+        from PIL import Image
+        from rfq_assistant.ingestion.parsers import pdf_parser
+
+        image_buffer = io.BytesIO()
+        Image.new("RGB", (600, 800), "white").save(image_buffer, format="PNG")
+        document = fitz.open()
+        native_page = document.new_page(width=595, height=842)
+        native_page.insert_textbox(
+            native_page.rect,
+            "Siemens 6ES7214-1AG40-0XB0 PLC 2 EA",
+            fontsize=16,
+        )
+        scanned_page = document.new_page(width=595, height=842)
+        scanned_page.insert_image(scanned_page.rect, stream=image_buffer.getvalue())
+        content = document.tobytes()
+        document.close()
+
+        recognized_pages = []
+
+        def fake_ocr(_rendered):
+            recognized_pages.append(2)
+            return "Omron E2E-X3D1-N sensor 4 EA"
+
+        monkeypatch.setattr(pdf_parser, "recognize_rendered_page", fake_ocr)
+        result = pdf_parser.PDFParser(allow_ocr=True).parse(content, "mixed_native_scan.pdf")
+
+        assert [line.source_locator.page_number for line in result.lines] == [1, 2]
+        assert [line.quantity for line in result.lines] == [2, 4]
+        assert recognized_pages == [2]
+        coverage = {unit.locator.page_number: unit for unit in result.source_coverage}
+        assert coverage[1].ocr_status in (None, "not_needed")
+        assert coverage[2].ocr_status == "succeeded"
+
     def test_multi_page_ocr_opens_pdf_once_for_all_page_renders(self, monkeypatch):
         """Selected pages reuse one decoded PDF and keep OCR work per page."""
         import io
