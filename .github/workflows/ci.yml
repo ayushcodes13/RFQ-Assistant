@@ -10,25 +10,56 @@ jobs:
   test-backend:
     name: Backend Unit & Schema Tests
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
-          pip install pytest pytest-asyncio
+          pip install -e .[test]
+
+      - name: Backend lint and format checks
+        run: |
+          # Start with syntax/import correctness while the repository-wide
+          # legacy naming/import cleanup is tracked separately.
+          ruff check rfq_assistant tests scripts --select E4,E7,E9 --ignore E741
+          ruff format --check \
+            tests/test_ingestion_worker.py \
+            tests/test_property_invariants.py \
+            tests/test_quotation_validator_contract.py \
+            tests/test_catalog_import_edges.py \
+            tests/test_persistence_fault_matrix.py
+
+      - name: Informational type check (ratchet toward zero errors)
+        continue-on-error: true
+        run: mypy --ignore-missing-imports rfq_assistant
 
       - name: Run pytest
         run: |
-          pytest -v
+          pytest -v --cov=rfq_assistant --cov-report=term-missing --cov-report=xml:coverage.xml --cov-report=json:coverage.json --cov-fail-under=80
+          python -m scripts.check_coverage coverage.json
+
+      - name: Publish coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-py${{ matrix.python-version }}
+          path: |
+            coverage.xml
+            coverage.json
+          if-no-files-found: ignore
+          retention-days: 14
 
   test-frontend:
     name: Frontend Lint, Build & Typecheck
@@ -41,12 +72,12 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22.12"
 
       - name: Install dependencies
         run: |
           cd frontend
-          npm ci || npm install
+          npm ci
 
       - name: Run lint, typecheck, and build
         run: |
@@ -76,12 +107,12 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22.12"
 
       - name: Install frontend dependencies
         run: |
           cd frontend
-          npm ci || npm install
+          npm ci
 
       - name: Install Playwright Chromium
         run: |
@@ -102,3 +133,44 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report
           retention-days: 7
+
+  security-scans:
+    name: Dependency and Python security scans
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install backend and scanners
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[test]
+
+      - name: Audit Python dependencies
+        # Report the current dependency inventory without making a known
+        # vulnerable transitive baseline a false-green/false-red release gate.
+        # Ratchet this to blocking after the dependency upgrade PR resolves it.
+        continue-on-error: true
+        run: pip-audit
+
+      - name: Scan Python source
+        run: bandit -r rfq_assistant -ll
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.12"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high

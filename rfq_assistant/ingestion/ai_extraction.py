@@ -309,6 +309,17 @@ def _quantity_is_grounded(quantity: Optional[Decimal], unit: Optional[str], quot
     return False
 
 
+def _decimal_quantity_as_float(quantity: Decimal) -> float:
+    """Convert only when the application float field preserves the decimal value."""
+    try:
+        normalized = float(quantity)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError("quantity cannot be represented safely") from exc
+    if not math.isfinite(normalized) or Decimal(str(normalized)) != quantity:
+        raise ValueError("quantity cannot be represented safely")
+    return normalized
+
+
 class GroundedLLMExtractor:
     """Extracts with a model, validates it, then allows one model repair attempt.
 
@@ -548,13 +559,8 @@ class GroundedLLMExtractor:
                 # change its decimal value; otherwise a valid JSON number could
                 # silently become infinity or a different commercial quantity.
                 try:
-                    normalized_quantity = float(line.quantity)
-                except (OverflowError, ValueError):
-                    return None, [f"line {line.line_number} quantity cannot be represented safely"]
-                if (
-                    not math.isfinite(normalized_quantity)
-                    or Decimal(str(normalized_quantity)) != line.quantity
-                ):
+                    normalized_quantity = _decimal_quantity_as_float(line.quantity)
+                except ValueError:
                     return None, [f"line {line.line_number} quantity cannot be represented safely"]
             parsed_lines.append(ParsedLineDraft(
                 line_number=line.line_number,

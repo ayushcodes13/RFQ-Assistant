@@ -66,6 +66,12 @@ available after the original manager objects are discarded.
 
 **Browser E2E:** the Playwright suite uses isolated FastAPI and Next.js processes with temporary storage. It covers synthetic intake, review/sample approval, draft export and safety boundaries; these paths prove UI/backend behavior only and are not accuracy benchmarks.
 
+**Coverage and generated cases:** CI publishes pytest-cov XML/JSON artifacts and enforces an 80% project line-coverage floor plus 95% floors for quotation validation, matching, exports, and SQLite persistence. Hypothesis checks normalization idempotence, quantity/unit preservation, decimal conversion, and spreadsheet-formula escaping. Lease and retry timing tests use frozen time. The backend lint gate currently checks Ruff syntax/import-error classes and formats files touched by the coverage work; repository-wide Ruff modernization remains a separate cleanup because the existing baseline contains legacy lint and formatting violations.
+
+**Supply-chain checks:** CI reports pip-audit findings (informational until the existing vulnerable dependency baseline is upgraded), runs Bandit, blocks on npm audit findings at high severity and above, and runs CodeQL for Python and TypeScript/JavaScript plus Gitleaks. Lower-severity npm advisories remain visible in audit output and should be triaged separately.
+
+Mutation testing and dedicated frontend component/accessibility tests are not yet CI gates. Add them after establishing a stable mutation target list and extracting the review/export decisions into testable UI units; the current Playwright suite remains the browser-level check.
+
 ## Local synthetic verification — 2026-10-31
 
 Run the reproducible API corpus from the repository root with:
@@ -79,6 +85,8 @@ The runner creates isolated temporary SQLite, upload, and export state, then exe
 Latest local verification for this work: the full Python suite passed (**319 tests**, 6 dependency deprecation warnings); `npm run lint`, `npx tsc --noEmit`, and the PR CI production build passed; isolated Playwright browser E2E passed **7/7** on synthetic local services. The synthetic API corpus passed **30/30** full flows; its latest timing details are recorded in `docs/EXTRACTION_AND_PERFORMANCE_AUDIT.md`. These synthetic results are not customer accuracy or production load evidence.
 
 **Security:** dangerous uploads, oversized sheets, path traversal, prompt injection, tenant isolation, retention/deletion and leaked logs.
+
+Coverage-gate implementation verification (2026-10-31): **365 Python tests passed**, with 87.29% overall line coverage; quotation validation 100%, matching 99.51%, exports 96.52%, and persistence 98.85%. Ruff's selected syntax/import checks and changed-test formatting passed. Bandit reported no medium/high findings. Frontend lint, generated API type check, and production build passed. npm audit reported moderate advisories and no high-severity findings. pip-audit found a substantial vulnerable dependency baseline in the available environment, so its CI step is informational pending a deliberate dependency-upgrade and compatibility pass. These local checks ran in the available Python 3.9 environment; the configured Python 3.10/3.11/3.12 CI matrix still needs hosted verification.
 
 **Pilot:** operator-led blind review of historical RFQs with manual baseline and measured corrections. Maintain a holdout set not used for tuning.
 

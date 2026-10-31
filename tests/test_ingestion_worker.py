@@ -4,6 +4,7 @@ import time
 import threading
 
 import pytest
+import time_machine
 
 from rfq_assistant.cases.manager import CaseManager
 from rfq_assistant.cases.manager import IngestionLeaseLostError
@@ -17,7 +18,9 @@ from rfq_assistant.schemas.enums import CaseStatus
 def _services(tmp_path):
     store = SQLiteStateStore(tmp_path / "state.sqlite3")
     catalog = CatalogRepository(state_store=store)
-    manager = CaseManager(catalog=catalog, storage=DocumentStorage(tmp_path / "files"), state_store=store)
+    manager = CaseManager(
+        catalog=catalog, storage=DocumentStorage(tmp_path / "files"), state_store=store
+    )
     return manager, store
 
 
@@ -37,7 +40,10 @@ def test_worker_processes_persisted_upload_without_api_request_waiting(tmp_path)
     worker.start()
     try:
         deadline = time.monotonic() + 3
-        while time.monotonic() < deadline and manager.get_case(pending.case_id).status == CaseStatus.PROCESSING:
+        while (
+            time.monotonic() < deadline
+            and manager.get_case(pending.case_id).status == CaseStatus.PROCESSING
+        ):
             time.sleep(0.01)
     finally:
         worker.stop()
@@ -52,16 +58,17 @@ def test_queue_claim_is_atomic_and_expired_lease_is_recovered(tmp_path):
     manager, store = _services(tmp_path)
     pending = manager.enqueue_case_from_upload("request.csv", b"MPN,Qty\nLC1D09BD,2\n")
 
-    first = store.claim_ingestion_job("worker-a", lease_seconds=0.01)
-    assert first is not None and first["attempt"] == 1
-    assert store.claim_ingestion_job("worker-b", lease_seconds=1) is None
-    time.sleep(0.03)
+    with time_machine.travel("2030-01-01T00:00:00+00:00", tick=False) as clock:
+        first = store.claim_ingestion_job("worker-a", lease_seconds=10)
+        assert first is not None and first["attempt"] == 1
+        assert store.claim_ingestion_job("worker-b", lease_seconds=1) is None
+        clock.shift(10.1)
 
-    second = store.claim_ingestion_job("worker-b", lease_seconds=1)
-    assert second is not None and second["attempt"] == 2
-    assert second["case_id"] == pending.case_id
-    assert not store.finish_ingestion_job(first["job_id"], "worker-a")
-    assert store.finish_ingestion_job(second["job_id"], "worker-b")
+        second = store.claim_ingestion_job("worker-b", lease_seconds=10)
+        assert second is not None and second["attempt"] == 2
+        assert second["case_id"] == pending.case_id
+        assert not store.finish_ingestion_job(first["job_id"], "worker-a")
+        assert store.finish_ingestion_job(second["job_id"], "worker-b")
 
 
 def test_startup_reconciles_case_saved_before_queue_insert(tmp_path):
@@ -82,25 +89,28 @@ def test_expired_worker_cannot_commit_over_new_lease_owner(tmp_path):
         "request.csv", b"MPN,Manufacturer,Qty\nLC1D09BD,Schneider Electric,2\n"
     )
 
-    first = store.claim_ingestion_job("worker-a", lease_seconds=0.01)
-    assert first is not None
-    time.sleep(0.03)
-    second = store.claim_ingestion_job("worker-b", lease_seconds=5)
-    assert second is not None
+    with time_machine.travel("2030-01-01T00:00:00+00:00", tick=False) as clock:
+        first = store.claim_ingestion_job("worker-a", lease_seconds=10)
+        assert first is not None
+        clock.shift(10.1)
+        second = store.claim_ingestion_job("worker-b", lease_seconds=50)
+        assert second is not None
 
-    with pytest.raises(IngestionLeaseLostError):
-        manager.process_pending_case(case.case_id, job_id=first["job_id"], worker_id="worker-a")
+        with pytest.raises(IngestionLeaseLostError):
+            manager.process_pending_case(
+                case.case_id, job_id=first["job_id"], worker_id="worker-a"
+            )
 
-    assert manager.get_case(case.case_id).status == CaseStatus.PROCESSING
-    assert manager.get_lines(case.case_id) == []
-    assert store.get_ingestion_job(case.case_id)["worker_id"] == "worker-b"
+        assert manager.get_case(case.case_id).status == CaseStatus.PROCESSING
+        assert manager.get_lines(case.case_id) == []
+        assert store.get_ingestion_job(case.case_id)["worker_id"] == "worker-b"
 
-    completed = manager.process_pending_case(
-        case.case_id, job_id=second["job_id"], worker_id="worker-b"
-    )
-    assert completed.status == CaseStatus.NEEDS_REVIEW
-    assert len(manager.get_lines(case.case_id)) == 1
-    assert store.finish_ingestion_job(second["job_id"], "worker-b")
+        completed = manager.process_pending_case(
+            case.case_id, job_id=second["job_id"], worker_id="worker-b"
+        )
+        assert completed.status == CaseStatus.NEEDS_REVIEW
+        assert len(manager.get_lines(case.case_id)) == 1
+        assert store.finish_ingestion_job(second["job_id"], "worker-b")
 
 
 def test_worker_processes_distinct_cases_with_bounded_concurrency(tmp_path):
@@ -130,18 +140,26 @@ def test_worker_processes_distinct_cases_with_bounded_concurrency(tmp_path):
 
     manager.process_pending_case = slowed
     worker = RFQIngestionWorker(
-        manager, store, poll_seconds=0.005, lease_seconds=2,
-        heartbeat_seconds=0.1, max_concurrent_jobs=2,
+        manager,
+        store,
+        poll_seconds=0.005,
+        lease_seconds=2,
+        heartbeat_seconds=0.1,
+        max_concurrent_jobs=2,
     )
     worker.start()
     try:
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline and any(
-            manager.get_case(case.case_id).status == CaseStatus.PROCESSING for case in cases
+            manager.get_case(case.case_id).status == CaseStatus.PROCESSING
+            for case in cases
         ):
             time.sleep(0.01)
     finally:
         worker.stop()
 
     assert max_active == 2
-    assert all(manager.get_case(case.case_id).status == CaseStatus.NEEDS_REVIEW for case in cases)
+    assert all(
+        manager.get_case(case.case_id).status == CaseStatus.NEEDS_REVIEW
+        for case in cases
+    )
