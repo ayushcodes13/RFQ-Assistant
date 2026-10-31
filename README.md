@@ -122,6 +122,15 @@ transient-error backoff (defaults 0.2 / 2 seconds). Only timeouts, HTTP 408,
 If a provider's `Retry-After` is longer than the configured maximum, the call
 fails promptly and unresolved fields go to human review instead of waiting
 through a long quota pause.
+The reused Luna client also applies process-local pacing and concurrency
+limits plus a circuit breaker. Configure `RFQ_LLM_MAX_CONCURRENT_REQUESTS`
+(default 2), `RFQ_LLM_REQUESTS_PER_MINUTE` (default 60),
+`RFQ_LLM_CIRCUIT_FAILURE_THRESHOLD` (default 4),
+`RFQ_LLM_CIRCUIT_OPEN_SECONDS` (default 30), and
+`RFQ_LLM_ADMISSION_TIMEOUT_SECONDS` (default 10). If the local provider gate
+rejects a call, the affected extraction goes to human review. These controls
+cover one API process; multiple processes or hosts need shared provider
+coordination before production.
 Open `http://localhost:3000` for the product landing page and `http://localhost:3000/workspace` for the RFQ workspace. The workspace supports RFQ intake, line-level provenance review, catalog browsing, approval, and draft worksheet export.
 
 ### Local persistence

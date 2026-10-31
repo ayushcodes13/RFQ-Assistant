@@ -156,7 +156,7 @@ class SQLiteStateStore:
                 (now, now, max_attempts),
             )
             row = connection.execute(
-                "SELECT job_id, case_id, source_digest, attempts FROM ingestion_jobs "
+                "SELECT job_id, case_id, source_digest, attempts, available_at FROM ingestion_jobs "
                 "WHERE state='queued' AND available_at <= ? ORDER BY created_at, job_id LIMIT 1",
                 (now,),
             ).fetchone()
@@ -172,6 +172,9 @@ class SQLiteStateStore:
                 "case_id": row["case_id"],
                 "source_digest": row["source_digest"],
                 "attempt": int(row["attempts"]) + 1,
+                # Time spent ready in the queue, excluding an intentional
+                # retry backoff before the job became claimable again.
+                "queue_wait_ms": max(0.0, (now - float(row["available_at"])) * 1000.0),
             }
 
     def heartbeat_ingestion_job(self, job_id: str, worker_id: str, lease_seconds: float = 90.0) -> bool:

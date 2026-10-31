@@ -22,6 +22,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from rfq_assistant.ingestion.provider_resilience import ProviderCallGate
 from rfq_assistant.ingestion.parsers.base import EvidenceSegment, ParsedDocumentResult, ParsedLineDraft
 from rfq_assistant.schemas.models import ExtractionWarning, SourceLocator
 
@@ -111,6 +112,7 @@ class OpenAICompatibleClient:
         max_attempts: int = 2,
         retry_base_seconds: float = 0.2,
         retry_max_delay_seconds: float = 2.0,
+        call_gate: Optional[ProviderCallGate] = None,
         sleeper=time.sleep,
     ):
         if not api_key or not model or not base_url:
@@ -128,6 +130,7 @@ class OpenAICompatibleClient:
         self.max_attempts = max_attempts
         self.retry_base_seconds = retry_base_seconds
         self.retry_max_delay_seconds = retry_max_delay_seconds
+        self.call_gate = call_gate or ProviderCallGate()
         self._sleeper = sleeper
         parsed = urlparse(self.base_url)
         if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
@@ -164,15 +167,27 @@ class OpenAICompatibleClient:
             request["temperature"] = 0
         started = time.perf_counter()
         for attempt in range(1, self.max_attempts + 1):
-            self._usage.last_http_attempts = attempt
             try:
-                response = self._http.post(
-                    endpoint,
-                    headers={"api-key" if is_azure else "Authorization": self.api_key if is_azure else f"Bearer {self.api_key}"},
-                    json=request,
-                    timeout=self.timeout_seconds,
-                )
-                response.raise_for_status()
+                with self.call_gate.acquire() as permit:
+                    self._usage.last_http_attempts = attempt
+                    try:
+                        response = self._http.post(
+                            endpoint,
+                            headers={"api-key" if is_azure else "Authorization": self.api_key if is_azure else f"Bearer {self.api_key}"},
+                            json=request,
+                            timeout=self.timeout_seconds,
+                        )
+                        response.raise_for_status()
+                    except httpx.HTTPStatusError as exc:
+                        if exc.response.status_code in {408, 429} or exc.response.status_code >= 500:
+                            permit.report_transient_failure()
+                        else:
+                            permit.report_non_transient_failure()
+                        raise
+                    except httpx.RequestError:
+                        permit.report_transient_failure()
+                        raise
+                    permit.report_success()
                 payload = response.json()
                 content = payload["choices"][0]["message"]["content"]
                 usage = payload.get("usage") or {}
@@ -410,12 +425,24 @@ class GroundedLLMExtractor:
             max_attempts = max(1, min(3, int(os.getenv("RFQ_LLM_MAX_ATTEMPTS", "2"))))
             retry_base = max(0.0, min(2.0, float(os.getenv("RFQ_LLM_RETRY_BASE_SECONDS", "0.2"))))
             retry_max_delay = max(0.0, min(5.0, float(os.getenv("RFQ_LLM_RETRY_MAX_DELAY_SECONDS", "2"))))
+            max_concurrent = max(1, min(8, int(os.getenv("RFQ_LLM_MAX_CONCURRENT_REQUESTS", "2"))))
+            requests_per_minute = max(1, min(1000, int(os.getenv("RFQ_LLM_REQUESTS_PER_MINUTE", "60"))))
+            failure_threshold = max(1, min(10, int(os.getenv("RFQ_LLM_CIRCUIT_FAILURE_THRESHOLD", "4"))))
+            circuit_open_seconds = max(1.0, min(300.0, float(os.getenv("RFQ_LLM_CIRCUIT_OPEN_SECONDS", "30"))))
+            admission_timeout = max(0.0, min(30.0, float(os.getenv("RFQ_LLM_ADMISSION_TIMEOUT_SECONDS", "10"))))
             return cls(OpenAICompatibleClient(
                 key, model, base_url, timeout_seconds=timeout, api_version=api_version,
                 deployment_version=deployment_version,
                 max_attempts=max_attempts,
                 retry_base_seconds=retry_base,
                 retry_max_delay_seconds=retry_max_delay,
+                call_gate=ProviderCallGate(
+                    max_concurrent=max_concurrent,
+                    requests_per_minute=requests_per_minute,
+                    failure_threshold=failure_threshold,
+                    open_seconds=circuit_open_seconds,
+                    admission_timeout_seconds=admission_timeout,
+                ),
             ))
         except (ValueError, httpx.InvalidURL):
             return None

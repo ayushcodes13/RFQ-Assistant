@@ -71,6 +71,26 @@ def test_queue_claim_is_atomic_and_expired_lease_is_recovered(tmp_path):
         assert store.finish_ingestion_job(second["job_id"], "worker-b")
 
 
+def test_queue_wait_is_reported_for_the_attempt_and_persisted_with_case(tmp_path):
+    manager, store = _services(tmp_path)
+    with time_machine.travel("2030-01-01T00:00:00+00:00", tick=False) as clock:
+        pending = manager.enqueue_case_from_upload(
+            "request.csv", b"MPN,Manufacturer,Qty\nLC1D09BD,Schneider Electric,2\n"
+        )
+        clock.shift(2.5)
+        job = store.claim_ingestion_job("worker-a")
+
+        assert job is not None
+        assert job["queue_wait_ms"] == pytest.approx(2500)
+        completed = manager.process_pending_case(
+            pending.case_id,
+            job_id=job["job_id"],
+            worker_id="worker-a",
+            queue_wait_ms=job["queue_wait_ms"],
+        )
+        assert completed.stage_timings_ms["queue_wait_ms"] == pytest.approx(2500)
+
+
 def test_startup_reconciles_case_saved_before_queue_insert(tmp_path):
     manager, store = _services(tmp_path)
     case = manager.create_case_from_upload(
@@ -126,14 +146,17 @@ def test_worker_processes_distinct_cases_with_bounded_concurrency(tmp_path):
     active = 0
     max_active = 0
 
-    def slowed(case_id, *, job_id, worker_id):
+    def slowed(case_id, *, job_id, worker_id, queue_wait_ms=None):
         nonlocal active, max_active
         with lock:
             active += 1
             max_active = max(max_active, active)
         try:
             time.sleep(0.05)
-            return original(case_id, job_id=job_id, worker_id=worker_id)
+            return original(
+                case_id, job_id=job_id, worker_id=worker_id,
+                queue_wait_ms=queue_wait_ms,
+            )
         finally:
             with lock:
                 active -= 1

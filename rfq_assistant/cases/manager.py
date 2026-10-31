@@ -113,6 +113,7 @@ class CaseManager:
         _existing_case_id: Optional[str] = None,
         _job_id: Optional[str] = None,
         _worker_id: Optional[str] = None,
+        _queue_wait_ms: Optional[float] = None,
     ) -> RFQCase:
         """Validates, stores, parses, and matches an uploaded RFQ document.
 
@@ -121,6 +122,8 @@ class CaseManager:
         """
         total_started = time.perf_counter()
         timings = {"validate_ms": 0.0, "store_ms": 0.0, "parse_ms": 0.0, "llm_ms": 0.0, "match_ms": 0.0}
+        if _queue_wait_ms is not None:
+            timings["queue_wait_ms"] = max(0.0, float(_queue_wait_ms))
         if bool(_job_id) != bool(_worker_id):
             raise ValueError("Both ingestion job ID and worker ID are required for a fenced processing attempt.")
 
@@ -402,9 +405,10 @@ class CaseManager:
             case.stage_timings_ms = dict(timings)
             self._persist_case(case_id, job_id=_job_id, worker_id=_worker_id)
             log.info(
-                "[rfq_timing] source_type=%s outcome=parsed lines=%d validate_ms=%.1f store_ms=%.1f parse_ms=%.1f llm_ms=%.1f match_ms=%.1f total_ms=%.1f",
-                src_type.value, len(lines), timings["validate_ms"], timings["store_ms"],
-                timings["parse_ms"], timings["llm_ms"], timings["match_ms"],
+                "[rfq_timing] source_type=%s outcome=parsed lines=%d queue_wait_ms=%.1f validate_ms=%.1f store_ms=%.1f parse_ms=%.1f llm_ms=%.1f match_ms=%.1f total_ms=%.1f",
+                src_type.value, len(lines), timings.get("queue_wait_ms", 0.0),
+                timings["validate_ms"], timings["store_ms"], timings["parse_ms"],
+                timings["llm_ms"], timings["match_ms"],
                 (time.perf_counter() - total_started) * 1000,
             )
             return self._cases[case_id]
@@ -436,9 +440,10 @@ class CaseManager:
             )
             self._persist_case(case_id, job_id=_job_id, worker_id=_worker_id)
             log.info(
-                "[rfq_timing] source_type=%s outcome=failed validate_ms=%.1f store_ms=%.1f parse_ms=%.1f llm_ms=%.1f total_ms=%.1f",
-                src_type.value, timings["validate_ms"], timings["store_ms"], timings["parse_ms"],
-                timings["llm_ms"], (time.perf_counter() - total_started) * 1000,
+                "[rfq_timing] source_type=%s outcome=failed queue_wait_ms=%.1f validate_ms=%.1f store_ms=%.1f parse_ms=%.1f llm_ms=%.1f total_ms=%.1f",
+                src_type.value, timings.get("queue_wait_ms", 0.0), timings["validate_ms"],
+                timings["store_ms"], timings["parse_ms"], timings["llm_ms"],
+                (time.perf_counter() - total_started) * 1000,
             )
             return failed_case
         except Exception:
@@ -498,7 +503,10 @@ class CaseManager:
         self._persist_case(case.case_id)
         return case
 
-    def process_pending_case(self, case_id: str, *, job_id: str, worker_id: str) -> RFQCase:
+    def process_pending_case(
+        self, case_id: str, *, job_id: str, worker_id: str,
+        queue_wait_ms: Optional[float] = None,
+    ) -> RFQCase:
         """Resume a persisted case only while its state is still PROCESSING."""
         with self._processing_locks_guard:
             case_lock = self._processing_locks.setdefault(case_id, threading.Lock())
@@ -508,9 +516,15 @@ class CaseManager:
         with case_lock:
             if self.state_store and not self.state_store.owns_ingestion_job(job_id, worker_id):
                 raise IngestionLeaseLostError("This worker no longer owns the RFQ processing lease.")
-            return self._process_pending_case_locked(case_id, job_id=job_id, worker_id=worker_id)
+            return self._process_pending_case_locked(
+                case_id, job_id=job_id, worker_id=worker_id,
+                queue_wait_ms=queue_wait_ms,
+            )
 
-    def _process_pending_case_locked(self, case_id: str, *, job_id: str, worker_id: str) -> RFQCase:
+    def _process_pending_case_locked(
+        self, case_id: str, *, job_id: str, worker_id: str,
+        queue_wait_ms: Optional[float] = None,
+    ) -> RFQCase:
         case = self._cases.get(case_id)
         if case is None or not case.source_file:
             raise DocumentParserError("Queued RFQ source is missing.")
@@ -528,6 +542,7 @@ class CaseManager:
             _existing_case_id=case_id,
             _job_id=job_id,
             _worker_id=worker_id,
+            _queue_wait_ms=queue_wait_ms,
         )
         if result.source_type == SourceType.EMAIL_TEXT:
             result.raw_text = content.decode("utf-8", errors="replace")

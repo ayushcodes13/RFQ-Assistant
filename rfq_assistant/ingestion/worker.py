@@ -98,7 +98,8 @@ class RFQIngestionWorker:
         heartbeat_thread.start()
         try:
             self.manager.process_pending_case(
-                job["case_id"], job_id=job["job_id"], worker_id=worker_id
+                job["case_id"], job_id=job["job_id"], worker_id=worker_id,
+                queue_wait_ms=job.get("queue_wait_ms", 0.0),
             )
             if not lost_lease.is_set():
                 self.state_store.finish_ingestion_job(job["job_id"], worker_id)
