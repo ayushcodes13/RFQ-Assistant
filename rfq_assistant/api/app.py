@@ -36,6 +36,7 @@ from rfq_assistant.quotation.validate import ProposedQuote, QuoteLine, SourceRef
 from rfq_assistant.schemas.enums import AuditAction
 from rfq_assistant.schemas.models import (
     AuditEvent,
+    ApproveRemainingRequest,
     BatchReviewRequest,
     CatalogItem,
     ExportManifest,
@@ -561,7 +562,12 @@ def batch_review_lines(
     try:
         count = case_manager.batch_review(case_id, request)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        code = (
+            status.HTTP_409_CONFLICT
+            if "stale" in str(exc).lower() or "conflict" in str(exc).lower()
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
     return {"status": "success", "updated_count": count}
 
 
@@ -579,13 +585,16 @@ def get_rfq_review_plan(
 @app.post("/api/rfqs/{case_id}/review-plan/approve-remaining")
 def approve_remaining_validated_lines(
     case_id: str,
+    request: ApproveRemainingRequest,
     current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     case = case_manager.get_case(case_id)
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ case not found.")
     try:
-        count = case_manager.approve_remaining_clean(case_id, current_user.name)
+        count = case_manager.approve_remaining_clean(
+            case_id, current_user.name, request.expected_versions
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return {"status": "success", "updated_count": count}

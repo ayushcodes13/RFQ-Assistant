@@ -342,6 +342,11 @@ export function WorkbenchView({
     try {
       await batchReviewLines(caseData.case_id, {
         line_ids: reviewPlan.sample_line_ids,
+        expected_versions: Object.fromEntries(
+          lines
+            .filter((line) => reviewPlan.sample_line_ids.includes(line.line_id))
+            .map((line) => [line.line_id, line.version]),
+        ),
         decision: "APPROVED",
         actor: "Inside Sales",
         notes: "Reviewer checked the risk-based sample against the original source.",
@@ -360,7 +365,10 @@ export function WorkbenchView({
   const handleApproveRemaining = async () => {
     setReviewPlanBusy(true);
     try {
-      await approveRemainingValidatedLines(caseData.case_id);
+      await approveRemainingValidatedLines(
+        caseData.case_id,
+        Object.fromEntries(lines.map((line) => [line.line_id, line.version])),
+      );
       await fetchLines();
       await refreshReviewPlan();
       await onCaseUpdated();

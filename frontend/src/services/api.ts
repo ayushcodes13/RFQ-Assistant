@@ -130,12 +130,13 @@ export async function getSpreadsheetSourcePreview(
 }
 
 export async function approveRemainingValidatedLines(
-  caseId: string
+  caseId: string,
+  expectedVersions: Record<string, number>,
 ): Promise<{ status: string; updated_count: number }> {
   return sendJson<{ status: string; updated_count: number }>(
     `/api/rfqs/${caseId}/review-plan/approve-remaining`,
     "POST",
-    {},
+    { expected_versions: expectedVersions },
     "Batch approval failed"
   );
 }
