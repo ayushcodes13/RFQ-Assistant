@@ -1,11 +1,16 @@
 """Abstract base class and data structures for document parsers."""
 
-from abc import ABC, abstractmethod
 import hashlib
+from abc import ABC, abstractmethod
 from typing import List, Optional
-from pydantic import BaseModel, Field
 
-from rfq_assistant.schemas.models import ExtractionWarning, SourceCoverageUnit, SourceLocator
+from pydantic import BaseModel, Field, model_validator
+
+from rfq_assistant.schemas.models import (
+    ExtractionWarning,
+    SourceCoverageUnit,
+    SourceLocator,
+)
 
 MAX_CANDIDATE_REGIONS = 500
 
@@ -55,6 +60,36 @@ class ParsedDocumentResult(BaseModel):
     llm_input_tokens: Optional[int] = None
     llm_output_tokens: Optional[int] = None
 
+    @model_validator(mode="after")
+    def source_coverage_reconciles_with_outputs(self):
+        """Fail closed if a source region was counted but lost before parser output."""
+        if not self.source_coverage:
+            # Small injected parser stubs may omit source coverage. Real format
+            # parsers always provide it, including empty and failed documents.
+            return self
+
+        structured = sum(unit.structured_regions for unit in self.source_coverage)
+        review = sum(unit.review_regions for unit in self.source_coverage)
+        nonempty = sum(unit.nonempty_regions for unit in self.source_coverage)
+        filtered = sum(unit.filtered_regions for unit in self.source_coverage)
+
+        if structured != len(self.lines):
+            raise ValueError(
+                "Source coverage mismatch: "
+                f"{structured} structured regions for {len(self.lines)} parsed lines"
+            )
+        if review != len(self.candidate_segments):
+            raise ValueError(
+                "Source coverage mismatch: "
+                f"{review} review regions for {len(self.candidate_segments)} review candidates"
+            )
+        if nonempty != structured + review + filtered:
+            raise ValueError(
+                "Source coverage mismatch: every non-empty region must have exactly one "
+                "structured, review, or filtered disposition"
+            )
+        return self
+
 
 def make_coverage_entry(
     region_id: str,
@@ -79,6 +114,7 @@ class SourceCoverageAccumulator:
 
     def __init__(self) -> None:
         self._groups: dict[str, dict] = {}
+        self._region_ids: set[str] = set()
 
     def record_unit(
         self,
@@ -150,6 +186,15 @@ class SourceCoverageAccumulator:
             self._groups[unit_id]["formula_backed_fields"] += count
 
     def append(self, receipt: dict) -> None:
+        region_id = receipt.get("region_id")
+        disposition = receipt.get("disposition")
+        if not isinstance(region_id, str) or not region_id:
+            raise ValueError("Source coverage receipts require a non-empty region ID")
+        if region_id in self._region_ids:
+            raise ValueError(f"Duplicate source coverage region ID: {region_id}")
+        if disposition not in {"structured_line", "review_candidate", "filtered_metadata", "ocr_error"}:
+            raise ValueError(f"Unknown source coverage disposition: {disposition}")
+        self._region_ids.add(region_id)
         locator = receipt["locator"]
         if locator.page_number is not None:
             unit_id = f"page:{locator.page_number}"

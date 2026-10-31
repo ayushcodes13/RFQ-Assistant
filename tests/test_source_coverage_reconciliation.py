@@ -1,0 +1,83 @@
+"""The parser manifest must account for every non-empty source region."""
+
+import pytest
+
+from rfq_assistant.ingestion.parsers.base import (
+    EvidenceSegment,
+    ParsedDocumentResult,
+    ParsedLineDraft,
+    SourceCoverageAccumulator,
+    make_coverage_entry,
+)
+from rfq_assistant.schemas.models import SourceCoverageUnit, SourceLocator
+
+
+def _coverage(*, structured=0, review=0, filtered=0, nonempty=None):
+    locator = SourceLocator(file_name="synthetic.txt")
+    if nonempty is None:
+        nonempty = structured + review + filtered
+    return SourceCoverageUnit(
+        unit_id="document",
+        locator=locator,
+        nonempty_regions=nonempty,
+        structured_regions=structured,
+        review_regions=review,
+        filtered_regions=filtered,
+    )
+
+
+def test_manifest_must_reconcile_structured_regions_to_parsed_lines():
+    with pytest.raises(ValueError, match="structured regions for 1 parsed lines"):
+        ParsedDocumentResult(
+            lines=[
+                ParsedLineDraft(
+                    line_number=1,
+                    raw_text="MPN-1 2 EA",
+                    source_locator=SourceLocator(
+                        file_name="synthetic.txt", row_number=1
+                    ),
+                )
+            ],
+            source_coverage=[_coverage(structured=0)],
+        )
+
+
+def test_manifest_must_reconcile_review_regions_to_candidates():
+    candidate = EvidenceSegment(
+        segment_id="text-row-1",
+        locator=SourceLocator(file_name="synthetic.txt", row_number=1),
+        text="unmapped request",
+    )
+    with pytest.raises(ValueError, match="0 review regions for 1 review candidates"):
+        ParsedDocumentResult(
+            lines=[], candidate_segments=[candidate], source_coverage=[_coverage()]
+        )
+
+
+def test_manifest_rejects_unaccounted_nonempty_regions():
+    with pytest.raises(ValueError, match="exactly one"):
+        ParsedDocumentResult(
+            lines=[],
+            source_coverage=[_coverage(nonempty=1)],
+        )
+
+
+def test_coverage_receipts_reject_duplicate_region_ids():
+    accumulator = SourceCoverageAccumulator()
+    locator = SourceLocator(file_name="synthetic.txt", row_number=1)
+    receipt = make_coverage_entry(
+        "text-row-1", locator, "part request", "review_candidate", "UNMAPPED"
+    )
+    accumulator.append(receipt)
+    with pytest.raises(ValueError, match="Duplicate source coverage region ID"):
+        accumulator.append(receipt)
+
+
+def test_coverage_receipts_reject_unknown_dispositions():
+    accumulator = SourceCoverageAccumulator()
+    locator = SourceLocator(file_name="synthetic.txt", row_number=1)
+    receipt = make_coverage_entry(
+        "text-row-1", locator, "part request", "ignored", "UNKNOWN"
+    )
+    with pytest.raises(ValueError, match="Unknown source coverage disposition"):
+        accumulator.append(receipt)
