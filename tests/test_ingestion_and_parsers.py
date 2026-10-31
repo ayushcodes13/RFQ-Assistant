@@ -130,6 +130,41 @@ class TestSpreadsheetParser:
         field_lines = [l for l in result.lines if l.source_locator.sheet_name == "Field Instrumentation"]
         assert len(field_lines) == 2
 
+    @pytest.mark.parametrize(("include_formula", "expected_loads"), [(False, 1), (True, 2)])
+    def test_cached_workbook_is_opened_only_when_formula_cells_exist(
+        self, monkeypatch, include_formula, expected_loads
+    ):
+        import io
+        import openpyxl
+        from rfq_assistant.ingestion.parsers import spreadsheet_parser
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.append(["MPN", "Manufacturer", "Quantity"])
+        sheet.append(["LC1D09BD", "Schneider Electric", "=2+3" if include_formula else 5])
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        original_loader = spreadsheet_parser.openpyxl.load_workbook
+        loads = []
+
+        def counting_loader(*args, **kwargs):
+            loads.append(kwargs.get("data_only", False))
+            return original_loader(*args, **kwargs)
+
+        monkeypatch.setattr(spreadsheet_parser.openpyxl, "load_workbook", counting_loader)
+        parsed = spreadsheet_parser.SpreadsheetParser().parse(
+            output.getvalue(), "maybe-formula.xlsx"
+        )
+
+        assert len(loads) == expected_loads
+        assert parsed.lines[0].quantity == (None if include_formula else 5)
+        assert any(
+            warning.code == "FORMULA_VALUE_NOT_EVALUATED"
+            for warning in parsed.lines[0].extraction_warnings
+        ) is include_formula
+
     def test_xlsx_formula_quantity_is_preserved_but_not_calculated(self):
         import io
         import openpyxl

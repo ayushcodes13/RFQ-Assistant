@@ -86,7 +86,7 @@ def identify_columns(headers: List[str]) -> Dict[str, int]:
 class SpreadsheetParser(BaseDocumentParser):
     """Parses CSV and multi-sheet XLSX documents into structured line drafts."""
 
-    artifact_version = "rfq-spreadsheet-v4"
+    artifact_version = "rfq-spreadsheet-v5"
 
     cache_dependencies = ("openpyxl",)
 
@@ -301,23 +301,29 @@ class SpreadsheetParser(BaseDocumentParser):
     def _parse_xlsx(self, content: bytes, filename: str) -> ParsedDocumentResult:
         try:
             wb = openpyxl.load_workbook(io.BytesIO(content), data_only=False, read_only=True)
-            cached_wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True, read_only=True)
         except Exception as exc:
-            if "wb" in locals():
-                wb.close()
             raise DocumentParserError(f"Workbook could not be opened safely: {type(exc).__name__}") from exc
         if len(wb.sheetnames) > 20:
             wb.close()
-            cached_wb.close()
             raise DocumentParserError(f"Spreadsheet sheet count ({len(wb.sheetnames)}) exceeds maximum permitted limit (20 sheets).")
         try:
             visibility_by_sheet = read_hidden_dimensions(content)
         except Exception as exc:
             wb.close()
-            cached_wb.close()
             raise DocumentParserError(
                 "Workbook row/column visibility could not be verified safely; the original file is retained for manual review."
             ) from exc
+        cached_wb = None
+        if any(sheet.has_formulas for sheet in visibility_by_sheet.values()):
+            try:
+                cached_wb = openpyxl.load_workbook(
+                    io.BytesIO(content), data_only=True, read_only=True
+                )
+            except Exception as exc:
+                wb.close()
+                raise DocumentParserError(
+                    f"Workbook formula cache could not be opened safely: {type(exc).__name__}"
+                ) from exc
 
         lines: List[ParsedLineDraft] = []
         warnings: List[ExtractionWarning] = []
@@ -358,11 +364,15 @@ class SpreadsheetParser(BaseDocumentParser):
                         source_coverage=source_coverage.build(),
                     )
 
-                cached_ws = cached_wb[sheet_name]
-                row_iterator = iter(zip(
-                    ws.iter_rows(values_only=False),
-                    cached_ws.iter_rows(values_only=False),
-                ))
+                if cached_wb is not None:
+                    cached_ws = cached_wb[sheet_name]
+                    worksheet_rows = zip(
+                        ws.iter_rows(values_only=False),
+                        cached_ws.iter_rows(values_only=False),
+                    )
+                else:
+                    worksheet_rows = ((row, row) for row in ws.iter_rows(values_only=False))
+                row_iterator = iter(worksheet_rows)
                 header_sample = list(itertools.islice(row_iterator, 10))
                 merges_by_column = {}
                 merges_starting_by_row = {}
@@ -740,7 +750,8 @@ class SpreadsheetParser(BaseDocumentParser):
                     line_counter += 1
         finally:
             wb.close()
-            cached_wb.close()
+            if cached_wb is not None:
+                cached_wb.close()
 
         if not lines:
             warnings.append(ExtractionWarning(

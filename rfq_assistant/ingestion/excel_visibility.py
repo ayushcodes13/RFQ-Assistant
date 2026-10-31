@@ -19,6 +19,7 @@ class SheetVisibility:
     hidden_rows: set[int]
     hidden_columns: set[int]
     vertical_merges: tuple["VerticalMerge", ...] = ()
+    has_formulas: bool = False
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,7 @@ def read_hidden_dimensions(content: bytes) -> dict[str, SheetVisibility]:
             hidden_rows: set[int] = set()
             hidden_columns: set[int] = set()
             vertical_merges: list[VerticalMerge] = []
+            has_formulas = False
             with archive.open(path) as xml_stream:
                 for event, element in ElementTree.iterparse(
                     xml_stream, events=("start", "end")
@@ -120,11 +122,14 @@ def read_hidden_dimensions(content: bytes) -> dict[str, SheetVisibility]:
                                     anchor_cell=f"{get_column_letter(min_column)}{min_row}",
                                 )
                             )
+                    elif event == "start" and element.tag == f"{{{_MAIN_NS}}}f":
+                        has_formulas = True
                     elif event == "end":
                         element.clear()
             result[sheet_name] = SheetVisibility(
                 hidden_rows=hidden_rows,
                 hidden_columns=hidden_columns,
                 vertical_merges=tuple(vertical_merges),
+                has_formulas=has_formulas,
             )
         return result
