@@ -53,7 +53,7 @@ if port_in_use "$FRONTEND_PORT"; then
   exit 1
 fi
 
-rm -rf "$RUNTIME"
+rm -rf "$RUNTIME/storage" "$RUNTIME/logs"
 mkdir -p "$RUNTIME/storage" "$RUNTIME/logs"
 PYTHON="$ROOT/.venv/bin/python"
 [[ -x "$PYTHON" ]] || PYTHON="$(command -v python3)"
@@ -101,7 +101,7 @@ cat <<INFO
 Demo is ready:
   Workspace: http://localhost:$FRONTEND_PORT/workspace
   Backend:   http://127.0.0.1:$BACKEND_PORT/api/health
-  Fixtures:  $ROOT/fixtures/rfq_samples/
+  Fixtures:  $ROOT/demo-data/
   Logs:      $RUNTIME/logs/
   Stop:      $ROOT/scripts/demo.sh stop
 

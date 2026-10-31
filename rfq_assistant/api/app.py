@@ -7,14 +7,16 @@ import os
 from pathlib import Path
 import time
 from typing import List, Optional
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from decimal import Decimal
 from rfq_assistant.agents.tools import ApprovalGateError, QuotationCommercialService
 from rfq_assistant.auth import PilotUser, get_current_user, require_role
 from rfq_assistant.cases.manager import CaseManager
 from rfq_assistant.exports import ExportGenerator, ExportValidationError
 from rfq_assistant.ingestion.excel import ExcelBOMInspector
+from rfq_assistant.ingestion.excel_values import render_excel_cell
 from rfq_assistant.ingestion.malware import ClamAVScanner
 from rfq_assistant.ingestion.storage import DocumentStorage
 from rfq_assistant.ingestion.ai_extraction import GroundedLLMExtractor
@@ -34,13 +36,20 @@ from rfq_assistant.schemas.models import (
     ExportRequest,
     RFQCase,
     RFQLineItem,
-    RFQLineItemUpdate,
+    RFQLineItemUpdateRequest,
     ReviewPlan,
+    SpreadsheetSourcePreview,
+    SourcePreviewCell,
+    SourcePreviewRow,
 )
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 log = logging.getLogger(__name__)
 DEFAULT_CATALOG_PATH = ROOT / "fixtures" / "catalogs" / "industrial_components_sample_catalog.csv"
+
+
+class PNGResponse(Response):
+    media_type = "image/png"
 
 # Global repositories and services
 _storage_root = Path(os.environ.get("RFQ_ASSISTANT_STORAGE_DIR", "storage"))
@@ -191,7 +200,6 @@ async def create_rfq(
     pasted_text: Optional[str] = Form(None),
     title: Optional[str] = Form(None),
     customer_label: Optional[str] = Form(None),
-    actor: str = Form("Inside Sales"),
     current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     """Creates draft case from an uploaded file or pasted email text with malware defense."""
@@ -334,11 +342,159 @@ def get_original_source(
     )
 
 
+@app.get(
+    "/api/rfqs/{case_id}/source/pages/{page_number}",
+    response_class=PNGResponse,
+    responses={200: {"content": {"image/png": {"schema": {"type": "string", "format": "binary"}}}}},
+)
+def get_pdf_source_page(
+    case_id: str,
+    page_number: int,
+    current_user: PilotUser = Depends(get_current_user),
+):
+    """Render one bounded PDF page as a safe image for source verification."""
+    import math
+    import pymupdf
+    if page_number < 1:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Page number must be positive.")
+    case = case_manager.get_case(case_id)
+    if not case or not case.source_file:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ source not found.")
+    source = case_manager.storage.uploads_dir / case.case_id / case.source_file.file_name
+    if not source.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original source file is missing.")
+    if source.suffix.lower() != ".pdf":
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Source page previews are available for PDF documents.")
+
+    document = None
+    try:
+        document = pymupdf.open(source)
+        if page_number > document.page_count:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF page not found.")
+        page = document.load_page(page_number - 1)
+        width, height = page.rect.width, page.rect.height
+        if not math.isfinite(width) or not math.isfinite(height) or width <= 0 or height <= 0:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="PDF page dimensions are invalid.")
+        scale = min(1.0, 1600 / max(width, height))
+        pixmap = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False, annots=False)
+        return Response(
+            content=pixmap.tobytes("png"),
+            media_type="image/png",
+            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.warning("[rfq_pdf_page_preview] failed case=%s page=%d error=%s", case_id, page_number, type(exc).__name__)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="PDF page could not be previewed safely.") from exc
+    finally:
+        if document is not None:
+            document.close()
+
+
+@app.get(
+    "/api/rfqs/{case_id}/source/preview",
+    response_model=SpreadsheetSourcePreview,
+)
+def get_spreadsheet_source_preview(
+    case_id: str,
+    sheet_name: str,
+    row_number: int,
+    target_cells: Optional[List[str]] = Query(default=None),
+    radius: int = Query(default=4, ge=0, le=10),
+    current_user: PilotUser = Depends(get_current_user),
+):
+    """Return a small read-only worksheet window centered on source evidence."""
+    import re
+    import openpyxl
+    from openpyxl.utils.cell import column_index_from_string, coordinate_from_string, get_column_letter
+
+    if not 1 <= row_number <= 5000:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Source row is outside workbook limits.")
+    case = case_manager.get_case(case_id)
+    if not case or not case.source_file:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ source not found.")
+
+    source = case_manager.storage.uploads_dir / case.case_id / case.source_file.file_name
+    if not source.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original source file is missing.")
+    if source.suffix.lower() != ".xlsx":
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Inline source preview is available for XLSX workbooks. Open the original file to inspect this source.",
+        )
+
+    selected_cells = []
+    for coordinate in target_cells or []:
+        if len(selected_cells) >= 20 or not re.fullmatch(r"[A-Z]{1,3}[1-9][0-9]*", coordinate, re.IGNORECASE):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid source cell reference.")
+        column, cell_row = coordinate_from_string(coordinate.upper())
+        if len(column) > 3 or cell_row > 5000:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Source cell is outside workbook limits.")
+        selected_cells.append(coordinate.upper())
+
+    workbook = cached_workbook = None
+    try:
+        workbook = openpyxl.load_workbook(source, read_only=True, data_only=False)
+        cached_workbook = openpyxl.load_workbook(source, read_only=True, data_only=True)
+        if sheet_name not in workbook.sheetnames:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Worksheet not found in source workbook.")
+        worksheet = workbook[sheet_name]
+        cached_worksheet = cached_workbook[sheet_name]
+        if (worksheet.max_row and worksheet.max_row > 5000) or (worksheet.max_column and worksheet.max_column > 100):
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Worksheet exceeds source preview limits.")
+        max_row = worksheet.max_row or 0
+        max_column = worksheet.max_column or 0
+        if not 1 <= row_number <= max_row:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Source row is not present in this worksheet.")
+        columns = min(max(worksheet.max_column or 1, 1), 100)
+        row_numbers = set(range(max(1, row_number - radius), min(max_row, row_number + radius) + 1))
+        for coordinate in selected_cells:
+            column_letters, cell_row = coordinate_from_string(coordinate)
+            if cell_row > max_row or column_index_from_string(column_letters) > max_column:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Source cell is not present in this worksheet.")
+            row_numbers.add(cell_row)
+        row_numbers = sorted(row_numbers)
+        rows = []
+        for target_row in row_numbers:
+            formula_cells = next(worksheet.iter_rows(min_row=target_row, max_row=target_row, min_col=1, max_col=columns))
+            cached_cells = next(cached_worksheet.iter_rows(min_row=target_row, max_row=target_row, min_col=1, max_col=columns))
+            cells = []
+            for index, cell in enumerate(formula_cells, start=1):
+                coordinate = f"{get_column_letter(index)}{target_row}"
+                if cell.value is None and coordinate.upper() not in selected_cells:
+                    continue
+                cells.append(SourcePreviewCell(
+                    coordinate=coordinate,
+                    value=render_excel_cell(cell, cached_cells[index - 1]),
+                    is_formula=cell.data_type == "f",
+                    selected=coordinate.upper() in selected_cells,
+                ))
+            rows.append(SourcePreviewRow(row_number=target_row, is_target=target_row == row_number, cells=cells))
+        return SpreadsheetSourcePreview(
+            file_name=case.source_file.file_name,
+            sheet_name=sheet_name,
+            target_row=row_number,
+            target_cells=selected_cells,
+            rows=rows,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.warning("[rfq_source_preview] failed case=%s error=%s", case_id, type(exc).__name__, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Source worksheet could not be previewed safely.") from exc
+    finally:
+        if workbook is not None:
+            workbook.close()
+        if cached_workbook is not None:
+            cached_workbook.close()
+
+
 @app.patch("/api/rfqs/{case_id}/lines/{line_id}", response_model=RFQLineItem)
 def update_rfq_line(
     case_id: str,
     line_id: str,
-    update: RFQLineItemUpdate,
+    update: RFQLineItemUpdateRequest,
     current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     update.actor = current_user.name

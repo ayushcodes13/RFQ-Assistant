@@ -1,6 +1,7 @@
 """Unit and integration tests for document validation, storage, and deterministic parsers."""
 
 from pathlib import Path
+import shutil
 import pytest
 
 from rfq_assistant.ingestion import (
@@ -129,6 +130,41 @@ class TestSpreadsheetParser:
         field_lines = [l for l in result.lines if l.source_locator.sheet_name == "Field Instrumentation"]
         assert len(field_lines) == 2
 
+    @pytest.mark.parametrize(("include_formula", "expected_loads"), [(False, 1), (True, 2)])
+    def test_cached_workbook_is_opened_only_when_formula_cells_exist(
+        self, monkeypatch, include_formula, expected_loads
+    ):
+        import io
+        import openpyxl
+        from rfq_assistant.ingestion.parsers import spreadsheet_parser
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.append(["MPN", "Manufacturer", "Quantity"])
+        sheet.append(["LC1D09BD", "Schneider Electric", "=2+3" if include_formula else 5])
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        original_loader = spreadsheet_parser.openpyxl.load_workbook
+        loads = []
+
+        def counting_loader(*args, **kwargs):
+            loads.append(kwargs.get("data_only", False))
+            return original_loader(*args, **kwargs)
+
+        monkeypatch.setattr(spreadsheet_parser.openpyxl, "load_workbook", counting_loader)
+        parsed = spreadsheet_parser.SpreadsheetParser().parse(
+            output.getvalue(), "maybe-formula.xlsx"
+        )
+
+        assert len(loads) == expected_loads
+        assert parsed.lines[0].quantity == (None if include_formula else 5)
+        assert any(
+            warning.code == "FORMULA_VALUE_NOT_EVALUATED"
+            for warning in parsed.lines[0].extraction_warnings
+        ) is include_formula
+
     def test_xlsx_formula_quantity_is_preserved_but_not_calculated(self):
         import io
         import openpyxl
@@ -149,6 +185,149 @@ class TestSpreadsheetParser:
         assert "=5+5" in line.raw_text
         assert any(w.code == "FORMULA_VALUE_NOT_EVALUATED" for w in line.extraction_warnings)
         assert any(w.code == "MISSING_QUANTITY" for w in line.extraction_warnings)
+        assert len(parsed.source_coverage) == 1
+        sheet_coverage = parsed.source_coverage[0]
+        assert sheet_coverage.unit_id == "sheet:Sheet"
+        assert sheet_coverage.nonempty_regions == 2
+        assert sheet_coverage.structured_regions == 1
+        assert sheet_coverage.filtered_regions == 1
+        assert sheet_coverage.header_row_number == 1
+        assert sheet_coverage.formula_backed_fields == 1
+
+    def test_xlsx_formula_cached_value_is_shown_but_never_used_as_quantity(self):
+        import io
+        import zipfile
+        from xml.etree import ElementTree
+
+        import openpyxl
+        from rfq_assistant.ingestion.parsers.spreadsheet_parser import SpreadsheetParser
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.append(["MPN", "Manufacturer", "Quantity"])
+        sheet.append(["LC1D09BD", "Schneider Electric", "=5+5"])
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        # openpyxl writes formulas without cached results. Insert a synthetic
+        # workbook cache value into the generated fixture's XML for this test.
+        cached_fixture = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(output.getvalue())) as source_zip:
+            with zipfile.ZipFile(cached_fixture, "w", zipfile.ZIP_DEFLATED) as target_zip:
+                for entry in source_zip.infolist():
+                    data = source_zip.read(entry.filename)
+                    if entry.filename == "xl/worksheets/sheet1.xml":
+                        root = ElementTree.fromstring(data)
+                        ns = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+                        cell = root.find(".//x:c[@r='C2']", ns)
+                        assert cell is not None
+                        value = cell.find("x:v", ns)
+                        assert value is not None
+                        value.text = "10"
+                        data = ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
+                    target_zip.writestr(entry, data)
+
+        parsed = SpreadsheetParser().parse(cached_fixture.getvalue(), "formula_quantity.xlsx")
+        line = parsed.lines[0]
+        warning = next(w for w in line.extraction_warnings if w.code == "FORMULA_VALUE_NOT_EVALUATED")
+        assert line.quantity is None
+        assert "cached value" not in line.raw_text
+        assert "quantity=10" in warning.message
+
+    def test_xlsx_zero_padding_format_preserves_numeric_mpn_leading_zeroes(self):
+        import io
+        import openpyxl
+        from rfq_assistant.ingestion.parsers.spreadsheet_parser import SpreadsheetParser
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.append(["MPN", "Manufacturer", "Quantity"])
+        sheet.append([2900364, "Phoenix Contact", 2])
+        sheet["A2"].number_format = "00000000"
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        parsed = SpreadsheetParser().parse(output.getvalue(), "numeric_mpn.xlsx")
+        assert parsed.lines[0].requested_mpn == "02900364"
+        assert "02900364" in parsed.lines[0].raw_text
+
+    def test_xlsx_numeric_mpn_over_excel_precision_limit_is_flagged(self):
+        import io
+        import openpyxl
+        from rfq_assistant.ingestion.parsers.spreadsheet_parser import SpreadsheetParser
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.append(["MPN", "Manufacturer", "Quantity"])
+        sheet.append([1234567890123456, "Synthetic Manufacturer", 1])
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        parsed = SpreadsheetParser().parse(output.getvalue(), "long_numeric_mpn.xlsx")
+        assert any(
+            warning.code == "NUMERIC_MPN_EXCEL_PRECISION_RISK"
+            for warning in parsed.lines[0].extraction_warnings
+        )
+
+    def test_xlsx_hidden_rows_and_mapped_hidden_columns_are_manifested_and_flagged(self):
+        import io
+        import openpyxl
+        from rfq_assistant.ingestion.parsers.spreadsheet_parser import SpreadsheetParser
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.append(["MPN", "Manufacturer", "Quantity"])
+        sheet.append(["LC1D09BD", "Schneider Electric", 2])
+        sheet.row_dimensions[2].hidden = True
+        sheet.column_dimensions["A"].hidden = True
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        parsed = SpreadsheetParser().parse(output.getvalue(), "hidden_layout.xlsx")
+        warning_codes = {warning.code for warning in parsed.lines[0].extraction_warnings}
+        coverage = next(unit for unit in parsed.source_coverage if unit.unit_kind == "workbook_sheet")
+
+        assert "HIDDEN_ROW_REVIEW" in warning_codes
+        assert "HIDDEN_COLUMN_VALUE_REVIEW" in warning_codes
+        assert coverage.hidden_row_count == 1
+        assert coverage.hidden_column_count == 1
+
+    def test_xlsx_vertical_merged_manufacturer_is_inherited_with_cell_provenance(self):
+        import io
+        import openpyxl
+        from rfq_assistant.ingestion.parsers.spreadsheet_parser import SpreadsheetParser
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.append(["MPN", "Manufacturer", "Quantity"])
+        sheet.append(["6ES7214-1AG40-0XB0", "Siemens", 2])
+        sheet.append(["6ES7214-1AG40-0XB1", None, 4])
+        sheet.merge_cells("B2:B3")
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        parsed = SpreadsheetParser().parse(output.getvalue(), "merged_manufacturer.xlsx")
+        inherited = parsed.lines[1]
+        warning_codes = {warning.code for warning in inherited.extraction_warnings}
+
+        assert len(parsed.lines) == 2
+        assert inherited.requested_manufacturer == "Siemens"
+        assert inherited.quantity == 4
+        assert inherited.source_locator.field_source_cells == {
+            "requested_mpn": "A3",
+            "requested_manufacturer": "B2",
+            "quantity": "C3",
+        }
+        assert "MERGED_CELL_VALUE_INHERITED" in warning_codes
+        sheet_coverage = next(
+            unit for unit in parsed.source_coverage if unit.unit_kind == "workbook_sheet"
+        )
+        assert sheet_coverage.locator.field_source_cells == {}
 
 
 class TestPDFParser:
@@ -169,6 +348,14 @@ class TestPDFParser:
         phoenix_line = next(line for line in result.lines if line.requested_manufacturer == "Phoenix Contact")
         assert phoenix_line.requested_mpn == "2900364"
         assert all(l.source_locator.page_number == 1 for l in result.lines)
+        coverage = result.source_coverage
+        assert [unit.unit_id for unit in coverage] == ["page:1"]
+        assert coverage[0].nonempty_regions == (
+            coverage[0].structured_regions
+            + coverage[0].review_regions
+            + coverage[0].filtered_regions
+        )
+        assert len(coverage[0].content_sha256) == 64
 
     def test_corrupt_pdf_fails_safely(self):
         file_path = SAMPLES_DIR / "corrupt_file.pdf"
@@ -232,6 +419,55 @@ class TestPDFParser:
         assert len(result.candidate_segments) == 1
         assert result.candidate_segments[0].locator.row_number == 1
 
+    def test_text_coverage_accounts_for_extraction_review_and_metadata(self):
+        from rfq_assistant.ingestion.parsers.text_parser import TextParser
+
+        content = (
+            "Subject: Synthetic request\n"
+            "1. 10 pcs Schneider Electric LC1D09BD contactor\n"
+            "Could you also include the unusual assembly from last time?\n"
+        )
+        result = TextParser().parse(content.encode(), "coverage.txt")
+        assert len(result.source_coverage) == 1
+        unit = result.source_coverage[0]
+        assert unit.unit_id == "document"
+        assert unit.nonempty_regions == 3
+        assert unit.structured_regions == 1
+        assert unit.review_regions == 1
+        assert unit.filtered_regions == 1
+        assert unit.structured_regions + unit.review_regions + unit.filtered_regions == unit.nonempty_regions
+        assert unit.locator.row_number is None
+        assert unit.locator.text_snippet is None
+        assert len(unit.content_sha256) == 64
+        repeated = TextParser().parse(content.encode(), "coverage.txt")
+        assert repeated.source_coverage == result.source_coverage
+        changed = TextParser().parse(content.replace("10 pcs", "11 pcs").encode(), "coverage.txt")
+        assert changed.source_coverage[0].content_sha256 != unit.content_sha256
+
+    def test_xlsx_manifest_includes_empty_and_hidden_sheets(self):
+        import io
+        import openpyxl
+        from rfq_assistant.ingestion.parsers.spreadsheet_parser import SpreadsheetParser
+
+        workbook = openpyxl.Workbook()
+        workbook.active.title = "Empty"
+        hidden = workbook.create_sheet("Hidden RFQ")
+        hidden.sheet_state = "hidden"
+        hidden.append(["Synthetic quotation request"])
+        hidden.append(["MPN", "Quantity", "Description"])
+        hidden.append(["LC1D09BD", 2, "Contactor"])
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        parsed = SpreadsheetParser().parse(output.getvalue(), "hidden_sheet.xlsx")
+        coverage = {unit.locator.sheet_name: unit for unit in parsed.source_coverage}
+        assert coverage["Empty"].is_empty is True
+        assert coverage["Empty"].sheet_visibility == "visible"
+        assert coverage["Hidden RFQ"].is_empty is False
+        assert coverage["Hidden RFQ"].sheet_visibility == "hidden"
+        assert coverage["Hidden RFQ"].header_row_number == 2
+
     def test_candidate_region_limit_fails_explicitly(self):
         from rfq_assistant.ingestion.parsers.text_parser import TextParser
 
@@ -256,8 +492,8 @@ class TestPDFParser:
 
         monkeypatch.setattr(
             pdf_parser,
-            "recognize_page",
-            lambda _content, _page_number: "1 Siemens 6ES7214-1AG40-0XB0 PLC 2 EA",
+            "recognize_rendered_page",
+            lambda _rendered: "1 Siemens 6ES7214-1AG40-0XB0 PLC 2 EA",
         )
         result = get_parser(SourceType.PDF_NATIVE, allow_ocr=True).parse(content, "scan.pdf")
 
@@ -271,6 +507,43 @@ class TestPDFParser:
         page_evidence = next(segment for segment in result.evidence_segments if segment.locator.page_number == 1)
         assert "Siemens" in page_evidence.text
         assert any(w.code == "OCR_TEXT_REVIEW" for w in page_evidence.warnings)
+
+    def test_multi_page_ocr_opens_pdf_once_for_all_page_renders(self, monkeypatch):
+        """Selected pages reuse one decoded PDF and keep OCR work per page."""
+        import io
+        import fitz
+        from PIL import Image
+        import pymupdf
+        from rfq_assistant.ingestion.parsers import pdf_parser
+
+        image_buffer = io.BytesIO()
+        Image.new("RGB", (300, 400), "white").save(image_buffer, format="PNG")
+        pdf = fitz.open()
+        for _ in range(3):
+            page = pdf.new_page(width=595, height=842)
+            page.insert_image(page.rect, stream=image_buffer.getvalue())
+        content = pdf.tobytes()
+        pdf.close()
+
+        original_open = pymupdf.open
+        opens = []
+        monkeypatch.setattr(
+            pymupdf, "open",
+            lambda *args, **kwargs: (opens.append(1), original_open(*args, **kwargs))[1],
+        )
+        recognized = []
+
+        def fake_recognize(_rendered):
+            recognized.append(1)
+            return "1 Siemens 6ES7214-1AG40-0XB0 PLC 2 EA"
+
+        monkeypatch.setattr(pdf_parser, "recognize_rendered_page", fake_recognize)
+        result = pdf_parser.PDFParser(allow_ocr=True).parse(content, "three-page-scan.pdf")
+
+        # One open is used for visual triage and one for every selected OCR render.
+        assert len(opens) == 2
+        assert len(recognized) == 3
+        assert len(result.lines) == 3
 
     def test_page_triage_failure_sends_every_page_to_ocr(self, monkeypatch):
         """An unknown page classification must not silently trust native text alone."""
@@ -287,12 +560,13 @@ class TestPDFParser:
         def fail_triage(_page, _text):
             raise RuntimeError("synthetic triage failure")
 
-        def fake_ocr(_content, page_number):
+        def fake_ocr(_rendered):
+            page_number = len(calls) + 1
             calls.append(page_number)
             return "1 Siemens 6ES7214-1AG40-0XB0 PLC 2 EA"
 
         monkeypatch.setattr(pdf_parser, "page_needs_ocr", fail_triage)
-        monkeypatch.setattr(pdf_parser, "recognize_page", fake_ocr)
+        monkeypatch.setattr(pdf_parser, "recognize_rendered_page", fake_ocr)
         result = pdf_parser.PDFParser(allow_ocr=True).parse(content, "triage-fallback.pdf")
 
         assert calls == [1]
@@ -300,6 +574,82 @@ class TestPDFParser:
         assert any(w.code == "PDF_PAGE_TRIAGE_UNAVAILABLE" for w in result.warnings)
         assert any(w.code == "LOCAL_OCR_USED" for w in result.warnings)
         assert any(w.code == "OCR_TEXT_REVIEW" for w in result.lines[0].extraction_warnings)
+
+    @pytest.mark.skipif(
+        shutil.which("tesseract") is None,
+        reason="local OCR integration requires the Tesseract binary",
+    )
+    @pytest.mark.parametrize("rotation", [90, 270])
+    def test_rotated_scan_is_ocrd_in_reading_orientation_with_timing(self, rotation):
+        """A rotated image-only page keeps readable OCR and rotation provenance."""
+        import io
+        import fitz
+        from PIL import Image
+        from rfq_assistant.matching import ExactMatchEngine
+        from rfq_assistant.matching.catalog import CatalogRepository
+        from rfq_assistant.ingestion.parsers.pdf_parser import PDFParser
+        from rfq_assistant.schemas.enums import MatchStatus
+        from rfq_assistant.schemas.models import CatalogItem
+
+        source = fitz.open()
+        source_page = source.new_page(width=1400, height=400)
+        source_page.insert_text(
+            (40, 210), "1 Siemens 6ES7214-1AG40-0XB0 PLC 2 EA",
+            fontsize=56, fontname="helv",
+        )
+        upright_png = source_page.get_pixmap(
+            matrix=fitz.Matrix(2, 2), alpha=False
+        ).tobytes("png")
+        source.close()
+
+        sideways = Image.open(io.BytesIO(upright_png)).rotate(
+            90 if rotation == 90 else 270, expand=True
+        )
+        image_buffer = io.BytesIO()
+        sideways.save(image_buffer, format="PNG")
+        pdf = fitz.open()
+        page = pdf.new_page(width=400, height=1400)
+        page.insert_image(page.rect, stream=image_buffer.getvalue())
+        page.set_rotation(rotation)
+        content = pdf.tobytes()
+        pdf.close()
+
+        parsed = PDFParser(allow_ocr=True).parse(content, "rotated_scan.pdf")
+        page_coverage = next(
+            unit for unit in parsed.source_coverage
+            if unit.unit_kind == "pdf_page"
+        )
+
+        assert page_coverage.page_rotation_degrees == rotation
+        assert page_coverage.ocr_status == "succeeded"
+        assert page_coverage.ocr_duration_ms is not None
+        assert page_coverage.ocr_duration_ms > 0
+        assert page_coverage.locator.page_bbox is None
+        assert len(parsed.lines) == 1
+        assert parsed.lines[0].requested_manufacturer == "Siemens"
+        assert parsed.lines[0].quantity == 2
+        bbox = parsed.lines[0].source_locator.page_bbox
+        assert bbox is not None
+        assert parsed.lines[0].source_locator.row_number == 1
+        assert 0 <= bbox[0] < bbox[2] <= 1
+        assert 0 <= bbox[1] < bbox[3] <= 1
+        assert parsed.lines[0].source_locator.ocr_confidence is not None
+        catalog = CatalogRepository()
+        catalog.add_item(CatalogItem(
+            internal_sku="SIEMENS-PLC-1",
+            manufacturer="Siemens",
+            manufacturer_part_number="6ES7214-1AG40-0XB0",
+            description="Synthetic PLC",
+        ))
+        match = ExactMatchEngine(catalog).match_line(
+            parsed.lines[0].requested_mpn,
+            parsed.lines[0].requested_manufacturer,
+        )
+        assert match.match_status == MatchStatus.NO_MATCH
+        assert any(
+            warning.code == "OCR_TEXT_REVIEW"
+            for warning in parsed.lines[0].extraction_warnings
+        )
 
     def test_image_heavy_page_is_blocked_when_ocr_disabled(self):
         import io
@@ -314,8 +664,12 @@ class TestPDFParser:
         content = pdf.tobytes()
         pdf.close()
 
-        with pytest.raises(DocumentParserError, match="image|OCR"):
+        with pytest.raises(DocumentParserError, match="image|OCR") as error:
             get_parser(SourceType.PDF_NATIVE, allow_ocr=False).parse(content, "scan.pdf")
+        page = error.value.source_coverage[0]
+        assert page.ocr_status == "disabled"
+        assert page.processing_status == "needs_review"
+        assert page.is_empty is True
 
 
 class TestTextAndEmailParser:

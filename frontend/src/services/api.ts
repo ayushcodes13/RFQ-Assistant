@@ -8,6 +8,7 @@ import {
   RFQLineItem,
   RFQLineItemUpdate,
   ReviewPlan,
+  SpreadsheetSourcePreview,
 } from "@/types";
 
 const API_BASE = "/api/proxy";
@@ -97,6 +98,24 @@ export async function getReviewPlan(caseId: string): Promise<ReviewPlan> {
   return getJson<ReviewPlan>(`/api/rfqs/${caseId}/review-plan`, "Failed to load review plan");
 }
 
+export async function getSpreadsheetSourcePreview(
+  caseId: string,
+  sheetName: string,
+  rowNumber: number,
+  targetCells: string[] = [],
+): Promise<SpreadsheetSourcePreview> {
+  const query = new URLSearchParams({
+    sheet_name: sheetName,
+    row_number: String(rowNumber),
+    radius: "4",
+  });
+  targetCells.forEach((cell) => query.append("target_cells", cell));
+  return getJson<SpreadsheetSourcePreview>(
+    `/api/rfqs/${encodeURIComponent(caseId)}/source/preview?${query.toString()}`,
+    "Failed to open the source worksheet",
+  );
+}
+
 export async function approveRemainingValidatedLines(
   caseId: string
 ): Promise<{ status: string; updated_count: number }> {
@@ -111,14 +130,12 @@ export async function approveRemainingValidatedLines(
 export async function createCaseFromUpload(
   file: File,
   title?: string,
-  customer?: string,
-  actor: string = "Inside Sales"
+  customer?: string
 ): Promise<RFQCase> {
   const formData = new FormData();
   formData.append("file", file);
   if (title) formData.append("title", title);
   if (customer) formData.append("customer_label", customer);
-  formData.append("actor", actor);
 
   const res = await fetch(`${API_BASE}/api/rfqs`, {
     method: "POST",
@@ -132,14 +149,12 @@ export async function createCaseFromUpload(
 export async function createCaseFromText(
   text: string,
   title?: string,
-  customer?: string,
-  actor: string = "Inside Sales"
+  customer?: string
 ): Promise<RFQCase> {
   const formData = new FormData();
   formData.append("pasted_text", text);
   if (title) formData.append("title", title);
   if (customer) formData.append("customer_label", customer);
-  formData.append("actor", actor);
 
   const res = await fetch(`${API_BASE}/api/rfqs`, {
     method: "POST",

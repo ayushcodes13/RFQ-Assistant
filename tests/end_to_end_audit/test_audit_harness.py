@@ -919,7 +919,8 @@ class TestFullApiWorkflow:
 
         # 1. Create case from text
         resp = client.post("/api/rfqs", data={
-            "pasted_text": "10 pcs Schneider Electric LC1D09BD\n5 pcs Siemens 6ES7214-1AG40-0XB0",
+            "pasted_text": "10 pcs Schneider Electric LC1D09BD
+5 pcs Siemens 6ES7214-1AG40-0XB0",
             "title": "API Workflow Test",
             "customer_label": "SYN-TEST",
             "actor": "Auditor",
@@ -941,7 +942,7 @@ class TestFullApiWorkflow:
         for line in lines:
             patch_resp = client.patch(
                 f"/api/rfqs/{case_id}/lines/{line['line_id']}",
-                json={"expected_version": 1, "review_decision": "APPROVED", "actor": "Auditor"},
+                json={"review_decision": "APPROVED", "expected_version": line["version"], "actor": "Auditor"},
             )
             assert patch_resp.status_code == 200
 

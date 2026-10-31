@@ -145,7 +145,8 @@ class TestAPIEndpoints:
         assert data["catalog_size"] >= 20
 
     def test_create_rfq_from_pasted_text(self, client):
-        text = "10 pcs Schneider Electric LC1D09BD\n5 pcs Siemens 6ES7214-1AG40-0XB0"
+        text = "10 pcs Schneider Electric LC1D09BD
+5 pcs Siemens 6ES7214-1AG40-0XB0"
         resp = client.post(
             "/api/rfqs",
             data={"pasted_text": text, "title": "API Test RFQ", "actor": "Test User"},
@@ -153,6 +154,14 @@ class TestAPIEndpoints:
         assert resp.status_code == 200
         case_data = resp.json()
         case_id = case_data["case_id"]
+        coverage = case_data["source_coverage"]
+        assert len(coverage) == 1
+        assert coverage[0]["unit_id"] == "document"
+        assert coverage[0]["nonempty_regions"] == 2
+        assert coverage[0]["structured_regions"] == 2
+        assert coverage[0]["locator"]["text_snippet"] is None
+        assert len(coverage[0]["content_sha256"]) == 64
+        assert client.get(f"/api/rfqs/{case_id}").json()["source_coverage"] == coverage
 
         # Fetch lines
         lines_resp = client.get(f"/api/rfqs/{case_id}/lines")
@@ -166,7 +175,7 @@ class TestAPIEndpoints:
         line1_id = lines[0]["line_id"]
         patch_resp = client.patch(
             f"/api/rfqs/{case_id}/lines/{line1_id}",
-            json={"expected_version": 1, "review_decision": "APPROVED", "actor": "Test Reviewer"},
+            json={"review_decision": "APPROVED", "expected_version": lines[0]["version"], "actor": "Test Reviewer"},
         )
         assert patch_resp.status_code == 200
         assert patch_resp.json()["review_decision"] == "APPROVED"

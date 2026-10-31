@@ -1,13 +1,19 @@
 """Case lifecycle manager with audit logging and state tracking."""
 
+import csv
 import hashlib
+import json
 import logging
 import math
 import threading
 import time
 import uuid
 from datetime import datetime
+from importlib import metadata as package_metadata
+from io import BytesIO, StringIO
 from typing import Dict, List, Optional
+
+from openpyxl import load_workbook
 
 from rfq_assistant.ingestion import (
     DocumentParserError,
@@ -18,14 +24,15 @@ from rfq_assistant.ingestion import (
 from rfq_assistant.ingestion.ai_extraction import (
     EvidenceSegment,
     GroundedLLMExtractor,
+    LLM_SCHEMA_VERSION,
+    LLM_VALIDATOR_VERSION,
 )
 from rfq_assistant.ingestion.parsers.base import ParsedDocumentResult, ParsedLineDraft
-from rfq_assistant.ingestion.parsers.text_parser import TextParser
 from rfq_assistant.ingestion.parsers.spreadsheet_parser import identify_columns
 from rfq_assistant.ingestion.source_segments import source_segments
 from rfq_assistant.matching import CatalogRepository, ExactMatchEngine
 from rfq_assistant.quotation.line_rules import blocking_line_issues
-from rfq_assistant.persistence import SQLiteStateStore
+from rfq_assistant.persistence import StateStore
 from rfq_assistant.schemas.enums import (
     AuditAction,
     CaseStatus,
@@ -44,8 +51,11 @@ from rfq_assistant.schemas.models import (
     RFQLineItemUpdate,
     ReviewPlan,
     SourceFileMetadata,
+    SourceCoverageUnit,
     SourceLocator,
 )
+
+MAX_TEXT_INTAKE_REGIONS = 500
 
 log = logging.getLogger(__name__)
 
@@ -61,7 +71,7 @@ class CaseManager:
         self,
         catalog: CatalogRepository,
         storage: Optional[DocumentStorage] = None,
-        state_store: Optional[SQLiteStateStore] = None,
+        state_store: Optional[StateStore] = None,
         llm_extractor: Optional[GroundedLLMExtractor] = None,
     ):
         self.catalog = catalog
@@ -110,6 +120,7 @@ class CaseManager:
         _existing_case_id: Optional[str] = None,
         _job_id: Optional[str] = None,
         _worker_id: Optional[str] = None,
+        _queue_wait_ms: Optional[float] = None,
     ) -> RFQCase:
         """Validates, stores, parses, and matches an uploaded RFQ document.
 
@@ -118,15 +129,25 @@ class CaseManager:
         """
         total_started = time.perf_counter()
         timings = {"validate_ms": 0.0, "store_ms": 0.0, "parse_ms": 0.0, "llm_ms": 0.0, "match_ms": 0.0}
+        if _queue_wait_ms is not None:
+            timings["queue_wait_ms"] = max(0.0, float(_queue_wait_ms))
         if bool(_job_id) != bool(_worker_id):
             raise ValueError("Both ingestion job ID and worker ID are required for a fenced processing attempt.")
 
         def require_lease() -> None:
-            if _job_id and self.state_store and not self.state_store.owns_ingestion_job(_job_id, _worker_id):
+            if (
+                _job_id
+                and self.state_store
+                and (
+                    not _worker_id
+                    or not self.state_store.owns_ingestion_job(_job_id, _worker_id)
+                )
+            ):
                 raise IngestionLeaseLostError("This worker no longer owns the RFQ processing lease.")
 
         stage_started = time.perf_counter()
         clean_name, src_type, digest = validate_file_upload(filename, content)
+        self._validate_intake_regions(clean_name, src_type, content)
         timings["validate_ms"] = (time.perf_counter() - stage_started) * 1000
         if _existing_case_id:
             case_id = _existing_case_id
@@ -175,13 +196,49 @@ class CaseManager:
             require_lease()
             # Parse document
             parser = get_parser(src_type)
+            parser_profile = {
+                **parser.cache_profile(),
+                "source_type": src_type.value,
+                "source_segmenter_version": "source-segments-v1",
+            }
+            dependencies = parser.cache_dependencies if src_type != SourceType.CSV else ()
+            for package_name in dependencies:
+                try:
+                    parser_profile.setdefault("dependencies", {})[package_name] = package_metadata.version(package_name)
+                except package_metadata.PackageNotFoundError:
+                    continue
+            profile_digest = hashlib.sha256(
+                json.dumps(parser_profile, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            case.parser_version = str(parser_profile["version"])
+            case.processing_profile_sha256 = profile_digest
+            cached_parse = None
+            if _existing_case_id and self.state_store:
+                cached_parse = self.state_store.load_processing_artifact(
+                    case_id, "parsed_document", digest, profile_digest
+                )
+            case.parse_cache_hit = cached_parse is not None
             stage_started = time.perf_counter()
-            try:
-                parse_result = parser.parse(content, clean_name)
-            finally:
+            if cached_parse is not None:
+                parse_result = ParsedDocumentResult.model_validate(cached_parse)
+                case.parse_cache_hit = True
+            else:
+                try:
+                    parse_result = parser.parse(content, clean_name)
+                finally:
+                    timings["parse_ms"] = (time.perf_counter() - stage_started) * 1000
+                if _existing_case_id and self.state_store:
+                    require_lease()
+                    self.state_store.save_processing_artifact(
+                        case_id, "parsed_document", digest, profile_digest,
+                        parse_result.model_dump(mode="json"),
+                        job_id=_job_id, worker_id=_worker_id,
+                    )
+            if case.parse_cache_hit:
                 timings["parse_ms"] = (time.perf_counter() - stage_started) * 1000
             require_lease()
             if self.llm_extractor and self._needs_llm_fallback(parse_result):
+                case.llm_cache_hit = False
                 stage_started = time.perf_counter()
                 try:
                     require_lease()
@@ -190,8 +247,69 @@ class CaseManager:
                         parse_result.evidence_segments,
                         parse_result.candidate_segments,
                     )
-                    llm_result = self.llm_extractor.extract(segments)
+                    cache_profile_fn = getattr(self.llm_extractor, "cache_profile", None)
+                    llm_profile = cache_profile_fn() if callable(cache_profile_fn) else None
+                    llm_profile_digest = None
+                    if llm_profile:
+                        llm_profile_digest = hashlib.sha256(json.dumps({
+                            "profile": llm_profile,
+                            "segments": [segment.model_dump(mode="json") for segment in segments],
+                        }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+                    cached_llm = None
+                    if llm_profile_digest and _existing_case_id and self.state_store:
+                        cached_llm = self.state_store.load_processing_artifact(
+                            case_id, "llm_result", digest, llm_profile_digest
+                        )
+                    llm_result = (
+                        ParsedDocumentResult.model_validate(cached_llm)
+                        if cached_llm is not None else self.llm_extractor.extract(segments)
+                    )
                     require_lease()
+                    case.llm_cache_hit = cached_llm is not None
+                    previous_llm_calls = case.llm_call_count
+                    case.llm_model = llm_result.llm_model
+                    case.llm_deployment_version = llm_result.llm_deployment_version
+                    case.llm_prompt_sha256 = llm_result.llm_prompt_sha256
+                    case.llm_schema_version = LLM_SCHEMA_VERSION
+                    case.llm_validator_version = LLM_VALIDATOR_VERSION
+                    if cached_llm is None:
+                        case.llm_call_count += llm_result.llm_call_count
+                        case.llm_repair_call_count += llm_result.llm_repair_call_count
+                        case.llm_review_call_count += llm_result.llm_review_call_count
+                        if llm_result.llm_input_tokens is None:
+                            case.llm_input_tokens = None
+                        elif previous_llm_calls == 0:
+                            case.llm_input_tokens = llm_result.llm_input_tokens
+                        elif case.llm_input_tokens is not None:
+                            case.llm_input_tokens += llm_result.llm_input_tokens
+                        if llm_result.llm_output_tokens is None:
+                            case.llm_output_tokens = None
+                        elif previous_llm_calls == 0:
+                            case.llm_output_tokens = llm_result.llm_output_tokens
+                        elif case.llm_output_tokens is not None:
+                            case.llm_output_tokens += llm_result.llm_output_tokens
+                    elif previous_llm_calls == 0:
+                        # Recover telemetry if a crash happened after the
+                        # artifact write but before the case snapshot.
+                        case.llm_call_count = llm_result.llm_call_count
+                        case.llm_repair_call_count = llm_result.llm_repair_call_count
+                        case.llm_review_call_count = llm_result.llm_review_call_count
+                        case.llm_input_tokens = llm_result.llm_input_tokens
+                        case.llm_output_tokens = llm_result.llm_output_tokens
+                    timings["llm_ms"] = (time.perf_counter() - stage_started) * 1000
+                    case.stage_timings_ms = dict(timings)
+                    self._persist_case(case_id, job_id=_job_id, worker_id=_worker_id)
+                    if (cached_llm is None and llm_profile_digest and self.state_store
+                            and llm_result.lines
+                            and not any(w.severity.lower() == "error" for w in llm_result.warnings)
+                            and not any(w.code == "LLM_VALIDATION_UNAVAILABLE"
+                                        for line in llm_result.lines for w in line.extraction_warnings)):
+                        require_lease()
+                        self.state_store.save_processing_artifact(
+                            case_id, "llm_result", digest, llm_profile_digest,
+                            llm_result.model_dump(mode="json"),
+                            job_id=_job_id, worker_id=_worker_id,
+                        )
                     if llm_result.lines or parse_result.candidate_segments:
                         parse_result = self._merge_llm_proposals(
                             parse_result, llm_result, parse_result.candidate_segments
@@ -234,16 +352,19 @@ class CaseManager:
                     ParsedDocumentResult(lines=[]),
                     parse_result.candidate_segments,
                 )
+            case.source_coverage = parse_result.source_coverage
             # A "successful" empty RFQ is worse than an explicit parse failure:
             # operators might otherwise export an empty worksheet as complete.
             if not parse_result.lines:
                 raise DocumentParserError(
-                    "No RFQ line items could be extracted. Please correct the document or paste items manually."
+                    "No RFQ line items could be extracted. Please correct the document or paste items manually.",
+                    source_coverage=parse_result.source_coverage,
                 )
             fatal_warnings = [w for w in parse_result.warnings if w.severity.lower() == "error"]
             if fatal_warnings:
                 raise DocumentParserError(
-                    "Document extraction failed: " + "; ".join(w.message for w in fatal_warnings)
+                    "Document extraction failed: " + "; ".join(w.message for w in fatal_warnings),
+                    source_coverage=parse_result.source_coverage,
                 )
             require_lease()
             case.document_warnings = parse_result.warnings
@@ -296,10 +417,13 @@ class CaseManager:
             )
 
             self._refresh_case_metrics(case_id, job_id=_job_id, worker_id=_worker_id)
+            case.stage_timings_ms = dict(timings)
+            self._persist_case(case_id, job_id=_job_id, worker_id=_worker_id)
             log.info(
-                "[rfq_timing] source_type=%s outcome=parsed lines=%d validate_ms=%.1f store_ms=%.1f parse_ms=%.1f llm_ms=%.1f match_ms=%.1f total_ms=%.1f",
-                src_type.value, len(lines), timings["validate_ms"], timings["store_ms"],
-                timings["parse_ms"], timings["llm_ms"], timings["match_ms"],
+                "[rfq_timing] source_type=%s outcome=parsed lines=%d queue_wait_ms=%.1f validate_ms=%.1f store_ms=%.1f parse_ms=%.1f llm_ms=%.1f match_ms=%.1f total_ms=%.1f",
+                src_type.value, len(lines), timings.get("queue_wait_ms", 0.0),
+                timings["validate_ms"], timings["store_ms"], timings["parse_ms"],
+                timings["llm_ms"], timings["match_ms"],
                 (time.perf_counter() - total_started) * 1000,
             )
             return self._cases[case_id]
@@ -309,11 +433,19 @@ class CaseManager:
             # failures. Do not turn a processing failure into a lost upload.
             failed_case = self._cases[case_id]
             failed_case.status = CaseStatus.FAILED
+            failed_case.source_coverage = exc.source_coverage or failed_case.source_coverage or [SourceCoverageUnit(
+                unit_id="document",
+                locator=SourceLocator(file_name=clean_name),
+                unit_kind="document",
+                processing_status="failed",
+                error_code="DOCUMENT_PARSER_ERROR",
+            )]
             failed_case.document_warnings.append(ExtractionWarning(
                 code="DOCUMENT_EXTRACTION_FAILED",
                 message=str(exc),
                 severity="error",
             ))
+            failed_case.stage_timings_ms = dict(timings)
             self._lines_by_case[case_id] = []
             self._record_audit(
                 case_id=case_id,
@@ -323,9 +455,10 @@ class CaseManager:
             )
             self._persist_case(case_id, job_id=_job_id, worker_id=_worker_id)
             log.info(
-                "[rfq_timing] source_type=%s outcome=failed validate_ms=%.1f store_ms=%.1f parse_ms=%.1f llm_ms=%.1f total_ms=%.1f",
-                src_type.value, timings["validate_ms"], timings["store_ms"], timings["parse_ms"],
-                timings["llm_ms"], (time.perf_counter() - total_started) * 1000,
+                "[rfq_timing] source_type=%s outcome=failed queue_wait_ms=%.1f validate_ms=%.1f store_ms=%.1f parse_ms=%.1f llm_ms=%.1f total_ms=%.1f",
+                src_type.value, timings.get("queue_wait_ms", 0.0), timings["validate_ms"],
+                timings["store_ms"], timings["parse_ms"], timings["llm_ms"],
+                (time.perf_counter() - total_started) * 1000,
             )
             return failed_case
         except Exception:
@@ -336,11 +469,20 @@ class CaseManager:
                 raise
             failed_case = self._cases[case_id]
             failed_case.status = CaseStatus.FAILED
+            if not failed_case.source_coverage:
+                failed_case.source_coverage = [SourceCoverageUnit(
+                    unit_id="document",
+                    locator=SourceLocator(file_name=clean_name),
+                    unit_kind="document",
+                    processing_status="failed",
+                    error_code="PROCESSING_UNEXPECTED_ERROR",
+                )]
             failed_case.document_warnings.append(ExtractionWarning(
                 code="PROCESSING_UNEXPECTED_ERROR",
                 message="The document could not be processed safely. The original upload is retained for manual review.",
                 severity="error",
             ))
+            failed_case.stage_timings_ms = dict(timings)
             self._lines_by_case[case_id] = []
             self._record_audit(case_id, actor, AuditAction.PARSED, notes="Unexpected processing failure; original upload retained.")
             self._persist_case(case_id, job_id=_job_id, worker_id=_worker_id)
@@ -376,7 +518,10 @@ class CaseManager:
         self._persist_case(case.case_id)
         return case
 
-    def process_pending_case(self, case_id: str, *, job_id: str, worker_id: str) -> RFQCase:
+    def process_pending_case(
+        self, case_id: str, *, job_id: str, worker_id: str,
+        queue_wait_ms: Optional[float] = None,
+    ) -> RFQCase:
         """Resume a persisted case only while its state is still PROCESSING."""
         with self._processing_locks_guard:
             case_lock = self._processing_locks.setdefault(case_id, threading.Lock())
@@ -386,9 +531,15 @@ class CaseManager:
         with case_lock:
             if self.state_store and not self.state_store.owns_ingestion_job(job_id, worker_id):
                 raise IngestionLeaseLostError("This worker no longer owns the RFQ processing lease.")
-            return self._process_pending_case_locked(case_id, job_id=job_id, worker_id=worker_id)
+            return self._process_pending_case_locked(
+                case_id, job_id=job_id, worker_id=worker_id,
+                queue_wait_ms=queue_wait_ms,
+            )
 
-    def _process_pending_case_locked(self, case_id: str, *, job_id: str, worker_id: str) -> RFQCase:
+    def _process_pending_case_locked(
+        self, case_id: str, *, job_id: str, worker_id: str,
+        queue_wait_ms: Optional[float] = None,
+    ) -> RFQCase:
         case = self._cases.get(case_id)
         if case is None or not case.source_file:
             raise DocumentParserError("Queued RFQ source is missing.")
@@ -406,6 +557,7 @@ class CaseManager:
             _existing_case_id=case_id,
             _job_id=job_id,
             _worker_id=worker_id,
+            _queue_wait_ms=queue_wait_ms,
         )
         if result.source_type == SourceType.EMAIL_TEXT:
             result.raw_text = content.decode("utf-8", errors="replace")
@@ -573,24 +725,75 @@ class CaseManager:
 
     @staticmethod
     def _preflight_text_input(raw_text: str) -> bytes:
-        """Reject empty/header-only paste before creating a case or storing bytes."""
+        """Reject empty, oversized, or header-only pasted input before persistence."""
         content = raw_text.encode("utf-8")
         if not raw_text.strip():
             raise DocumentParserError("Pasted RFQ text is empty. Add inquiry text or line items before creating a case.")
         validate_file_upload("pasted_inquiry.txt", content)
-        parsed = TextParser().parse(content, "pasted_inquiry.txt")
-        if not parsed.lines and parsed.candidate_segments:
-            def is_header(segment) -> bool:
-                text = segment.text.strip()
-                for delimiter in ("|", ",", ";", "\t"):
-                    if delimiter in text:
-                        mapping = identify_columns([part.strip() for part in text.split(delimiter)])
-                        if "mpn" in mapping and len(mapping) >= 2:
-                            return True
-                return False
-            if all(is_header(segment) for segment in parsed.candidate_segments):
-                raise DocumentParserError("The pasted text contains only table headers. Add at least one item row.")
+        parsed = get_parser(SourceType.EMAIL_TEXT).parse(content, "pasted_inquiry.txt")
+        nonempty_regions = [line for line in raw_text.splitlines() if line.strip()]
+        if len(nonempty_regions) > MAX_TEXT_INTAKE_REGIONS:
+            raise DocumentParserError(
+                f"This RFQ contains more than {MAX_TEXT_INTAKE_REGIONS} non-empty text regions. Split it into smaller requests."
+            )
+        if parsed.lines or not parsed.candidate_segments:
+            return content
+
+        def looks_like_header(text: str) -> bool:
+            normalized = text.strip()
+            for delimiter in ("|", ",", ";", "\t"):
+                if delimiter in normalized:
+                    mapping = identify_columns([part.strip() for part in normalized.split(delimiter)])
+                    if "mpn" in mapping and len(mapping) >= 2:
+                        return True
+            return False
+
+        if all(looks_like_header(segment.text) for segment in parsed.candidate_segments):
+            raise DocumentParserError("The pasted text contains only table headers. Add at least one item row.")
         return content
+
+    @staticmethod
+    def _validate_intake_regions(filename: str, source_type: SourceType, content: bytes) -> None:
+        """Reject clearly empty or unbounded intake before writing case state/files."""
+        if source_type == SourceType.EMAIL_TEXT:
+            text = content.decode("utf-8", errors="replace")
+            regions = [line for line in text.splitlines() if line.strip()]
+            if not regions:
+                raise DocumentParserError("Pasted RFQ text is empty. Add non-whitespace content before creating a case.")
+            if len(regions) > MAX_TEXT_INTAKE_REGIONS:
+                raise DocumentParserError(
+                    f"This RFQ contains more than {MAX_TEXT_INTAKE_REGIONS} non-empty text regions. Split it into smaller requests."
+                )
+        elif filename.lower().endswith(".csv"):
+            try:
+                rows = [row for row in csv.reader(StringIO(content.decode("utf-8-sig"))) if any(cell.strip() for cell in row)]
+            except (UnicodeDecodeError, csv.Error) as exc:
+                raise DocumentParserError("CSV could not be read safely. Check its encoding and contents.") from exc
+            if len(rows) == 1 and any(token in " ".join(rows[0]).lower() for token in ("mpn", "part number", "manufacturer", "quantity", "qty", "description")):
+                raise DocumentParserError("This CSV contains headers but no RFQ line items.")
+        elif filename.lower().endswith(".xlsx"):
+            workbook = load_workbook(BytesIO(content), read_only=True, data_only=False)
+            nonempty_rows = 0
+            header_rows = 0
+            header_terms = ("mpn", "part number", "manufacturer", "quantity", "qty", "description")
+            try:
+                for worksheet in workbook.worksheets:
+                    first_content_row = True
+                    for row in worksheet.iter_rows(values_only=True):
+                        values = [str(value).strip() for value in row if value is not None and str(value).strip()]
+                        if not values:
+                            continue
+                        nonempty_rows += 1
+                        if first_content_row:
+                            first_content_row = False
+                            if any(term in " ".join(values).lower() for term in header_terms):
+                                header_rows += 1
+            finally:
+                workbook.close()
+            if not nonempty_rows:
+                raise DocumentParserError("This spreadsheet contains no non-empty cells.")
+            if header_rows and nonempty_rows == header_rows:
+                raise DocumentParserError("This workbook contains headers but no RFQ line items.")
 
     def update_line(
         self, case_id: str, line_id: str, update: RFQLineItemUpdate
@@ -829,7 +1032,6 @@ class CaseManager:
         lines = self._lines_by_case.get(case_id, [])
         eligible = [line for line in lines if self._is_sample_eligible(line, self.catalog)]
         eligible_ids = {line.line_id for line in eligible}
-        exceptions = [line.line_id for line in lines if line.line_id not in eligible_ids]
 
         sample_size = min(5, len(eligible))
         groups: Dict[str, List[RFQLineItem]] = {}
@@ -865,15 +1067,45 @@ class CaseManager:
                 allocation[group_keys[index]] = 1
 
         sample_ids: List[str] = []
+        covered_group_keys = {key for key, count in allocation.items() if count > 0}
+        covered_eligible_ids = {
+            line.line_id
+            for key in covered_group_keys
+            for line in groups[key]
+        }
         for key in group_keys:
             group_lines = groups[key]
             count = allocation[key]
             sample_ids.extend(line.line_id for line in group_lines[:count])
         sample_ids = sample_ids[:sample_size]
+        # A clean row from a source stratum that could not fit into the five
+        # sample slots has not been represented by the sample. Keep those rows
+        # as individual-review exceptions instead of silently batch-approving
+        # an unseen extraction path/location.
+        exceptions = [
+            line.line_id for line in lines
+            if line.line_id not in eligible_ids or line.line_id not in covered_eligible_ids
+        ]
+        lines_by_id = {line.line_id: line for line in eligible}
+        sample_rationale = {}
+        for line_id in sample_ids:
+            line = lines_by_id[line_id]
+            path = "Luna-assisted" if any(
+                warning.code == "LLM_PROPOSED_EXTRACTION" for warning in line.extraction_warnings
+            ) else "structured extraction"
+            locator = line.source_locator
+            location = (
+                f"sheet {locator.sheet_name}" if locator.sheet_name
+                else f"PDF page {locator.page_number}" if locator.page_number
+                else "text/document"
+            )
+            sample_rationale[line_id] = f"Representative clean row from {path} · {location}"
         sampled = set(sample_ids)
         remaining = [
             line.line_id for line in eligible
-            if line.line_id not in sampled and line.review_decision != ReviewDecision.APPROVED
+            if line.line_id in covered_eligible_ids
+            and line.line_id not in sampled
+            and line.review_decision != ReviewDecision.APPROVED
         ]
         sample_approved = bool(sample_ids) and all(
             next(line for line in eligible if line.line_id == line_id).review_decision == ReviewDecision.APPROVED
@@ -889,6 +1121,7 @@ class CaseManager:
             total_lines=len(lines),
             exception_line_ids=exceptions,
             sample_line_ids=sample_ids,
+            sample_rationale=sample_rationale,
             remaining_line_ids=remaining,
             sample_approved=sample_approved,
             sample_correction_found=sample_correction_found,

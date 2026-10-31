@@ -128,7 +128,7 @@ class TestExportAPIEndpoints:
         line_id = lines[0]["line_id"]
 
         # Approve line
-        client.patch(f"/api/rfqs/{case_id}/lines/{line_id}", json={"expected_version": 1, "review_decision": "APPROVED"})
+        client.patch(f"/api/rfqs/{case_id}/lines/{line_id}", json={"review_decision": "APPROVED", "expected_version": lines[0]["version"]})
 
         # Export worksheet
         export_resp = client.post(

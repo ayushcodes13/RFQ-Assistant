@@ -8,8 +8,12 @@ Show the proposed **pre-ERP quotation preparation step**: incoming RFQ file or e
 
 ### Preflight, 10-15 minutes before the meeting
 
-1. Clone and open this repository on an isolated machine. **No real customer, employer or personal production data**.
-2. From the repository root, run `./scripts/demo.sh`. It starts synchronous ingestion on backend port 8010 and frontend port 3010, uses fresh isolated state under `.demo-runtime/`, and leaves existing `storage/` untouched. It refuses ports already in use; override with `RFQ_DEMO_BACKEND_PORT` or `RFQ_DEMO_FRONTEND_PORT` if needed. Stop with `./scripts/demo.sh stop`.
+1. Open this repository on the demo machine. **No real customer, employer or personal production data**.
+2. From the repository root, start the isolated demo launcher (it uses separate ports 8010/3010, a fresh `.demo-runtime/` database, and synchronous ingestion; it refuses occupied ports and does not kill unrelated processes):
+   ```bash
+   ./scripts/demo.sh
+   ```
+   Keep the process running while presenting. Stop it with `./scripts/demo.sh stop`. If either isolated port is occupied, choose free ones with `RFQ_DEMO_BACKEND_PORT` and `RFQ_DEMO_FRONTEND_PORT`; do not kill an unidentified listener.
 3. Open `http://localhost:3010/workspace`. Confirm the **Cases Inbox**, **New RFQ Intake**, review workbench, **Audit Log** and **Export Quotation Worksheet** work.
 4. Confirm the sample catalog is available at `fixtures/catalogs/industrial_components_sample_catalog.csv` (the README says the backend loads it locally).
 5. Stage **two or three separate synthetic cases** before recording:

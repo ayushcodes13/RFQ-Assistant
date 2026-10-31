@@ -379,11 +379,12 @@ class TestV1APIEndpoints:
         assert len(match_data["results"]) == 1
         assert match_data["results"][0]["requested_mpn"] == "LC1D09BD"
         line_id = match_data["results"][0]["line_id"]
+        version = client.get(f"/api/rfqs/{case_id}/lines").json()[0]["version"]
 
         # 3. Human reviews and approves the line item
         rev_resp = client.patch(
             f"/api/rfqs/{case_id}/lines/{line_id}",
-            json={"expected_version": 1, "review_decision": "APPROVED", "actor": "Sales Rep #402"},
+            json={"review_decision": "APPROVED", "expected_version": version, "actor": "Sales Rep #402"},
         )
         assert rev_resp.status_code == 200
         assert rev_resp.json()["review_decision"] == "APPROVED"
