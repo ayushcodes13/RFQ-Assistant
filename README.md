@@ -110,7 +110,7 @@ The browser talks to the same-origin Next.js API proxy. Configure
 `NEXT_PUBLIC_` variable for credentials. This proxy does not provide user or
 tenant authentication: the local demo is single-user, and a shared API key is
 not sufficient authorization for a distributor pilot.
-Open `http://localhost:3000` to access the Review Workbench, upload RFQs, browse the catalog, inspect line-level provenance, batch approve, and export draft quotation worksheets.
+Open `http://localhost:3000` for the product landing page and `http://localhost:3000/workspace` for the RFQ workspace. The workspace supports RFQ intake, line-level provenance review, catalog browsing, approval, and draft worksheet export.
 
 ### Local persistence
 

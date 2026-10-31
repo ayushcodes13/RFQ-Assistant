@@ -2,6 +2,16 @@
 
 **Direction (redesigned 2026-10-31):** A clear RFQ operations desk: fast, legible, keyboard-first and audit-friendly. Not a chat playground, animated agent dashboard or neon AI demo.
 
+## Product landing page
+
+- The root route (`/`) is one continuous marketing page for independent industrial component distributors; `/workspace` opens the actual local product.
+- Visual direction: cinematic, editorial imagery and large display type with deliberate section changes; graphite and cool paper tones with the existing copper accent.
+- Show the real workflow in readable interface fragments: intake, line review, exact catalog matching, and draft preparation. The interactive example is clearly labeled as illustrative data.
+- Product images are generated industrial scenes and must remain labeled as illustrative, not customer locations or results.
+- Claims stay within the product blueprint. No customer logos, testimonials, accuracy/time-saved metrics, fabricated catalog evidence, autonomous quotes, or substitution claims.
+- Primary CTA is "Open workspace". Do not collect an email or imply a sales/contact workflow that is not implemented.
+- Motion demonstrates the workflow and reveals imagery; it must remain subtle, use transform/opacity or one-time image masking, and honor reduced-motion preferences.
+
 ## Design personality
 
 - Cool metal-tint frame around a white work sheet, near-black primary text, and a distinct copper accent used for the product mark, primary action and key data only.

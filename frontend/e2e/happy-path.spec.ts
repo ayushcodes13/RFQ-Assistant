@@ -15,9 +15,9 @@ const RFQ_TEXT = `Please quote the following spare parts:
 test("paste RFQ, approve every line, export and download a draft worksheet", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/workspace");
 
-  // The app shows a brief loading screen, then the header New RFQ action.
+  // Open the product workspace directly; the landing page lives at `/`.
   await expect(
     page.getByRole("button", { name: /New RFQ/i }).first()
   ).toBeVisible({ timeout: 20_000 });
