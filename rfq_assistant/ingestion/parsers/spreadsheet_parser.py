@@ -5,7 +5,7 @@ import io
 import itertools
 import re
 from bisect import bisect_right
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import openpyxl
 from openpyxl.utils import get_column_letter
 
@@ -26,6 +26,7 @@ from rfq_assistant.ingestion.excel_values import (
     render_excel_cell,
 )
 from rfq_assistant.ingestion.excel_visibility import (
+    VerticalMerge,
     read_hidden_dimensions,
 )
 
@@ -374,8 +375,8 @@ class SpreadsheetParser(BaseDocumentParser):
                     worksheet_rows = ((row, row) for row in ws.iter_rows(values_only=False))
                 row_iterator = iter(worksheet_rows)
                 header_sample = list(itertools.islice(row_iterator, 10))
-                merges_by_column = {}
-                merges_starting_by_row = {}
+                merges_by_column: Dict[int, List[VerticalMerge]] = {}
+                merges_starting_by_row: Dict[int, List[VerticalMerge]] = {}
                 for merge in visibility.vertical_merges:
                     merges_by_column.setdefault(merge.column_index, []).append(merge)
                     merges_starting_by_row.setdefault(merge.first_row, []).append(merge)
@@ -814,17 +815,17 @@ class SpreadsheetParser(BaseDocumentParser):
                     desc_scores[col_idx] = desc_scores.get(col_idx, 0) + 1
         result: Dict[str, int] = {}
         if mpn_scores:
-            result["mpn"] = max(mpn_scores, key=mpn_scores.get)
+            result["mpn"] = max(mpn_scores, key=lambda column: mpn_scores[column])
         available = {idx: score for idx, score in qty_scores.items() if idx != result.get("mpn")}
         if available:
-            result["quantity"] = max(available, key=available.get)
+            result["quantity"] = max(available, key=lambda column: available[column])
         available_desc = {idx: score for idx, score in desc_scores.items() if idx not in result.values()}
         if available_desc:
-            result["description"] = max(available_desc, key=available_desc.get)
+            result["description"] = max(available_desc, key=lambda column: available_desc[column])
         return result
 
     @staticmethod
-    def _get_col_value(row: Tuple, col_idx: Optional[int]) -> Optional[str]:
+    def _get_col_value(row: Sequence[Any], col_idx: Optional[int]) -> Optional[str]:
         if col_idx is None or col_idx >= len(row):
             return None
         cell = row[col_idx]

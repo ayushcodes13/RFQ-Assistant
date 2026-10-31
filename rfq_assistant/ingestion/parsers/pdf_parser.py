@@ -128,9 +128,9 @@ class PDFParser(BaseDocumentParser):
             visual_doc = pymupdf.open(stream=content, filetype="pdf")
             try:
                 for page_number, (_, native_text) in enumerate(page_texts, start=1):
-                    page = visual_doc[page_number - 1]
-                    page_rotations[page_number] = int(page.rotation)
-                    if page_number in native_text_failures or page_needs_ocr(page, native_text):
+                    visual_page = visual_doc[page_number - 1]
+                    page_rotations[page_number] = int(visual_page.rotation)
+                    if page_number in native_text_failures or page_needs_ocr(visual_page, native_text):
                         pages_needing_ocr.append(page_number)
             finally:
                 visual_doc.close()

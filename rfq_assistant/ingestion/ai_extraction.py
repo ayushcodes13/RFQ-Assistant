@@ -153,7 +153,7 @@ class OpenAICompatibleClient:
         self._usage.last_http_attempts = 0
         endpoint = self._completion_url(self.base_url, self.api_version)
         is_azure = (urlparse(endpoint).hostname or "").endswith((".openai.azure.com", ".services.ai.azure.com"))
-        request = {
+        request: dict[str, object] = {
             "model": self.model,
             "response_format": {"type": "json_object"},
             "messages": [
@@ -215,6 +215,8 @@ class OpenAICompatibleClient:
                 status = exc.response.status_code
                 retryable = status in {408, 429} or status >= 500
                 delay = self._retry_delay(attempt, exc.response.headers.get("retry-after"))
+                if status == 429 and delay is not None:
+                    self.call_gate.hold(delay)
                 if retryable and attempt < self.max_attempts and delay is not None:
                     log.warning(
                         "[rfq_llm_call] model=%s outcome=retry status=%d attempt=%d delay_s=%.2f",
@@ -249,6 +251,7 @@ class OpenAICompatibleClient:
                     self.model, type(exc).__name__, attempt, (time.perf_counter() - started) * 1000,
                 )
                 raise
+        raise RuntimeError("Provider attempts exhausted without a response or error")
 
     def _retry_delay(self, attempt: int, retry_after: Optional[str]) -> Optional[float]:
         if retry_after:
@@ -326,6 +329,7 @@ def _is_verbatim(value: Optional[str], quote: str) -> bool:
 def _quantity_is_grounded(quantity: Optional[Decimal], unit: Optional[str], quote: str) -> bool:
     if quantity is None:
         return True
+    normalized_unit = unit.upper() if unit else ""
 
     unit_aliases = {
         "EA": {"EA", "EACH", "UNIT", "UNITS"},
@@ -335,8 +339,8 @@ def _quantity_is_grounded(quantity: Optional[Decimal], unit: Optional[str], quot
         "SET": {"SET", "SETS"},
     }
     unit_pattern = None
-    if unit:
-        aliases = unit_aliases.get(unit.upper(), {unit.upper()})
+    if normalized_unit:
+        aliases = unit_aliases.get(normalized_unit, {normalized_unit})
         unit_pattern = "(?:" + "|".join(re.escape(alias) for alias in sorted(aliases, key=len, reverse=True)) + ")"
     unit_group = r"\s*(" + unit_pattern + r")" if unit_pattern else ""
     pattern = r"(?<![A-Za-z0-9.])([+-]?\d[\d,]*(?:\.\d+)?)(?:" + unit_group + r")?(?![A-Za-z0-9.])"
@@ -357,8 +361,11 @@ def _quantity_is_grounded(quantity: Optional[Decimal], unit: Optional[str], quot
                 re.IGNORECASE,
             ):
                 continue
-            if unit_pattern and observed_unit.upper() not in unit_aliases.get(unit.upper(), {unit.upper()}):
-                continue
+            if unit_pattern:
+                if observed_unit is None or observed_unit.upper() not in unit_aliases.get(
+                    normalized_unit, {normalized_unit}
+                ):
+                    continue
             return True
         except InvalidOperation:
             continue
@@ -430,6 +437,19 @@ class GroundedLLMExtractor:
             failure_threshold = max(1, min(10, int(os.getenv("RFQ_LLM_CIRCUIT_FAILURE_THRESHOLD", "4"))))
             circuit_open_seconds = max(1.0, min(300.0, float(os.getenv("RFQ_LLM_CIRCUIT_OPEN_SECONDS", "30"))))
             admission_timeout = max(0.0, min(30.0, float(os.getenv("RFQ_LLM_ADMISSION_TIMEOUT_SECONDS", "10"))))
+            shared_pacer = None
+            redis_url = os.getenv("RFQ_LLM_REDIS_URL", "").strip()
+            if redis_url:
+                from rfq_assistant.ingestion.redis_pacing import RedisSharedPacer
+
+                prefix = os.getenv("RFQ_LLM_SHARED_PACE_PREFIX", "{rfq-luna}:provider").strip()
+                if not prefix:
+                    raise ValueError("RFQ_LLM_SHARED_PACE_PREFIX must not be blank")
+                shared_pacer = RedisSharedPacer.from_url(
+                    redis_url,
+                    requests_per_minute=requests_per_minute,
+                    prefix=prefix,
+                )
             return cls(OpenAICompatibleClient(
                 key, model, base_url, timeout_seconds=timeout, api_version=api_version,
                 deployment_version=deployment_version,
@@ -442,9 +462,10 @@ class GroundedLLMExtractor:
                     failure_threshold=failure_threshold,
                     open_seconds=circuit_open_seconds,
                     admission_timeout_seconds=admission_timeout,
+                    shared_pacer=shared_pacer,
                 ),
             ))
-        except (ValueError, httpx.InvalidURL):
+        except (RuntimeError, ValueError, httpx.InvalidURL):
             return None
 
     def extract(self, segments: List[EvidenceSegment]) -> ParsedDocumentResult:

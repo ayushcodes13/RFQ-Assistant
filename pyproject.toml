@@ -36,6 +36,11 @@ test = [
     "mypy>=1.14",
     "bandit>=1.8",
     "pip-audit>=2.7",
+    "redis>=5.0",
+]
+
+production = [
+    "redis>=5.0",
 ]
 
 

@@ -10,6 +10,18 @@ jobs:
   test-backend:
     name: Backend Unit & Schema Tests
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      RFQ_TEST_REDIS_URL: redis://127.0.0.1:6379/15
     strategy:
       fail-fast: false
       matrix:
@@ -39,7 +51,8 @@ jobs:
             tests/test_property_invariants.py \
             tests/test_quotation_validator_contract.py \
             tests/test_catalog_import_edges.py \
-            tests/test_persistence_fault_matrix.py
+            tests/test_persistence_fault_matrix.py \
+            tests/test_redis_provider_pacing.py
 
       - name: Informational type check (ratchet toward zero errors)
         continue-on-error: true

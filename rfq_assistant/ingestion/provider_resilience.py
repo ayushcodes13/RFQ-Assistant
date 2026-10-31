@@ -1,8 +1,8 @@
-"""Process-local admission control for remote extraction-model calls.
+"""Admission control for remote extraction-model calls.
 
-This gate bounds concurrent requests, spaces request starts, and briefly opens
-after repeated provider transport failures. It is intentionally process-local;
-multi-worker deployments need a shared limiter and breaker.
+Concurrency and the circuit breaker are process-local. Request starts can use
+an optional shared provider pacer; without it, or during its outage, pacing is
+process-local as well.
 """
 
 from __future__ import annotations
@@ -10,11 +10,19 @@ from __future__ import annotations
 import threading
 import time
 from contextlib import AbstractContextManager
-from typing import Callable, Optional
+from typing import Callable, Optional, Protocol
 
 
 class ProviderCallRejected(RuntimeError):
-    """A model call was rejected by local pacing or circuit-breaker policy."""
+    """A model call was rejected by provider pacing or circuit-breaker policy."""
+
+
+class SharedProviderPacer(Protocol):
+    """Optional cross-process request-start pacing backed by shared infrastructure."""
+
+    def acquire(self, timeout_seconds: float) -> bool: ...
+
+    def hold(self, seconds: float) -> None: ...
 
 
 class ProviderPermit(AbstractContextManager):
@@ -55,6 +63,7 @@ class ProviderCallGate:
         failure_threshold: int = 4,
         open_seconds: float = 30.0,
         admission_timeout_seconds: float = 10.0,
+        shared_pacer: Optional[SharedProviderPacer] = None,
         clock: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
     ):
@@ -67,6 +76,7 @@ class ProviderCallGate:
         self._failure_threshold = failure_threshold
         self._open_seconds = open_seconds
         self._admission_timeout_seconds = admission_timeout_seconds
+        self._shared_pacer = shared_pacer
         self._clock = clock
         self._sleeper = sleeper
         self._lock = threading.Lock()
@@ -78,16 +88,20 @@ class ProviderCallGate:
     def acquire(self) -> ProviderPermit:
         """Acquire one paced wire-call permit or fail promptly for human review."""
         started = self._clock()
-        with self._lock:
-            now = self._clock()
-            scheduled = max(now, self._next_request_at)
-            delay = scheduled - now
-            if delay > self._admission_timeout_seconds:
-                raise ProviderCallRejected("Provider request pacing queue is full.")
-            self._next_request_at = scheduled + self._interval_seconds
+        globally_paced = False
+        if self._shared_pacer is not None:
+            globally_paced = self._shared_pacer.acquire(self._admission_timeout_seconds)
+        if not globally_paced:
+            with self._lock:
+                now = self._clock()
+                scheduled = max(now, self._next_request_at)
+                delay = scheduled - now
+                if delay > self._admission_timeout_seconds:
+                    raise ProviderCallRejected("Provider request pacing queue is full.")
+                self._next_request_at = scheduled + self._interval_seconds
 
-        if delay:
-            self._sleeper(delay)
+            if delay:
+                self._sleeper(delay)
         remaining = max(0.0, self._admission_timeout_seconds - (self._clock() - started))
         if not self._semaphore.acquire(timeout=remaining):
             raise ProviderCallRejected("Provider concurrency limit is busy.")
@@ -107,6 +121,11 @@ class ProviderCallGate:
         except Exception:
             self._semaphore.release()
             raise
+
+    def hold(self, seconds: float) -> None:
+        """Share a bounded provider cooldown after a 429 when Redis pacing is enabled."""
+        if self._shared_pacer is not None and seconds > 0:
+            self._shared_pacer.hold(seconds)
 
     def _report_success(self) -> None:
         with self._lock:
