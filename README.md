@@ -80,7 +80,7 @@ Small independent US/UK industrial electrical, automation, or electronic compone
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
-pytest -v   # Run all 43 unit, integration, and scenario tests
+pytest -v   # Run the unit, integration, contract, and scenario tests
 
 # Start backend server on port 8000 (preloads synthetic catalog automatically)
 uvicorn rfq_assistant.api.app:app --host 127.0.0.1 --port 8000
@@ -90,9 +90,26 @@ uvicorn rfq_assistant.api.app:app --host 127.0.0.1 --port 8000
 ```bash
 cd frontend
 npm install
-npm run build   # Verify typecheck and production build
-npm run dev     # Starts web app at http://localhost:3000
+npm run check:types  # Fail if generated OpenAPI types are stale
+npm run build        # Verify typecheck and production build
+npm run e2e          # Full-stack Playwright happy path (starts backend + Next)
+npm run dev          # Starts web app at http://localhost:3000
 ```
+
+Frontend wire types come from the backend OpenAPI schema. After changing API
+models, regenerate and commit both files:
+
+```bash
+python -m rfq_assistant.scripts.export_openapi
+cd frontend && npm run gen:types
+```
+
+The browser talks to the same-origin Next.js API proxy. Configure
+`RFQ_ASSISTANT_API_URL` and, when the backend requires it,
+`RFQ_ASSISTANT_API_KEY` in the **server environment only**; never use a
+`NEXT_PUBLIC_` variable for credentials. This proxy does not provide user or
+tenant authentication: the local demo is single-user, and a shared API key is
+not sufficient authorization for a distributor pilot.
 Open `http://localhost:3000` to access the Review Workbench, upload RFQs, browse the catalog, inspect line-level provenance, batch approve, and export draft quotation worksheets.
 
 ### Local persistence

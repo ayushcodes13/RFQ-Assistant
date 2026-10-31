@@ -62,6 +62,10 @@ available after the original manager objects are discarded.
 
 **UI:** keyboard-only editing, source navigation, warning notices, export confirmation, empty/loading/error states and prevention of accidental approval.
 
+**Contract:** `frontend/openapi.json` is checked in and verified against the live FastAPI app by `tests/test_openapi_contract.py`. Frontend wire types are generated from that schema with `npm run gen:types`; `npm run check:types` fails CI if the generated file is stale.
+
+**Browser E2E:** one deterministic Playwright happy path (`frontend/e2e/happy-path.spec.ts`) pastes a synthetic RFQ, extracts exact-match lines, approves every line, generates a draft worksheet and downloads it. It runs against a real FastAPI process and the Next.js dev server. It proves the UI/backend contract for that path only; it is not an accuracy benchmark.
+
 **Security:** dangerous uploads, oversized sheets, path traversal, prompt injection, tenant isolation, retention/deletion and leaked logs.
 
 **Pilot:** operator-led blind review of historical RFQs with manual baseline and measured corrections. Maintain a holdout set not used for tuning.

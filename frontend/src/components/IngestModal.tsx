@@ -1,402 +1,423 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  X,
+  Upload,
+  FileText,
+  CheckCircle,
+  AlertCircle,
+} from "lucide-react";
 import { createCaseFromText, createCaseFromUpload } from "@/services/api";
 import { RFQCase } from "@/types";
 
 interface IngestModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCaseCreated: (createdCase: RFQCase) => void;
+  onCaseCreated: (newCase: RFQCase) => void;
 }
 
-export function IngestModal({ isOpen, onClose, onCaseCreated }: IngestModalProps) {
-  const [tab, setTab] = useState<"file" | "text">("file");
+export function IngestModal({
+  isOpen,
+  onClose,
+  onCaseCreated,
+}: IngestModalProps) {
+  const [mode, setMode] = useState<"file" | "paste">("file");
   const [file, setFile] = useState<File | null>(null);
-  const [pastedText, setPastedText] = useState("");
+  const [pasteText, setPasteText] = useState("");
   const [title, setTitle] = useState("");
   const [customer, setCustomer] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  if (!isOpen) return null;
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    setErrorMsg(null);
-    setSubmitting(true);
+    setDragOver(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) {
+      setFile(f);
+      setMode("file");
+    }
+  }, []);
 
+  const handleSubmit = async () => {
+    setError(null);
+    setSubmitting(true);
     try {
-      if (tab === "file") {
-        if (!file) {
-          setErrorMsg("Please select or drop a valid file (PDF, XLSX, CSV).");
-          setSubmitting(false);
-          return;
-        }
-        const created = await createCaseFromUpload(file, title || undefined, customer || undefined);
-        onCaseCreated(created);
-        onClose();
+      let newCase: RFQCase;
+      if (mode === "file" && file) {
+        newCase = await createCaseFromUpload(
+          file,
+          title || undefined,
+          customer || undefined
+        );
+      } else if (mode === "paste" && pasteText.trim()) {
+        newCase = await createCaseFromText(
+          pasteText,
+          title || undefined,
+          customer || undefined
+        );
       } else {
-        if (!pastedText.trim()) {
-          setErrorMsg("Please enter or paste RFQ text.");
-          setSubmitting(false);
-          return;
-        }
-        const created = await createCaseFromText(pastedText, title || undefined, customer || undefined);
-        onCaseCreated(created);
-        onClose();
+        throw new Error("Please provide a file or paste text.");
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to process quotation request.");
+      onCaseCreated(newCase);
+      onClose();
+      setFile(null);
+      setPasteText("");
+      setTitle("");
+      setCustomer("");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Submission failed";
+      setError(msg);
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleFileDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setFile(e.dataTransfer.files[0]);
-    }
-  };
+  if (!isOpen) return null;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <div>
-            <h2 className="modal-title">New RFQ Intake</h2>
-            <p className="modal-subtitle">
-              Upload customer request files or paste email message text for deterministic line extraction.
-            </p>
-          </div>
-          <button className="close-btn" onClick={onClose} aria-label="Close modal">
-            ✕
-          </button>
-        </div>
-
-        <div className="tab-switcher">
-          <button
-            type="button"
-            className={`tab-btn ${tab === "file" ? "active" : ""}`}
-            onClick={() => setTab("file")}
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(42, 35, 24, 0.4)" }}
+          onClick={onClose}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            transition={{
+              duration: 0.35,
+              ease: [0.16, 1, 0.3, 1],
+            }}
+            className="w-full max-w-lg rounded-2xl overflow-hidden shadow-xl"
+            style={{
+              backgroundColor: "var(--color-cream-50)",
+              border: "1px solid var(--color-sand-200)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="New RFQ"
           >
-            📄 Upload File (PDF / XLSX / CSV)
-          </button>
-          <button
-            type="button"
-            className={`tab-btn ${tab === "text" ? "active" : ""}`}
-            onClick={() => setTab("text")}
-          >
-            ✉ Paste Email / Parts List
-          </button>
-        </div>
+            {/* Header */}
+            <div
+              className="flex items-center justify-between px-5 py-4 border-b"
+              style={{ borderColor: "var(--color-sand-200)" }}
+            >
+              <h2
+                className="text-lg font-bold"
+                style={{ color: "var(--color-brown-800)" }}
+              >
+                New RFQ
+              </h2>
+              <button
+                onClick={onClose}
+                className="p-1.5 rounded-lg transition-colors duration-200"
+                style={{ color: "var(--color-brown-300)" }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor =
+                    "var(--color-sand-100)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor =
+                    "transparent";
+                }}
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
 
-        {errorMsg && <div className="error-banner">⚠ {errorMsg}</div>}
+            {/* Body */}
+            <div className="px-5 py-5">
+              {/* Mode toggle */}
+              <div
+                className="flex rounded-lg p-1 mb-5"
+                style={{ backgroundColor: "var(--color-sand-100)" }}
+              >
+                <button
+                  onClick={() => setMode("file")}
+                  className="flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-all duration-200"
+                  style={{
+                    backgroundColor:
+                      mode === "file"
+                        ? "var(--color-cream-50)"
+                        : "transparent",
+                    color:
+                      mode === "file"
+                        ? "var(--color-brown-800)"
+                        : "var(--color-brown-400)",
+                    boxShadow:
+                      mode === "file"
+                        ? "0 1px 3px rgba(139,115,85,0.08)"
+                        : "none",
+                  }}
+                >
+                  <Upload size={15} />
+                  Upload file
+                </button>
+                <button
+                  onClick={() => setMode("paste")}
+                  className="flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-all duration-200"
+                  style={{
+                    backgroundColor:
+                      mode === "paste"
+                        ? "var(--color-cream-50)"
+                        : "transparent",
+                    color:
+                      mode === "paste"
+                        ? "var(--color-brown-800)"
+                        : "var(--color-brown-400)",
+                    boxShadow:
+                      mode === "paste"
+                        ? "0 1px 3px rgba(139,115,85,0.08)"
+                        : "none",
+                  }}
+                >
+                  <FileText size={15} />
+                  Paste text
+                </button>
+              </div>
 
-        <form onSubmit={handleSubmit} className="modal-body">
-          <div className="form-row">
-            <div className="form-group flex-2">
-              <label className="form-label">Case Title / Reference (optional)</label>
+              {/* File Upload */}
+              {mode === "file" && (
+                <div
+                  className={`rounded-xl border-2 border-dashed p-6 text-center cursor-pointer transition-all duration-300 mb-4 ${
+                    dragOver ? "scale-[1.01]" : ""
+                  }`}
+                  style={{
+                    borderColor: dragOver
+                      ? "var(--color-amber-400)"
+                      : file
+                        ? "var(--color-success-500)"
+                        : "var(--color-sand-300)",
+                    backgroundColor: dragOver
+                      ? "var(--color-amber-50)"
+                      : file
+                        ? "var(--color-success-50)"
+                        : "var(--color-cream-100)",
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragOver(true);
+                  }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.xlsx,.xls,.csv,.txt"
+                    onChange={(e) =>
+                      setFile(e.target.files?.[0] || null)
+                    }
+                    className="hidden"
+                  />
+                  <AnimatePresence mode="wait">
+                    {file ? (
+                      <motion.div
+                        key="has-file"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                      >
+                        <CheckCircle
+                          size={28}
+                          className="mx-auto mb-2"
+                          style={{
+                            color: "var(--color-success-500)",
+                          }}
+                        />
+                        <p
+                          className="text-sm font-semibold"
+                          style={{
+                            color: "var(--color-success-700)",
+                          }}
+                        >
+                          {file.name}
+                        </p>
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        key="no-file"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                      >
+                        <Upload
+                          size={28}
+                          className="mx-auto mb-2"
+                          style={{
+                            color: "var(--color-sand-400)",
+                          }}
+                        />
+                        <p
+                          className="text-sm font-medium"
+                          style={{
+                            color: "var(--color-brown-500)",
+                          }}
+                        >
+                          Drop PDF, XLSX or CSV here
+                        </p>
+                        <p
+                          className="text-xs mt-1"
+                          style={{
+                            color: "var(--color-brown-300)",
+                          }}
+                        >
+                          or click to browse
+                        </p>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+
+              {/* Text Paste */}
+              {mode === "paste" && (
+                <textarea
+                  placeholder="Paste email or RFQ text here…"
+                  value={pasteText}
+                  onChange={(e) => setPasteText(e.target.value)}
+                  rows={7}
+                  className="w-full rounded-xl border p-3 text-sm resize-y outline-none transition-colors duration-200 mb-4 font-mono"
+                  style={{
+                    borderColor: "var(--color-sand-200)",
+                    backgroundColor: "var(--color-cream-100)",
+                    color: "var(--color-brown-800)",
+                  }}
+                  onFocus={(e) => {
+                    e.currentTarget.style.borderColor =
+                      "var(--color-amber-300)";
+                  }}
+                  onBlur={(e) => {
+                    e.currentTarget.style.borderColor =
+                      "var(--color-sand-200)";
+                  }}
+                />
+              )}
+
+              {/* Optional title */}
               <input
                 type="text"
-                className="form-input"
-                placeholder="e.g. Line 3 Maintenance Spares"
+                placeholder="Optional case title"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors duration-200 mb-4"
+                style={{
+                  borderColor: "var(--color-sand-200)",
+                  backgroundColor: "var(--color-cream-100)",
+                  color: "var(--color-brown-800)",
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor =
+                    "var(--color-amber-300)";
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor =
+                    "var(--color-sand-200)";
+                }}
               />
-            </div>
-            <div className="form-group flex-1">
-              <label className="form-label">Customer Name / Account (optional)</label>
+
+              {/* Optional customer label */}
               <input
                 type="text"
-                className="form-input"
-                placeholder="e.g. Apex Manufacturing"
+                placeholder="Optional customer label"
                 value={customer}
                 onChange={(e) => setCustomer(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors duration-200 mb-4"
+                style={{
+                  borderColor: "var(--color-sand-200)",
+                  backgroundColor: "var(--color-cream-100)",
+                  color: "var(--color-brown-800)",
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor =
+                    "var(--color-amber-300)";
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor =
+                    "var(--color-sand-200)";
+                }}
               />
-            </div>
-          </div>
 
-          {tab === "file" ? (
+              {/* Error */}
+              <AnimatePresence>
+                {error && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="flex items-start gap-2 p-3 rounded-lg mb-3"
+                    role="alert"
+                    style={{
+                      backgroundColor: "var(--color-error-50)",
+                      color: "var(--color-error-700)",
+                    }}
+                  >
+                    <AlertCircle
+                      size={16}
+                      className="flex-shrink-0 mt-0.5"
+                    />
+                    <p className="text-xs">{error}</p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <p
+                className="text-[11px] leading-relaxed"
+                style={{ color: "var(--color-brown-300)" }}
+              >
+                Uploaded files are stored locally for processing. Review
+                our data handling practices.
+              </p>
+            </div>
+
+            {/* Footer */}
             <div
-              className="dropzone"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={handleFileDrop}
+              className="flex justify-end gap-2.5 px-5 py-4 border-t"
+              style={{ borderColor: "var(--color-sand-200)" }}
             >
-              <input
-                type="file"
-                id="rfq-file-input"
-                className="file-input-hidden"
-                accept=".xlsx,.csv,.pdf,.txt"
-                onChange={(e) => e.target.files && setFile(e.target.files[0])}
-              />
-              <label htmlFor="rfq-file-input" className="dropzone-label">
-                <div className="dropzone-icon">📁</div>
-                <div className="dropzone-text">
-                  {file ? (
-                    <span className="file-selected">
-                      Selected: <strong>{file.name}</strong> ({(file.size / 1024).toFixed(1)} KB)
-                    </span>
-                  ) : (
-                    <>
-                      <strong>Click to browse</strong> or drag & drop customer file here
-                    </>
-                  )}
-                </div>
-                <div className="dropzone-hint">
-                  Supports Excel (.xlsx), CSV, Native PDF, and Text files. Max 10 MB.
-                </div>
-              </label>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-lg text-sm font-medium border transition-all duration-200"
+                style={{
+                  color: "var(--color-brown-500)",
+                  borderColor: "var(--color-sand-200)",
+                  backgroundColor: "var(--color-cream-100)",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={
+                  submitting ||
+                  (mode === "file" && !file) ||
+                  (mode === "paste" && !pasteText.trim())
+                }
+                className="px-5 py-2 rounded-lg text-sm font-semibold transition-all duration-200 hover:shadow-md active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{
+                  backgroundColor: "var(--color-amber-400)",
+                  color: "var(--color-brown-900)",
+                }}
+              >
+                {submitting ? "Processing…" : "Extract line items"}
+              </button>
             </div>
-          ) : (
-            <div className="form-group">
-              <label className="form-label">Pasted RFQ Message Body</label>
-              <textarea
-                className="form-textarea"
-                rows={8}
-                placeholder="Paste customer email inquiry here... e.g.&#10;1. 10 pcs Schneider Electric LC1D09BD&#10;2. 4 units Siemens 6ES7223-1BL32-0XB0"
-                value={pastedText}
-                onChange={(e) => setPastedText(e.target.value)}
-              />
-            </div>
-          )}
-
-          <div className="security-notice">
-            🔒 <strong>Safety & Privacy:</strong> Input text and files are treated strictly as data.
-            Macros and embedded scripts are rejected. We never invent part numbers, stock, or lead times.
-          </div>
-
-          <div className="modal-footer">
-            <button type="button" className="cancel-btn" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className="submit-btn" disabled={submitting}>
-              {submitting ? "Extracting line items..." : "Extract & Match Lines →"}
-            </button>
-          </div>
-        </form>
-      </div>
-
-      <style jsx>{`
-        .modal-backdrop {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(15, 23, 42, 0.4);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 100;
-        }
-        .modal-dialog {
-          background: #FFFFFF;
-          border-radius: 8px;
-          width: 90%;
-          max-width: 640px;
-          box-shadow: var(--shadow-lg);
-          border: 1px solid var(--border-light);
-          overflow: hidden;
-        }
-        .modal-header {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          padding: 1.25rem 1.5rem;
-          border-bottom: 1px solid var(--border-light);
-          background: #FFFFFF;
-        }
-        .modal-title {
-          font-size: 1.15rem;
-          font-weight: 600;
-          color: var(--text-primary);
-        }
-        .modal-subtitle {
-          font-size: 0.85rem;
-          color: var(--text-muted);
-          margin-top: 0.2rem;
-        }
-        .close-btn {
-          background: none;
-          border: none;
-          font-size: 1.1rem;
-          cursor: pointer;
-          color: var(--text-muted);
-        }
-        .close-btn:hover {
-          color: var(--text-primary);
-        }
-        .tab-switcher {
-          display: flex;
-          background: #F8FAFC;
-          border-bottom: 1px solid var(--border-light);
-          padding: 0 1.5rem;
-        }
-        .tab-btn {
-          background: none;
-          border: none;
-          padding: 0.75rem 1.25rem;
-          font-size: 0.875rem;
-          font-weight: 500;
-          color: var(--text-secondary);
-          cursor: pointer;
-          border-bottom: 2px solid transparent;
-        }
-        .tab-btn:hover {
-          color: var(--text-primary);
-        }
-        .tab-btn.active {
-          color: var(--accent-primary);
-          border-bottom-color: var(--accent-primary);
-          background: #FFFFFF;
-          font-weight: 600;
-        }
-        .modal-body {
-          padding: 1.5rem;
-        }
-        .error-banner {
-          background: #FEF2F2;
-          color: #991B1B;
-          border: 1px solid #FECACA;
-          padding: 0.65rem 1rem;
-          margin: 1rem 1.5rem 0 1.5rem;
-          border-radius: 6px;
-          font-size: 0.85rem;
-        }
-        .form-row {
-          display: flex;
-          gap: 1rem;
-          margin-bottom: 1.25rem;
-        }
-        .flex-2 { flex: 2; }
-        .flex-1 { flex: 1; }
-        .form-group {
-          display: flex;
-          flex-direction: column;
-          gap: 0.35rem;
-        }
-        .form-label {
-          font-size: 0.82rem;
-          font-weight: 600;
-          color: var(--text-secondary);
-        }
-        .form-input {
-          padding: 0.5rem 0.75rem;
-          border: 1px solid var(--border-medium);
-          background: #FFFFFF;
-          color: var(--text-primary);
-          border-radius: 6px;
-          font-size: 0.875rem;
-        }
-        .form-textarea {
-          padding: 0.75rem;
-          border: 1px solid var(--border-medium);
-          background: #FFFFFF;
-          color: var(--text-primary);
-          border-radius: 6px;
-          font-size: 0.875rem;
-          font-family: var(--font-mono);
-          resize: vertical;
-          line-height: 1.45;
-        }
-        .form-input:focus, .form-textarea:focus {
-          outline: none;
-          border-color: var(--accent-primary);
-        }
-        .dropzone {
-          border: 2px dashed var(--border-medium);
-          border-radius: 6px;
-          background: #F8FAFC;
-          padding: 2.25rem 1.5rem;
-          text-align: center;
-          cursor: pointer;
-          transition: border-color 0.15s ease;
-          margin-bottom: 1.25rem;
-        }
-        .dropzone:hover {
-          border-color: var(--accent-primary);
-        }
-        .file-input-hidden {
-          display: none;
-        }
-        .dropzone-label {
-          cursor: pointer;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 0.4rem;
-        }
-        .dropzone-icon {
-          font-size: 2rem;
-        }
-        .dropzone-text {
-          font-size: 0.9rem;
-          color: var(--text-primary);
-          font-weight: 500;
-        }
-        .dropzone-hint {
-          font-size: 0.78rem;
-          color: var(--text-muted);
-        }
-        .file-selected {
-          color: var(--accent-primary);
-          font-weight: 500;
-        }
-        .security-notice {
-          background: #F8FAFC;
-          border: 1px solid var(--border-light);
-          padding: 0.65rem 0.85rem;
-          border-radius: 6px;
-          font-size: 0.78rem;
-          color: var(--text-muted);
-          line-height: 1.4;
-          margin-top: 1rem;
-        }
-        .security-notice strong {
-          color: var(--text-secondary);
-        }
-        .modal-footer {
-          display: flex;
-          align-items: center;
-          justify-content: flex-end;
-          gap: 0.75rem;
-          margin-top: 1.5rem;
-        }
-        .cancel-btn {
-          background: #FFFFFF;
-          border: 1px solid var(--border-medium);
-          color: var(--text-secondary);
-          padding: 0.5rem 1rem;
-          border-radius: 6px;
-          font-size: 0.875rem;
-          font-weight: 500;
-          cursor: pointer;
-        }
-        .cancel-btn:hover {
-          background: var(--bg-subtle);
-          color: var(--text-primary);
-        }
-        .submit-btn {
-          background: var(--accent-primary);
-          border: 1px solid var(--accent-primary);
-          color: #FFFFFF;
-          padding: 0.5rem 1.25rem;
-          border-radius: 6px;
-          font-size: 0.875rem;
-          font-weight: 500;
-          cursor: pointer;
-          transition: background 0.15s ease;
-        }
-        .submit-btn:hover:not(:disabled) {
-          background: var(--accent-primary-hover);
-        }
-        .submit-btn:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-        }
-      `}</style>
-    </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
