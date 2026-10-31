@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 from rfq_assistant.schemas.enums import (
     AuditAction,
     CaseStatus,
+    ExtractionOrigin,
     ExtractionStatus,
     MatchStatus,
     ProcessingStage,
@@ -101,6 +102,20 @@ class ExtractionWarning(BaseModel):
     severity: str = "warning"  # "warning" or "error"
 
 
+class FieldProvenance(BaseModel):
+    """Versioned source and review record for one extracted line field."""
+
+    raw_value: Optional[str] = None
+    proposed_value: Optional[str] = None
+    origin: ExtractionOrigin = ExtractionOrigin.DETERMINISTIC
+    source_locator: SourceLocator
+    evidence: Optional[str] = None
+    validation_status: str = "source_grounded"
+    revision: int = 1
+    review_status: ReviewDecision = ReviewDecision.PENDING
+    warnings: List[ExtractionWarning] = Field(default_factory=list)
+
+
 class CatalogItem(BaseModel):
     """An approved record from the distributor's item master."""
     internal_sku: str
@@ -127,6 +142,7 @@ class RFQLineItem(BaseModel):
     line_number: int
     raw_text: str
     source_locator: SourceLocator
+    field_provenance: Dict[str, FieldProvenance] = Field(default_factory=dict)
     requested_manufacturer: Optional[str] = None
     requested_mpn: Optional[str] = None
     description: Optional[str] = None
@@ -138,6 +154,7 @@ class RFQLineItem(BaseModel):
     extraction_warnings: List[ExtractionWarning] = Field(default_factory=list)
     match_status: MatchStatus = MatchStatus.NO_MATCH
     selected_catalog_sku: Optional[str] = None
+    matched_catalog_version: Optional[str] = None
     candidates: List[MatchCandidate] = Field(default_factory=list)
     review_decision: ReviewDecision = ReviewDecision.PENDING
     reviewed_by: Optional[str] = None

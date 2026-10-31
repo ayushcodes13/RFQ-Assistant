@@ -107,6 +107,7 @@ The review plan classifies every non-clean row as an exception, selects up to fi
 **RFQ line**
 - line_id, case_id, source_locator (file, page/sheet, row or text span), source_snippet.
 - raw_text, requested_manufacturer (optional), requested_mpn (optional), description, quantity (nullable), unit (nullable), required_by (nullable).
+- `field_provenance` stores each requested field's recoverable source value, proposed value, origin (`DETERMINISTIC`, `OCR`, `LUNA`, `HUMAN`), field locator/evidence, validation status, revision, review status, and warnings. Missing source values remain null; the evidence snippet still points to the original source.
 - extraction_status, extraction_warnings, extraction_version.
 
 **Catalog row**
@@ -115,6 +116,7 @@ The review plan classifies every non-clean row as an exception, selects up to fi
 
 **Match proposal**
 - line_id, candidate_catalog_row_id, match_type (exact_mpn_manufacturer | collision | no_match | manual), explanation, evidence_locator.
+- The selected match retains its catalog item/version snapshot and `matched_catalog_version` on the line.
 - state (unreviewed | approved | needs_clarification | rejected), reviewed_by, reviewed_at.
 
 **Audit event**

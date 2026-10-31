@@ -23,19 +23,27 @@ def test_case_line_audit_and_catalog_survive_manager_restart(tmp_path):
 
     case = first_manager.create_case_from_upload(
         "request.csv",
-        b"manufacturer,mpn,quantity,unit,description\n"
-        b"Schneider Electric,LC1D09BD,3,EA,Contactor\n",
+        b"manufacturer,mpn,quantity,description\n"
+        b"Schneider Electric,LC1D09BD,3,Contactor\n",
         title="Synthetic restart check",
     )
     assert len(case.source_coverage) == 1
     assert case.source_coverage[0].nonempty_regions == 2
     line = first_manager.get_lines(case.case_id)[0]
+    assert line.field_provenance["requested_mpn"].origin.value == "DETERMINISTIC"
+    assert line.field_provenance["requested_mpn"].source_locator.row_number == 2
+    assert line.field_provenance["unit"].raw_value is None
+    assert line.field_provenance["unit"].proposed_value == "EA"
+    assert line.matched_catalog_version == "v1"
     edited = first_manager.update_line(
         case.case_id,
         line.line_id,
         RFQLineItemUpdate(quantity=5, actor="Reviewer A", expected_version=line.version),
     )
     assert edited.quantity == 5
+    assert edited.field_provenance["quantity"].origin.value == "HUMAN"
+    assert edited.field_provenance["quantity"].revision == 2
+    assert edited.field_provenance["quantity"].raw_value == "3"
 
     # Recreate every process-scoped repository while retaining only SQLite and files.
     second_store = SQLiteStateStore(database)
@@ -50,9 +58,30 @@ def test_case_line_audit_and_catalog_survive_manager_restart(tmp_path):
     assert restored_line.quantity == 5
     assert restored_line.version == edited.version
     assert restored_line.selected_catalog_sku == "SKU-1"
+    assert restored_line.matched_catalog_version == "v1"
+    assert restored_line.field_provenance == edited.field_provenance
     assert second_catalog.get_by_sku("SKU-1") is not None
     assert any(event.field_name == "quantity" for event in second_manager.get_audit_trail(case.case_id))
     assert storage.get_file(case.case_id, "request.csv") is not None
+
+
+def test_provenance_does_not_guess_raw_quantity_from_row_text(tmp_path):
+    from rfq_assistant.cases.manager import CaseManager
+    from rfq_assistant.ingestion.parsers.base import ParsedLineDraft
+    from rfq_assistant.schemas.models import SourceLocator
+
+    draft = ParsedLineDraft(
+        line_number=1,
+        raw_text="LC1D09BD quantity 3",
+        source_locator=SourceLocator(file_name="request.txt", text_snippet="LC1D09BD quantity 3"),
+        requested_mpn="LC1D09BD",
+        quantity=3,
+    )
+
+    provenance = CaseManager._build_field_provenance(draft)
+
+    assert provenance["quantity"].proposed_value == "3.0"
+    assert provenance["quantity"].raw_value is None
 
 
 def test_delete_case_removes_durable_state_and_file(tmp_path):

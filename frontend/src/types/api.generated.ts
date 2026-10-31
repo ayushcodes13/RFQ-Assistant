@@ -673,6 +673,12 @@ export interface components {
             format: string;
         };
         /**
+         * ExtractionOrigin
+         * @description How a field value entered the reviewable RFQ line.
+         * @enum {string}
+         */
+        ExtractionOrigin: "DETERMINISTIC" | "OCR" | "LUNA" | "HUMAN";
+        /**
          * ExtractionStatus
          * @enum {string}
          */
@@ -691,6 +697,35 @@ export interface components {
              * @default warning
              */
             severity: string;
+        };
+        /**
+         * FieldProvenance
+         * @description Versioned source and review record for one extracted line field.
+         */
+        FieldProvenance: {
+            /** Evidence */
+            evidence?: string | null;
+            /** @default DETERMINISTIC */
+            origin: components["schemas"]["ExtractionOrigin"];
+            /** Proposed Value */
+            proposed_value?: string | null;
+            /** Raw Value */
+            raw_value?: string | null;
+            /** @default PENDING */
+            review_status: components["schemas"]["ReviewDecision"];
+            /**
+             * Revision
+             * @default 1
+             */
+            revision: number;
+            source_locator: components["schemas"]["SourceLocator"];
+            /**
+             * Validation Status
+             * @default source_grounded
+             */
+            validation_status: string;
+            /** Warnings */
+            warnings?: components["schemas"]["ExtractionWarning"][];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -833,12 +868,18 @@ export interface components {
             extraction_status: components["schemas"]["ExtractionStatus"];
             /** Extraction Warnings */
             extraction_warnings?: components["schemas"]["ExtractionWarning"][];
+            /** Field Provenance */
+            field_provenance?: {
+                [key: string]: components["schemas"]["FieldProvenance"];
+            };
             /** Line Id */
             line_id: string;
             /** Line Number */
             line_number: number;
             /** @default NO_MATCH */
             match_status: components["schemas"]["MatchStatus"];
+            /** Matched Catalog Version */
+            matched_catalog_version?: string | null;
             /** Notes */
             notes?: string | null;
             /** Quantity */

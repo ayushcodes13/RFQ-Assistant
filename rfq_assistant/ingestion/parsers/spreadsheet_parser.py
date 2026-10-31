@@ -275,6 +275,13 @@ class SpreadsheetParser(BaseDocumentParser):
                     quantity=qty,
                     unit=unit,
                     notes=notes,
+                    field_raw_values={
+                        "requested_manufacturer": oem if oem not in (None, "") else None,
+                        "requested_mpn": mpn if mpn not in (None, "") else None,
+                        "description": desc if desc not in (None, "") else None,
+                        "quantity": raw_qty if raw_qty not in (None, "") else None,
+                        "unit": str(raw_unit) if raw_unit not in (None, "") else None,
+                    },
                     extraction_warnings=line_warnings,
                 )
             )
@@ -743,6 +750,18 @@ class SpreadsheetParser(BaseDocumentParser):
                         quantity=qty,
                         unit=unit,
                         notes=notes,
+                        field_raw_values={
+                            name: (
+                                str(getattr(effective_cells.get(name), "value"))
+                                if effective_cells.get(name) is not None
+                                and getattr(effective_cells.get(name), "value", None) is not None
+                                and str(getattr(effective_cells.get(name), "value")).strip()
+                                else None
+                            )
+                            for name in (
+                                "requested_manufacturer", "requested_mpn", "description", "quantity", "unit"
+                            )
+                        },
                         extraction_warnings=line_warnings,
                     ))
                     source_coverage.append(make_coverage_entry(
