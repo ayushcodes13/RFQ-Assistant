@@ -153,6 +153,14 @@ class TestAPIEndpoints:
         assert resp.status_code == 200
         case_data = resp.json()
         case_id = case_data["case_id"]
+        coverage = case_data["source_coverage"]
+        assert len(coverage) == 1
+        assert coverage[0]["unit_id"] == "document"
+        assert coverage[0]["nonempty_regions"] == 2
+        assert coverage[0]["structured_regions"] == 2
+        assert coverage[0]["locator"]["text_snippet"] is None
+        assert len(coverage[0]["content_sha256"]) == 64
+        assert client.get(f"/api/rfqs/{case_id}").json()["source_coverage"] == coverage
 
         # Fetch lines
         lines_resp = client.get(f"/api/rfqs/{case_id}/lines")

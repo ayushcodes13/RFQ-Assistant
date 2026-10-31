@@ -8,6 +8,7 @@ review -> CSV/XLSX export -> download -> audit for every successful document.
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import os
 import tempfile
@@ -16,10 +17,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+from fpdf import FPDF
 from openpyxl import Workbook
 
-ROOT = Path(__file__).resolve().parents[1]
-SAMPLES = ROOT / "fixtures" / "rfq_samples"
 RUN_DIR = tempfile.TemporaryDirectory(prefix="rfq-synthetic-e2e-")
 os.environ["RFQ_ASSISTANT_DB_PATH"] = str(Path(RUN_DIR.name) / "state.sqlite3")
 os.environ["RFQ_LLM_ENABLED"] = "false"  # deterministic timing corpus; never sends source text to a model
@@ -55,14 +55,83 @@ def _document(kind: str, number: int) -> tuple[str | None, bytes | None, str | N
     if kind == "xlsx":
         workbook = Workbook()
         sheet = workbook.active
-        sheet.title = "BOM"
-        sheet.append(["Part Number", "Manufacturer", "Qty", "Description", "UOM"])
-        for (manufacturer, mpn, description), quantity in rows:
-            sheet.append([mpn, manufacturer, quantity, description, "EA"])
+        layout_id = number % 7
+        layouts = [
+            (["Part Number", "Manufacturer", "Qty", "Description", "UOM"],
+             {"mpn": 0, "manufacturer": 1, "quantity": 2, "description": 3, "unit": 4}),
+            (["Part Number", "OEM", "Quantity", "Details", "Unit"],
+             {"mpn": 0, "manufacturer": 1, "quantity": 2, "description": 3, "unit": 4}),
+            (["Model", "Brand", "Count", "Specification", "Unit of Measure"],
+             {"mpn": 0, "manufacturer": 1, "quantity": 2, "description": 3, "unit": 4}),
+            (["Description", "Qty", "Mfr", "P/N", "UOM"],
+             {"mpn": 3, "manufacturer": 2, "quantity": 1, "description": 0, "unit": 4}),
+            (["Line No", "Make", "Item Code", "Notes", "Unit of Measure", "Quantity", "Item Description"],
+             {"mpn": 2, "manufacturer": 1, "quantity": 5, "description": 6, "unit": 4}),
+            (["Manufacturer", "Part #", "Qty", "Description", "UOM"],
+             {"mpn": 1, "manufacturer": 0, "quantity": 2, "description": 3, "unit": 4}),
+            (["MPN", "Vendor", "Amount", "Item Description", "Unit"],
+             {"mpn": 0, "manufacturer": 1, "quantity": 2, "description": 3, "unit": 4}),
+        ]
+        header, columns = layouts[layout_id]
+        if layout_id == 5:
+            sheet.title = "Panel A"
+            other_sheet = workbook.create_sheet("Panel B")
+            target_sheets = [(sheet, rows[:1]), (other_sheet, rows[1:])]
+        else:
+            sheet.title = "BOM"
+            target_sheets = [(sheet, rows)]
+        for target, target_rows in target_sheets:
+            if layout_id in {1, 6}:
+                target.append([f"SYNTHETIC RFQ {number:02d} - layout {layout_id}"])
+            if layout_id == 6:
+                target.append([])
+            target.append(header)
+            for (manufacturer, mpn, description), quantity in target_rows:
+                values = {
+                    "mpn": mpn,
+                    "manufacturer": manufacturer,
+                    "quantity": quantity,
+                    "description": description,
+                    "unit": "EA",
+                }
+                row_values = [None] * len(header)
+                for field, column_index in columns.items():
+                    row_values[column_index] = values[field]
+                target.append(row_values)
         buffer = io.BytesIO()
         workbook.save(buffer)
+        workbook.close()
         return f"synthetic-{number}.xlsx", buffer.getvalue(), None
-    return "formal_rfq_native.pdf", (SAMPLES / "formal_rfq_native.pdf").read_bytes(), None
+    if kind == "pdf":
+        # Generate distinct native-text PDF layouts instead of timing the same
+        # fixture seven times. Scanned/OCR behavior is measured separately.
+        orientation = "landscape" if number % 2 else "portrait"
+        split_pages = number % 3 == 0
+        layout_id = number % 4 + 1
+        pdf = FPDF(orientation="L" if orientation == "landscape" else "P", unit="mm", format="A4")
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.add_page()
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(0, 10, f"SYNTHETIC RFQ {number:02d} - LAYOUT {layout_id}", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", size=10)
+        formats = [
+            "Qty: {qty} EA | Manufacturer: {manufacturer} | MPN: {mpn} | {description}",
+            "{qty} EA - {manufacturer} - {mpn} - {description}",
+            "Please quote {qty} EA {manufacturer} part {mpn} - {description}",
+            "Manufacturer: {manufacturer}  Part: {mpn}  Qty: {qty} EA  {description}",
+        ]
+        row_format = formats[layout_id - 1]
+        for index, ((manufacturer, mpn, description), quantity) in enumerate(rows):
+            if split_pages and index == 1:
+                pdf.add_page()
+                pdf.set_font("Helvetica", "B", 10)
+                pdf.cell(0, 8, "Line | OEM / Brand | Description | Part Number | Qty | UOM", new_x="LMARGIN", new_y="NEXT")
+                pdf.set_font("Helvetica", size=10)
+            row = row_format.format(qty=quantity, manufacturer=manufacturer, mpn=mpn, description=description)
+            pdf.set_x(10)
+            pdf.multi_cell(pdf.epw, 8, row)
+        return f"synthetic-{number}.pdf", bytes(pdf.output()), None
+    raise ValueError(f"Unsupported synthetic corpus format: {kind}")
 
 
 def _timed_request(timings: dict[str, float], stage: str, request):
@@ -77,6 +146,7 @@ def _check_document(client: TestClient, number: int, kind: str) -> dict[str, Any
     timings: dict[str, float] = {}
     build_started = time.perf_counter()
     name, content, pasted_text = _document(kind, number)
+    source_hash = hashlib.sha256(content).hexdigest() if content is not None else None
     timings["fixture_build"] = round((time.perf_counter() - build_started) * 1000, 1)
     data = {"title": f"Synthetic RFQ {number:02d}", "customer_label": "Synthetic only"}
     if name:
@@ -99,9 +169,52 @@ def _check_document(client: TestClient, number: int, kind: str) -> dict[str, Any
     if lines_response.status_code != 200:
         return {"number": number, "format": kind, "step": "lines", "status": lines_response.status_code, "stage_latency_ms": timings}
     lines = lines_response.json()
+    expected_lines = [
+        {
+            "requested_mpn": PRODUCTS[(number + index) % len(PRODUCTS)][1],
+            "requested_manufacturer": PRODUCTS[(number + index) % len(PRODUCTS)][0],
+            "quantity": index + 2,
+            "unit": "EA",
+        }
+        for index in range(2)
+    ]
     source = _timed_request(timings, "source", lambda: client.get(f"/api/rfqs/{case_id}/source"))
     if not lines or source.status_code != 200:
         return {"number": number, "format": kind, "step": "source", "line_count": len(lines), "status": source.status_code, "stage_latency_ms": timings}
+
+    extraction_mismatches = []
+    actual_by_mpn = {line.get("requested_mpn"): line for line in lines if line.get("requested_mpn")}
+    if len(lines) != len(expected_lines) or set(actual_by_mpn) != {
+        line["requested_mpn"] for line in expected_lines
+    }:
+        extraction_mismatches.append({
+            "field": "line_set",
+            "expected_mpns": [line["requested_mpn"] for line in expected_lines],
+            "actual_mpns": [line.get("requested_mpn") for line in lines],
+        })
+    for expected in expected_lines:
+        actual = actual_by_mpn.get(expected["requested_mpn"])
+        if actual is None:
+            continue
+        for field in ("requested_manufacturer", "quantity", "unit"):
+            observed = actual.get(field)
+            if field == "quantity" and observed is not None:
+                observed = float(observed)
+            if observed != expected[field]:
+                extraction_mismatches.append({
+                    "mpn": expected["requested_mpn"],
+                    "field": field,
+                    "expected": expected[field],
+                    "actual": actual.get(field),
+                })
+    if extraction_mismatches:
+        return {
+            "number": number,
+            "format": kind,
+            "step": "ground-truth-field-comparison",
+            "mismatches": extraction_mismatches,
+            "stage_latency_ms": timings,
+        }
 
     invalid = [
         line
@@ -176,15 +289,28 @@ def _check_document(client: TestClient, number: int, kind: str) -> dict[str, Any
     audit = _timed_request(timings, "audit", lambda: client.get(f"/api/rfqs/{case_id}/audit"))
     if audit.status_code != 200 or not any(event["action"] == "EXPORTED" for event in audit.json()):
         return {"number": number, "format": kind, "step": "audit", "status": audit.status_code, "stage_latency_ms": timings}
-    return {
+    result = {
         "number": number,
         "format": kind,
         "lines": len(lines),
+        "critical_field_checks_total": len(expected_lines) * 3,
+        "critical_field_checks_passed": len(expected_lines) * 3,
         "approved": manifest["approved_lines"],
         "download_bytes": len(download.content),
         "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
         "stage_latency_ms": timings,
     }
+    if kind == "pdf":
+        result["source_sha256"] = source_hash
+        result["pdf_layout"] = {
+            "variant": number % 4 + 1,
+            "orientation": "landscape" if number % 2 else "portrait",
+            "split_across_pages": number % 3 == 0,
+        }
+    if kind == "xlsx":
+        result["source_sha256"] = source_hash
+        result["xlsx_layout"] = number % 7
+    return result
 
 
 def _concurrent_create(number: int) -> tuple[int, str | None]:
@@ -225,6 +351,13 @@ def main() -> int:
                 "max_ms": max(ordered),
             }
 
+    pdf_source_hashes = {result["source_sha256"] for result in results if result.get("pdf_layout")}
+    pdf_layout_variants = {result["pdf_layout"]["variant"] for result in results if result.get("pdf_layout")}
+    pdf_diversity_passed = len(pdf_source_hashes) == formats.count("pdf") and len(pdf_layout_variants) == 4
+    xlsx_source_hashes = {result["source_sha256"] for result in results if result.get("xlsx_layout") is not None}
+    xlsx_layout_variants = {result["xlsx_layout"] for result in results if result.get("xlsx_layout") is not None}
+    xlsx_diversity_passed = len(xlsx_source_hashes) == formats.count("xlsx") and len(xlsx_layout_variants) == 7
+
     concurrency_started = time.perf_counter()
     concurrent_request_count = 128
     concurrent_worker_count = 16
@@ -236,7 +369,18 @@ def main() -> int:
         "serial_corpus": {
             "documents": len(formats),
             "formats": {kind: formats.count(kind) for kind in sorted(set(formats))},
+            "pdf_unique_sources": len(pdf_source_hashes),
+            "pdf_layout_variants": len(pdf_layout_variants),
+            "pdf_diversity_passed": pdf_diversity_passed,
+            "pdf_layouts": sorted(
+                {json.dumps(r["pdf_layout"], sort_keys=True) for r in results if r.get("pdf_layout")}
+            ),
+            "xlsx_unique_sources": len(xlsx_source_hashes),
+            "xlsx_layout_variants": len(xlsx_layout_variants),
+            "xlsx_diversity_passed": xlsx_diversity_passed,
             "successful_full_flows": len(results) - len(failures),
+            "critical_field_checks_total": sum(result.get("critical_field_checks_total", 0) for result in results),
+            "critical_field_checks_passed": sum(result.get("critical_field_checks_passed", 0) for result in results),
             "failures": failures,
             "elapsed_seconds": round(time.perf_counter() - started, 2),
             "median_document_ms": durations[len(durations) // 2] if durations else None,
@@ -252,7 +396,7 @@ def main() -> int:
         },
     }
     print(json.dumps(report, indent=2))
-    return 1 if failures or len(concurrent_ids) != len(concurrent) or len(set(concurrent_ids)) != len(concurrent_ids) else 0
+    return 1 if failures or not pdf_diversity_passed or not xlsx_diversity_passed or len(concurrent_ids) != len(concurrent) or len(set(concurrent_ids)) != len(concurrent_ids) else 0
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ import io
 import logging
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from typing import List, Optional, Tuple
 import pypdf
 
@@ -12,12 +12,17 @@ from rfq_assistant.ingestion.parsers.base import (
     BaseDocumentParser,
     DocumentParserError,
     EvidenceSegment,
-    enforce_candidate_region_limit,
+    MAX_CANDIDATE_REGIONS,
+    make_coverage_entry,
     ParsedDocumentResult,
     ParsedLineDraft,
+    SourceCoverageAccumulator,
 )
 from rfq_assistant.schemas.models import ExtractionWarning, SourceLocator
-from rfq_assistant.ingestion.ocr.local_tesseract import LocalOCRError, page_needs_ocr, recognize_page
+from rfq_assistant.ingestion.ocr.local_tesseract import (
+    LocalOCRError, OCRPageResult, engine_profile, page_needs_ocr,
+    recognize_rendered_page, render_page,
+)
 
 MAX_OCR_PAGES_PER_DOCUMENT = 10
 MAX_CONCURRENT_OCR_PAGES = 2
@@ -42,8 +47,22 @@ KNOWN_OEMS = [
 class PDFParser(BaseDocumentParser):
     """Deterministic parser for native PDFs. Safely detects scanned PDFs and rejects them when OCR is disabled."""
 
+    artifact_version = "rfq-pdf-v5"
+
     def __init__(self, allow_ocr: bool = False):
         self.allow_ocr = allow_ocr
+
+    cache_dependencies = ("pypdf", "PyMuPDF")
+
+    def cache_profile(self) -> dict:
+        return {
+            **super().cache_profile(),
+            "allow_ocr": self.allow_ocr,
+            "ocr_profile": "pymupdf-triage+tesseract-psm6-tsv-180dpi-v3",
+            "ocr_engine": engine_profile() if self.allow_ocr else "disabled",
+            "max_ocr_pages": MAX_OCR_PAGES_PER_DOCUMENT,
+            "max_concurrent_ocr_pages": MAX_CONCURRENT_OCR_PAGES,
+        }
 
     def parse(self, content: bytes, filename: str) -> ParsedDocumentResult:
         started = time.perf_counter()
@@ -66,28 +85,52 @@ class PDFParser(BaseDocumentParser):
         if total_pages == 0:
             raise DocumentParserError("PDF contains 0 pages.")
         if total_pages > 50:
-            raise DocumentParserError(f"PDF page count ({total_pages}) exceeds maximum permitted limit (50 pages).")
+            coverage = SourceCoverageAccumulator()
+            coverage.record_unit(
+                "document", SourceLocator(file_name=filename), unit_kind="pdf_document",
+                processing_status="rejected", truncated=True, error_code="PDF_PAGE_LIMIT_EXCEEDED",
+            )
+            raise DocumentParserError(
+                f"PDF page count ({total_pages}) exceeds maximum permitted limit (50 pages).",
+                source_coverage=coverage.build(),
+            )
 
         all_text = ""
+        warnings: List[ExtractionWarning] = []
+        source_coverage = SourceCoverageAccumulator()
+        native_text_failures: set[int] = set()
         page_texts: List[Tuple[int, str]] = []
         for idx, page in enumerate(reader.pages, start=1):
-            text = page.extract_text() or ""
+            try:
+                text = page.extract_text() or ""
+            except Exception as exc:
+                text = ""
+                native_text_failures.add(idx)
+                warnings.append(ExtractionWarning(
+                    code="PDF_NATIVE_TEXT_PAGE_FAILED",
+                    message=f"Native text extraction failed on PDF page {idx}; the page was routed to bounded OCR or manual review.",
+                    severity="warning",
+                ))
+                log.warning("[rfq_pdf] native_text=failed page=%d error=%s", idx, type(exc).__name__)
             page_texts.append((idx, text))
 
-        warnings: List[ExtractionWarning] = []
         ocr_text_by_page: dict[int, str] = {}
+        ocr_result_by_page: dict[int, OCRPageResult] = {}
+        ocr_duration_by_page_ms: dict[int, float] = {}
         pages_needing_ocr: List[int] = []
+        page_rotations: dict[int, int] = {}
         triage_unavailable = False
         # pypdf preserves row-shaped text better for tabular RFQs. PyMuPDF is
         # used for visual triage/rendering, not to reshape native RFQ rows.
         try:
-            import fitz
+            import pymupdf
 
-            visual_doc = fitz.open(stream=content, filetype="pdf")
+            visual_doc = pymupdf.open(stream=content, filetype="pdf")
             try:
                 for page_number, (_, native_text) in enumerate(page_texts, start=1):
-                    page = visual_doc[page_number - 1]
-                    if page_needs_ocr(page, native_text):
+                    visual_page = visual_doc[page_number - 1]
+                    page_rotations[page_number] = int(visual_page.rotation)
+                    if page_number in native_text_failures or page_needs_ocr(visual_page, native_text):
                         pages_needing_ocr.append(page_number)
             finally:
                 visual_doc.close()
@@ -110,6 +153,14 @@ class PDFParser(BaseDocumentParser):
                 message=f"Image-heavy PDF pages require OCR before extraction: {', '.join(map(str, pages_needing_ocr))}.",
                 severity="error",
             ))
+            for page_number in pages_needing_ocr:
+                source_coverage.append(make_coverage_entry(
+                    f"pdf-page-{page_number}-ocr",
+                    SourceLocator(file_name=filename, page_number=page_number),
+                    page_texts[page_number - 1][1],
+                    "ocr_error",
+                    "OCR_DISABLED",
+                ))
         elif pages_needing_ocr:
             if len(pages_needing_ocr) > MAX_OCR_PAGES_PER_DOCUMENT:
                 warnings.append(ExtractionWarning(
@@ -117,45 +168,92 @@ class PDFParser(BaseDocumentParser):
                     message=f"{len(pages_needing_ocr)} pages need OCR; the local limit is {MAX_OCR_PAGES_PER_DOCUMENT}. The document needs manual handling.",
                     severity="error",
                 ))
+                for page_number in pages_needing_ocr:
+                    source_coverage.append(make_coverage_entry(
+                        f"pdf-page-{page_number}-ocr",
+                        SourceLocator(file_name=filename, page_number=page_number),
+                        page_texts[page_number - 1][1],
+                        "ocr_error",
+                        "OCR_PAGE_LIMIT_EXCEEDED",
+                    ))
             else:
-                # Render/OCR a small number of selected pages concurrently to
-                # reduce scan latency without unbounded CPU or memory use.
-                with ThreadPoolExecutor(
-                    max_workers=min(MAX_CONCURRENT_OCR_PAGES, len(pages_needing_ocr))
-                ) as pool:
-                    future_pages = {
-                        pool.submit(recognize_page, content, page_number): page_number
-                        for page_number in pages_needing_ocr
-                    }
-                    for future in as_completed(future_pages):
-                        page_number = future_pages[future]
-                        try:
-                            ocr_text = future.result()
-                            if not ocr_text:
-                                raise LocalOCRError("OCR returned no readable text for this page.")
-                            # The page was selected because its native text is
-                            # incomplete or the classifier failed. Prefer OCR
-                            # for the whole page instead of discarding it solely
-                            # because its text happens to be shorter.
-                            ocr_text_by_page[page_number] = ocr_text
-                        except LocalOCRError as exc:
-                            warnings.append(ExtractionWarning(
-                                code="OCR_PAGE_FAILED",
-                                message=f"OCR could not safely read PDF page {page_number}: {exc}",
-                                severity="error",
-                            ))
-                        except Exception as exc:
-                            # A bad page must be visible and must not discard
-                            # usable OCR text from the other selected pages.
-                            log.warning(
-                                "[rfq_pdf] page_ocr=failed page=%d error=%s",
-                                page_number, type(exc).__name__,
-                            )
-                            warnings.append(ExtractionWarning(
-                                code="OCR_PAGE_FAILED",
-                                message=f"OCR could not safely read PDF page {page_number} because of an unexpected processing error. The original page needs manual review.",
-                                severity="error",
-                            ))
+                # Decode the PDF once for OCR and render in bounded batches.
+                # Tesseract runs concurrently, while only two page images can
+                # be resident at a time regardless of the document size.
+                import pymupdf
+
+                ocr_document = pymupdf.open(stream=content, filetype="pdf")
+                try:
+                    with ThreadPoolExecutor(
+                        max_workers=min(MAX_CONCURRENT_OCR_PAGES, len(pages_needing_ocr))
+                    ) as pool:
+                        for offset in range(0, len(pages_needing_ocr), MAX_CONCURRENT_OCR_PAGES):
+                            future_pages = {}
+                            for page_number in pages_needing_ocr[offset:offset + MAX_CONCURRENT_OCR_PAGES]:
+                                submitted_at = time.perf_counter()
+                                try:
+                                    rendered_page = render_page(ocr_document, page_number)
+                                    future = pool.submit(recognize_rendered_page, rendered_page)
+                                except Exception as exc:
+                                    future = Future()
+                                    future.set_exception(exc)
+                                future_pages[future] = (page_number, submitted_at)
+                            for future in as_completed(future_pages):
+                                page_number, submitted_at = future_pages[future]
+                                try:
+                                    ocr_result = future.result()
+                                    ocr_text = (
+                                        ocr_result.text
+                                        if isinstance(ocr_result, OCRPageResult)
+                                        else str(ocr_result).strip()
+                                    )
+                                    if not ocr_text:
+                                        raise LocalOCRError("OCR returned no readable text for this page.")
+                                    # The page was selected because its native text is
+                                    # incomplete or the classifier failed. Prefer OCR
+                                    # for the whole page instead of discarding it solely
+                                    # because its text happens to be shorter.
+                                    ocr_text_by_page[page_number] = ocr_text
+                                    if isinstance(ocr_result, OCRPageResult):
+                                        ocr_result_by_page[page_number] = ocr_result
+                                except LocalOCRError as exc:
+                                    warnings.append(ExtractionWarning(
+                                        code="OCR_PAGE_FAILED",
+                                        message=f"OCR could not safely read PDF page {page_number}: {exc}",
+                                        severity="error",
+                                    ))
+                                    source_coverage.append(make_coverage_entry(
+                                        f"pdf-page-{page_number}-ocr",
+                                        SourceLocator(file_name=filename, page_number=page_number),
+                                        page_texts[page_number - 1][1],
+                                        "ocr_error",
+                                        "OCR_PAGE_FAILED",
+                                    ))
+                                except Exception as exc:
+                                    # A bad page must be visible and must not discard
+                                    # usable OCR text from the other selected pages.
+                                    log.warning(
+                                        "[rfq_pdf] page_ocr=failed page=%d error=%s",
+                                        page_number, type(exc).__name__,
+                                    )
+                                    warnings.append(ExtractionWarning(
+                                        code="OCR_PAGE_FAILED",
+                                        message=f"OCR could not safely read PDF page {page_number} because of an unexpected processing error. The original page needs manual review.",
+                                        severity="error",
+                                    ))
+                                    source_coverage.append(make_coverage_entry(
+                                        f"pdf-page-{page_number}-ocr",
+                                        SourceLocator(file_name=filename, page_number=page_number),
+                                        page_texts[page_number - 1][1],
+                                        "ocr_error",
+                                        "OCR_PAGE_FAILED_UNEXPECTED",
+                                    ))
+                                finally:
+                                    ocr_duration_by_page_ms[page_number] = round(
+                                        (time.perf_counter() - submitted_at) * 1000, 1
+                                    )
+                finally:
+                    ocr_document.close()
                 for page_number, ocr_text in ocr_text_by_page.items():
                     page_texts[page_number - 1] = (page_number, ocr_text)
                 if ocr_text_by_page:
@@ -165,16 +263,43 @@ class PDFParser(BaseDocumentParser):
                         severity="warning",
                     ))
 
+        for page_number, page_text in page_texts:
+            ocr_status = (
+                "succeeded" if page_number in ocr_text_by_page
+                else "failed" if page_number in pages_needing_ocr and self.allow_ocr and len(pages_needing_ocr) <= MAX_OCR_PAGES_PER_DOCUMENT
+                else "limit_exceeded" if page_number in pages_needing_ocr and self.allow_ocr
+                else "disabled" if page_number in pages_needing_ocr
+                else "not_needed"
+            )
+            source_coverage.record_unit(
+                f"page:{page_number}",
+                SourceLocator(file_name=filename, page_number=page_number),
+                unit_kind="pdf_page",
+                processing_status=("needs_review" if ocr_status in {"disabled", "limit_exceeded", "failed"} else "processed"),
+                is_empty=not bool(page_text.strip()),
+                error_code=(
+                    "PDF_NATIVE_TEXT_PAGE_FAILED" if page_number in native_text_failures
+                    else f"OCR_{ocr_status.upper()}" if ocr_status in {"disabled", "limit_exceeded", "failed"}
+                    else None
+                ),
+                ocr_status=ocr_status,
+                ocr_duration_ms=ocr_duration_by_page_ms.get(page_number),
+                page_rotation_degrees=page_rotations.get(page_number),
+            )
+
         all_text = "".join(text.strip() for _, text in page_texts)
 
         # Check if PDF is scanned (empty text layer)
         if len(all_text.strip()) == 0:
             blocked = [w.message for w in warnings if w.severity.lower() == "error"]
             if blocked:
-                raise DocumentParserError("; ".join(blocked))
+                raise DocumentParserError(
+                    "; ".join(blocked), source_coverage=source_coverage.build()
+                )
             raise DocumentParserError(
                 "Scanned or image-only PDF detected. No readable text was found. "
-                "Install Tesseract and enable bounded local OCR, or use the manual-entry path."
+                "Install Tesseract and enable bounded local OCR, or use the manual-entry path.",
+                source_coverage=source_coverage.build(),
             )
 
         lines: List[ParsedLineDraft] = []
@@ -182,10 +307,28 @@ class PDFParser(BaseDocumentParser):
         line_counter = 1
 
         for page_num, ptext in page_texts:
-            raw_lines = ptext.splitlines()
-            for source_line_number, rline in enumerate(raw_lines, start=1):
+            ocr_lines = ocr_result_by_page.get(page_num)
+            raw_lines = (
+                [(line.text, line.bbox, line.confidence) for line in ocr_lines.lines]
+                if ocr_lines is not None else [(line, None, None) for line in ptext.splitlines()]
+            )
+            for source_line_number, (rline, page_bbox, ocr_confidence) in enumerate(raw_lines, start=1):
                 rline_clean = rline.strip()
-                if not rline_clean or len(rline_clean) < 5:
+                if not rline_clean:
+                    continue
+                locator = SourceLocator(
+                    file_name=filename,
+                    page_number=page_num,
+                    row_number=source_line_number,
+                    text_snippet=rline_clean[:120],
+                    page_bbox=page_bbox,
+                    ocr_confidence=ocr_confidence,
+                )
+                region_id = f"pdf-page-{page_num}-line-{source_line_number}"
+                if len(rline_clean) < 5:
+                    source_coverage.append(make_coverage_entry(
+                        region_id, locator, rline, "filtered_metadata", "SHORT_PDF_TEXT_REGION"
+                    ))
                     continue
 
                 # Skip header/title lines
@@ -196,10 +339,15 @@ class PDFParser(BaseDocumentParser):
                     rline_clean,
                     re.IGNORECASE,
                 ):
+                    source_coverage.append(make_coverage_entry(
+                        region_id, locator, rline, "filtered_metadata", "PDF_HEADER_OR_FOOTER"
+                    ))
                     continue
 
                 # Attempt to extract line item: e.g. "1 Schneider Electric LC1D09BD TeSys D Contactor 9A 24VDC 10 EA"
-                parsed_draft = self._parse_pdf_line(rline_clean, filename, page_num, line_counter)
+                parsed_draft = self._parse_pdf_line(
+                    rline_clean, filename, page_num, line_counter, source_locator=locator
+                )
                 if parsed_draft:
                     if page_num in ocr_text_by_page:
                         parsed_draft.extraction_warnings.append(ExtractionWarning(
@@ -208,6 +356,9 @@ class PDFParser(BaseDocumentParser):
                             severity="warning",
                         ))
                     lines.append(parsed_draft)
+                    source_coverage.append(make_coverage_entry(
+                        region_id, locator, rline, "structured_line", "DETERMINISTIC_PDF_PARSE"
+                    ))
                     line_counter += 1
                 else:
                     candidate_warnings = []
@@ -218,15 +369,13 @@ class PDFParser(BaseDocumentParser):
                             severity="warning",
                         ))
                     candidate_segments.append(EvidenceSegment(
-                        segment_id=f"candidate-page-{page_num}-line-{source_line_number}",
-                        locator=SourceLocator(
-                            file_name=filename,
-                            page_number=page_num,
-                            row_number=source_line_number,
-                            text_snippet=rline_clean[:120],
-                        ),
+                        segment_id=region_id,
+                        locator=locator,
                         text=rline_clean,
                         warnings=candidate_warnings,
+                    ))
+                    source_coverage.append(make_coverage_entry(
+                        region_id, locator, rline, "review_candidate", "PDF_LINE_NOT_CONFIDENTLY_PARSED"
                     ))
 
         if not lines:
@@ -263,17 +412,23 @@ class PDFParser(BaseDocumentParser):
             )
             for page_number, page_text in page_texts if page_text.strip()
         ]
-        enforce_candidate_region_limit(candidate_segments)
+        if len(candidate_segments) > MAX_CANDIDATE_REGIONS:
+            raise DocumentParserError(
+                f"Document contains more than {MAX_CANDIDATE_REGIONS} unresolved non-empty regions. Split the source into smaller files or use manual review; the original upload is retained.",
+                source_coverage=source_coverage.build(),
+            )
         return ParsedDocumentResult(
             lines=lines,
             warnings=warnings,
             total_lines_detected=len(lines),
             evidence_segments=evidence_segments,
             candidate_segments=candidate_segments,
+            source_coverage=source_coverage.build(),
         )
 
     def _parse_pdf_line(
-        self, raw_line: str, filename: str, page_num: int, line_counter: int
+        self, raw_line: str, filename: str, page_num: int, line_counter: int,
+        *, source_locator: Optional[SourceLocator] = None,
     ) -> Optional[ParsedLineDraft]:
         # Check if line contains known OEM
         detected_oem: Optional[str] = None
@@ -339,10 +494,8 @@ class PDFParser(BaseDocumentParser):
         if not detected_oem and not mpn:
             return None
 
-        locator = SourceLocator(
-            file_name=filename,
-            page_number=page_num,
-            text_snippet=raw_line[:120],
+        locator = source_locator or SourceLocator(
+            file_name=filename, page_number=page_num, text_snippet=raw_line[:120]
         )
 
         line_warnings: List[ExtractionWarning] = []

@@ -292,6 +292,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/rfqs/{case_id}/source/pages/{page_number}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Pdf Source Page
+         * @description Render one bounded PDF page as a safe image for source verification.
+         */
+        get: operations["get_pdf_source_page_api_rfqs__case_id__source_pages__page_number__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rfqs/{case_id}/source/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Spreadsheet Source Preview
+         * @description Return a small read-only worksheet window centered on source evidence.
+         */
+        get: operations["get_spreadsheet_source_preview_api_rfqs__case_id__source_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/approved-quotes/{quote_id}/send": {
         parameters: {
             query?: never;
@@ -701,14 +741,61 @@ export interface components {
              */
             line_count: number;
             /**
+             * Llm Cache Hit
+             * @default false
+             */
+            llm_cache_hit: boolean;
+            /**
+             * Llm Call Count
+             * @default 0
+             */
+            llm_call_count: number;
+            /** Llm Deployment Version */
+            llm_deployment_version?: string | null;
+            /** Llm Input Tokens */
+            llm_input_tokens?: number | null;
+            /** Llm Model */
+            llm_model?: string | null;
+            /** Llm Output Tokens */
+            llm_output_tokens?: number | null;
+            /** Llm Prompt Sha256 */
+            llm_prompt_sha256?: string | null;
+            /**
+             * Llm Repair Call Count
+             * @default 0
+             */
+            llm_repair_call_count: number;
+            /**
+             * Llm Review Call Count
+             * @default 0
+             */
+            llm_review_call_count: number;
+            /** Llm Schema Version */
+            llm_schema_version?: string | null;
+            /** Llm Validator Version */
+            llm_validator_version?: string | null;
+            /**
+             * Parse Cache Hit
+             * @default false
+             */
+            parse_cache_hit: boolean;
+            /**
              * Parser Version
              * @default v1-deterministic
              */
             parser_version: string;
+            /** Processing Profile Sha256 */
+            processing_profile_sha256?: string | null;
             /** Raw Text */
             raw_text?: string | null;
+            /** Source Coverage */
+            source_coverage?: components["schemas"]["SourceCoverageUnit"][];
             source_file?: components["schemas"]["SourceFileMetadata"] | null;
             source_type: components["schemas"]["SourceType"];
+            /** Stage Timings Ms */
+            stage_timings_ms?: {
+                [key: string]: number;
+            };
             /** @default NEW */
             status: components["schemas"]["CaseStatus"];
             /** Title */
@@ -833,8 +920,95 @@ export interface components {
             sample_correction_found: boolean;
             /** Sample Line Ids */
             sample_line_ids: string[];
+            /** Sample Rationale */
+            sample_rationale?: {
+                [key: string]: string;
+            };
             /** Total Lines */
             total_lines: number;
+        };
+        /**
+         * SourceCoverageUnit
+         * @description Compact, hash-backed accounting for one PDF page, workbook sheet, or text document.
+         */
+        SourceCoverageUnit: {
+            /** Content Sha256 */
+            content_sha256?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /**
+             * Filtered Regions
+             * @default 0
+             */
+            filtered_regions: number;
+            /**
+             * Formula Backed Fields
+             * @default 0
+             */
+            formula_backed_fields: number;
+            /** Header Row Number */
+            header_row_number?: number | null;
+            /**
+             * Hidden Column Count
+             * @default 0
+             */
+            hidden_column_count: number;
+            /**
+             * Hidden Row Count
+             * @default 0
+             */
+            hidden_row_count: number;
+            /**
+             * Is Empty
+             * @default false
+             */
+            is_empty: boolean;
+            locator: components["schemas"]["SourceLocator"];
+            /**
+             * Nonempty Regions
+             * @default 0
+             */
+            nonempty_regions: number;
+            /** Ocr Duration Ms */
+            ocr_duration_ms?: number | null;
+            /**
+             * Ocr Failures
+             * @default 0
+             */
+            ocr_failures: number;
+            /** Ocr Status */
+            ocr_status?: string | null;
+            /** Page Rotation Degrees */
+            page_rotation_degrees?: number | null;
+            /**
+             * Processing Status
+             * @default processed
+             */
+            processing_status: string;
+            /**
+             * Review Regions
+             * @default 0
+             */
+            review_regions: number;
+            /** Sheet Visibility */
+            sheet_visibility?: string | null;
+            /**
+             * Structured Regions
+             * @default 0
+             */
+            structured_regions: number;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /** Unit Id */
+            unit_id: string;
+            /**
+             * Unit Kind
+             * @default document
+             */
+            unit_kind: string;
         };
         /**
          * SourceFileMetadata
@@ -863,8 +1037,21 @@ export interface components {
          * @description Pinpoints where a line was extracted from within original source document.
          */
         SourceLocator: {
+            /** Field Source Cells */
+            field_source_cells?: {
+                [key: string]: string;
+            };
             /** File Name */
             file_name: string;
+            /** Ocr Confidence */
+            ocr_confidence?: number | null;
+            /** Page Bbox */
+            page_bbox?: [
+                number,
+                number,
+                number,
+                number
+            ] | null;
             /** Page Number */
             page_number?: number | null;
             /** Row Number */
@@ -874,11 +1061,53 @@ export interface components {
             /** Text Snippet */
             text_snippet?: string | null;
         };
+        /** SourcePreviewCell */
+        SourcePreviewCell: {
+            /** Coordinate */
+            coordinate: string;
+            /**
+             * Is Formula
+             * @default false
+             */
+            is_formula: boolean;
+            /**
+             * Selected
+             * @default false
+             */
+            selected: boolean;
+            /** Value */
+            value: string;
+        };
+        /** SourcePreviewRow */
+        SourcePreviewRow: {
+            /** Cells */
+            cells?: components["schemas"]["SourcePreviewCell"][];
+            /**
+             * Is Target
+             * @default false
+             */
+            is_target: boolean;
+            /** Row Number */
+            row_number: number;
+        };
         /**
          * SourceType
          * @enum {string}
          */
         SourceType: "EMAIL_TEXT" | "CSV" | "XLSX" | "PDF_NATIVE" | "PDF_SCANNED";
+        /** SpreadsheetSourcePreview */
+        SpreadsheetSourcePreview: {
+            /** File Name */
+            file_name: string;
+            /** Rows */
+            rows?: components["schemas"]["SourcePreviewRow"][];
+            /** Sheet Name */
+            sheet_name: string;
+            /** Target Cells */
+            target_cells?: string[];
+            /** Target Row */
+            target_row: number;
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -1466,6 +1695,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_pdf_source_page_api_rfqs__case_id__source_pages__page_number__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-API-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                case_id: string;
+                page_number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_spreadsheet_source_preview_api_rfqs__case_id__source_preview_get: {
+        parameters: {
+            query: {
+                sheet_name: string;
+                row_number: number;
+                target_cells?: string[] | null;
+                radius?: number;
+            };
+            header?: {
+                "X-API-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpreadsheetSourcePreview"];
                 };
             };
             /** @description Validation Error */

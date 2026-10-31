@@ -7,8 +7,10 @@ from rfq_assistant.ingestion.parsers.base import (
     BaseDocumentParser,
     enforce_candidate_region_limit,
     EvidenceSegment,
+    make_coverage_entry,
     ParsedDocumentResult,
     ParsedLineDraft,
+    SourceCoverageAccumulator,
 )
 from rfq_assistant.schemas.models import ExtractionWarning, SourceLocator
 
@@ -37,12 +39,26 @@ class TextParser(BaseDocumentParser):
         lines: List[ParsedLineDraft] = []
         warnings: List[ExtractionWarning] = []
         candidate_segments: List[EvidenceSegment] = []
+        source_coverage = SourceCoverageAccumulator()
+        source_coverage.record_unit(
+            "document", SourceLocator(file_name=filename), unit_kind="text_document", is_empty=True,
+        )
         line_counter = 1
         in_signature = False
 
         for row_idx, rline in enumerate(raw_lines, start=1):
             clean = rline.strip()
-            if not clean or len(clean) < 4:
+            if not clean:
+                continue
+            locator = SourceLocator(file_name=filename, row_number=row_idx, text_snippet=clean[:120])
+
+            def record(disposition: str, rule_code: str) -> None:
+                source_coverage.append(make_coverage_entry(
+                    f"text-row-{row_idx}", locator, rline, disposition, rule_code
+                ))
+
+            if len(clean) < 4:
+                record("filtered_metadata", "SHORT_TEXT_REGION")
                 continue
 
             # Unwrap quoted email lines before classifying them so forwarded
@@ -64,11 +80,16 @@ class TextParser(BaseDocumentParser):
                 clean,
                 re.IGNORECASE,
             ):
+                record("filtered_metadata", "EMAIL_HEADER_OR_GREETING")
                 if re.match(r"^(?:thanks|best regards|sincerely)\b", clean, re.IGNORECASE):
                     in_signature = True
                 continue
 
-            if in_signature or self._is_known_non_item_text(clean):
+            if in_signature:
+                record("filtered_metadata", "EMAIL_SIGNATURE")
+                continue
+            if self._is_known_non_item_text(clean):
+                record("filtered_metadata", "KNOWN_EMAIL_METADATA")
                 continue
 
             # Check if this line contains component, quantity, or item clues
@@ -89,6 +110,7 @@ class TextParser(BaseDocumentParser):
                     locator=SourceLocator(file_name=filename, row_number=row_idx, text_snippet=clean[:120]),
                     text=clean,
                 ))
+                record("review_candidate", "NO_DETERMINISTIC_ITEM_INDICATOR")
                 continue
 
 
@@ -119,6 +141,7 @@ class TextParser(BaseDocumentParser):
                         ],
                     )
                 )
+                record("structured_line", "VAGUE_ITEM_REFERENCE_PRESERVED")
                 line_counter += 1
                 continue
 
@@ -126,6 +149,7 @@ class TextParser(BaseDocumentParser):
             parsed = self._parse_item_line(clean, filename, row_idx, line_counter)
             if parsed:
                 lines.append(parsed)
+                record("structured_line", "DETERMINISTIC_TEXT_PARSE")
                 line_counter += 1
             else:
                 candidate_segments.append(EvidenceSegment(
@@ -133,6 +157,7 @@ class TextParser(BaseDocumentParser):
                     locator=SourceLocator(file_name=filename, row_number=row_idx, text_snippet=clean[:120]),
                     text=clean,
                 ))
+                record("review_candidate", "DETERMINISTIC_PARSE_UNRESOLVED")
 
         if not lines:
             warnings.append(
@@ -143,13 +168,14 @@ class TextParser(BaseDocumentParser):
                 )
             )
 
-        enforce_candidate_region_limit(candidate_segments)
+        enforce_candidate_region_limit(candidate_segments, source_coverage.build())
 
         return ParsedDocumentResult(
             lines=lines,
             warnings=warnings,
             total_lines_detected=len(lines),
             candidate_segments=candidate_segments,
+            source_coverage=source_coverage.build(),
         )
 
     def _parse_item_line(

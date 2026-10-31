@@ -15,6 +15,8 @@ import {
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { MotionWrapper } from "@/components/ui/MotionWrapper";
+import { SourcePreviewDialog } from "@/components/SourcePreviewDialog";
+import { PdfSourcePreviewDialog } from "@/components/PdfSourcePreviewDialog";
 import {
   approveRemainingValidatedLines,
   batchReviewLines,
@@ -50,6 +52,19 @@ function formatLocator(locator: SourceLocator): string {
   const parts = [locator.file_name];
   if (locator.sheet_name) parts.push(`sheet ${locator.sheet_name}`);
   if (locator.page_number != null) parts.push(`page ${locator.page_number}`);
+  if (locator.page_bbox) {
+    const [x0, y0, x1, y1] = locator.page_bbox;
+    parts.push(
+      `OCR area ${Math.round(x0 * 100)}%,${Math.round(y0 * 100)}%–${Math.round(x1 * 100)}%,${Math.round(y1 * 100)}%`,
+    );
+  }
+  if (locator.ocr_confidence != null) {
+    parts.push(`OCR ${Math.round(locator.ocr_confidence)}% confidence`);
+  }
+  const sourceCells = Object.entries(locator.field_source_cells ?? {});
+  if (sourceCells.length > 0) {
+    parts.push(`cells ${sourceCells.map(([field, cell]) => `${field} ${cell}`).join(", ")}`);
+  }
   if (locator.row_number != null) parts.push(`row ${locator.row_number}`);
   return parts.join(" · ");
 }
@@ -98,6 +113,10 @@ export function WorkbenchView({
   const [editValue, setEditValue] = useState("");
   const [selectedLine, setSelectedLine] = useState<RFQLineItem | null>(null);
   const [showDetail, setShowDetail] = useState(false);
+  const [showSourcePreview, setShowSourcePreview] = useState(false);
+  const [showPdfSourcePreview, setShowPdfSourcePreview] = useState(false);
+  const closeSourcePreview = useCallback(() => setShowSourcePreview(false), []);
+  const closePdfSourcePreview = useCallback(() => setShowPdfSourcePreview(false), []);
 
   const fetchLines = useCallback(async () => {
     setLoading(true);
@@ -375,6 +394,61 @@ export function WorkbenchView({
         </div>
       )}
 
+      {(caseData.source_coverage ?? []).length > 0 && (() => {
+        const coverage = caseData.source_coverage ?? [];
+        const totals = coverage.reduce((sum, unit) => ({
+          regions: sum.regions + unit.nonempty_regions,
+          structured: sum.structured + unit.structured_regions,
+          review: sum.review + unit.review_regions,
+          filtered: sum.filtered + unit.filtered_regions,
+          ocrFailures: sum.ocrFailures + unit.ocr_failures,
+          hiddenRows: sum.hiddenRows + (unit.hidden_row_count ?? 0),
+          hiddenColumns: sum.hiddenColumns + (unit.hidden_column_count ?? 0),
+        }), { regions: 0, structured: 0, review: 0, filtered: 0, ocrFailures: 0, hiddenRows: 0, hiddenColumns: 0 });
+        return (
+          <details className="mb-4 rounded-lg border border-[#d7e1e3] bg-white px-3 py-2 text-sm text-[#3d5056]">
+            <summary className="cursor-pointer font-medium">
+              Source accounting · {totals.regions} non-empty regions across {coverage.length} source sections
+              <span className="ml-2 font-normal text-[#687b81]">
+                {totals.structured} parsed · {totals.review} sent to review · {totals.filtered} metadata filtered
+                {totals.ocrFailures > 0 && ` · ${totals.ocrFailures} OCR failures`}
+                {(totals.hiddenRows > 0 || totals.hiddenColumns > 0) && ` · ${totals.hiddenRows} hidden rows, ${totals.hiddenColumns} hidden columns`}
+              </span>
+            </summary>
+            <ul className="mt-2 space-y-1 pl-5 text-xs text-[#52656b]">
+              {coverage.map((unit) => (
+                <li key={unit.unit_id}>
+                  {unit.unit_id}: {unit.nonempty_regions} regions · {unit.structured_regions} parsed · {unit.review_regions} review · {unit.filtered_regions} filtered
+                  {unit.ocr_failures > 0 && ` · ${unit.ocr_failures} OCR failures`}
+                  {unit.ocr_status && unit.ocr_status !== "not_needed" && ` · OCR ${unit.ocr_status}`}
+                  {unit.ocr_duration_ms != null && ` · ${Math.round(unit.ocr_duration_ms)} ms`}
+                  {unit.is_empty && " · no readable content"}
+                  {unit.sheet_visibility === "hidden" && " · hidden sheet"}
+                  {(unit.hidden_row_count ?? 0) > 0 && ` · ${unit.hidden_row_count} hidden rows`}
+                  {(unit.hidden_column_count ?? 0) > 0 && ` · ${unit.hidden_column_count} hidden columns`}
+                  {unit.header_row_number != null && ` · header row ${unit.header_row_number}`}
+                  {unit.formula_backed_fields > 0 && ` · ${unit.formula_backed_fields} formula-backed fields`}
+                  {unit.page_rotation_degrees != null && unit.page_rotation_degrees !== 0 && ` · rotated ${unit.page_rotation_degrees}°`}
+                  {unit.truncated && " · processing stopped at a safety limit"}
+                  {unit.processing_status !== "processed" && ` · ${unit.processing_status}`}
+                  {unit.error_code && ` (${unit.error_code})`}
+                </li>
+              ))}
+            </ul>
+            <div className="mt-2 text-xs text-[#52656b]">
+              {caseData.parse_cache_hit && <span>Deterministic extraction reused from the same source and parser profile. </span>}
+              {caseData.llm_cache_hit && <span>Luna result reused for its pinned deployment version. </span>}
+              {caseData.llm_call_count > 0 && (
+                <span>
+                  Luna · {caseData.llm_call_count} calls ({caseData.llm_repair_call_count} repair, {caseData.llm_review_call_count} validation)
+                  {caseData.llm_input_tokens != null && ` · ${caseData.llm_input_tokens} input / ${caseData.llm_output_tokens ?? "unknown"} output tokens`}
+                </span>
+              )}
+            </div>
+          </details>
+        );
+      })()}
+
       {caseData.status === "PROCESSING" && lines.length === 0 && (
         <div role="status" className="mb-4 rounded-lg border border-[#cbd6d9] bg-white px-4 py-3 text-sm text-[#33464c]">
           The original request is saved. Document processing is running in the background; this view will update when the review rows are ready.
@@ -391,6 +465,7 @@ export function WorkbenchView({
               <p className="mt-1 text-sm text-[#52656b]">
                 Check the marked rows against the original. {reviewPlan.exception_line_ids.length} exception rows still need individual review.
                 AI-proposed rows are eligible for the sample only after JSON, number, and source-quote checks pass.
+                The sample spans {new Set(Object.values(reviewPlan.sample_rationale ?? {})).size} source and extraction groups; it reduces routine review, but does not statistically prove every line is correct.
                 {reviewPlan.remaining_line_ids.length > 0 && " After the sample is approved, you can approve the remaining clean rows together."}
                 {reviewPlan.sample_correction_found && " A sampled row needed correction, so the remaining clean rows must be checked individually."}
               </p>
@@ -850,6 +925,27 @@ export function WorkbenchView({
                 </dt>
                 <dd style={{ color: "var(--color-brown-700)" }}>
                   {formatLocator(selectedLine.source_locator)}
+                  <div className="mt-2">
+                    {caseData.source_file?.file_name.toLowerCase().endsWith(".xlsx") &&
+                    selectedLine.source_locator.sheet_name && selectedLine.source_locator.row_number ? (
+                      <button type="button" onClick={() => setShowSourcePreview(true)} className="rfq-secondary">
+                        Open source row and cells
+                      </button>
+                    ) : caseData.source_file?.file_name.toLowerCase().endsWith(".pdf") && selectedLine.source_locator.page_number ? (
+                      <button type="button" onClick={() => setShowPdfSourcePreview(true)} className="rfq-secondary">
+                        View original page
+                      </button>
+                    ) : (
+                      <a
+                        href={`/api/proxy/api/rfqs/${encodeURIComponent(caseData.case_id)}/source${selectedLine.source_locator.page_number ? `#page=${selectedLine.source_locator.page_number}` : ""}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rfq-secondary inline-flex"
+                      >
+                        Open original source{selectedLine.source_locator.page_number ? ` · page ${selectedLine.source_locator.page_number}` : ""}
+                      </a>
+                    )}
+                  </div>
                 </dd>
               </div>
               <div>
@@ -949,6 +1045,22 @@ export function WorkbenchView({
           </motion.div>
         )}
       </AnimatePresence>
+      {showSourcePreview && selectedLine?.source_locator.sheet_name && selectedLine.source_locator.row_number && (
+        <SourcePreviewDialog
+          caseId={caseData.case_id}
+          sheetName={selectedLine.source_locator.sheet_name}
+          rowNumber={selectedLine.source_locator.row_number}
+          targetCells={Object.values(selectedLine.source_locator.field_source_cells ?? {})}
+          onClose={closeSourcePreview}
+        />
+      )}
+      {showPdfSourcePreview && selectedLine?.source_locator.page_number && (
+        <PdfSourcePreviewDialog
+          caseId={caseData.case_id}
+          locator={selectedLine.source_locator}
+          onClose={closePdfSourcePreview}
+        />
+      )}
     </div>
   );
 }

@@ -613,10 +613,123 @@
             "title": "Line Count",
             "type": "integer"
           },
+          "llm_cache_hit": {
+            "default": false,
+            "title": "Llm Cache Hit",
+            "type": "boolean"
+          },
+          "llm_call_count": {
+            "default": 0,
+            "title": "Llm Call Count",
+            "type": "integer"
+          },
+          "llm_deployment_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Deployment Version"
+          },
+          "llm_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Input Tokens"
+          },
+          "llm_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Model"
+          },
+          "llm_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Output Tokens"
+          },
+          "llm_prompt_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Prompt Sha256"
+          },
+          "llm_repair_call_count": {
+            "default": 0,
+            "title": "Llm Repair Call Count",
+            "type": "integer"
+          },
+          "llm_review_call_count": {
+            "default": 0,
+            "title": "Llm Review Call Count",
+            "type": "integer"
+          },
+          "llm_schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Schema Version"
+          },
+          "llm_validator_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Validator Version"
+          },
+          "parse_cache_hit": {
+            "default": false,
+            "title": "Parse Cache Hit",
+            "type": "boolean"
+          },
           "parser_version": {
             "default": "v1-deterministic",
             "title": "Parser Version",
             "type": "string"
+          },
+          "processing_profile_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Processing Profile Sha256"
           },
           "raw_text": {
             "anyOf": [
@@ -628,6 +741,13 @@
               }
             ],
             "title": "Raw Text"
+          },
+          "source_coverage": {
+            "items": {
+              "$ref": "#/components/schemas/SourceCoverageUnit"
+            },
+            "title": "Source Coverage",
+            "type": "array"
           },
           "source_file": {
             "anyOf": [
@@ -641,6 +761,13 @@
           },
           "source_type": {
             "$ref": "#/components/schemas/SourceType"
+          },
+          "stage_timings_ms": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Stage Timings Ms",
+            "type": "object"
           },
           "status": {
             "$ref": "#/components/schemas/CaseStatus",
@@ -1024,6 +1151,13 @@
             "title": "Sample Line Ids",
             "type": "array"
           },
+          "sample_rationale": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Sample Rationale",
+            "type": "object"
+          },
           "total_lines": {
             "title": "Total Lines",
             "type": "integer"
@@ -1040,6 +1174,161 @@
           "can_batch_approve"
         ],
         "title": "ReviewPlan",
+        "type": "object"
+      },
+      "SourceCoverageUnit": {
+        "description": "Compact, hash-backed accounting for one PDF page, workbook sheet, or text document.",
+        "properties": {
+          "content_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Sha256"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "filtered_regions": {
+            "default": 0,
+            "title": "Filtered Regions",
+            "type": "integer"
+          },
+          "formula_backed_fields": {
+            "default": 0,
+            "title": "Formula Backed Fields",
+            "type": "integer"
+          },
+          "header_row_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Header Row Number"
+          },
+          "hidden_column_count": {
+            "default": 0,
+            "title": "Hidden Column Count",
+            "type": "integer"
+          },
+          "hidden_row_count": {
+            "default": 0,
+            "title": "Hidden Row Count",
+            "type": "integer"
+          },
+          "is_empty": {
+            "default": false,
+            "title": "Is Empty",
+            "type": "boolean"
+          },
+          "locator": {
+            "$ref": "#/components/schemas/SourceLocator"
+          },
+          "nonempty_regions": {
+            "default": 0,
+            "title": "Nonempty Regions",
+            "type": "integer"
+          },
+          "ocr_duration_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr Duration Ms"
+          },
+          "ocr_failures": {
+            "default": 0,
+            "title": "Ocr Failures",
+            "type": "integer"
+          },
+          "ocr_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr Status"
+          },
+          "page_rotation_degrees": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Rotation Degrees"
+          },
+          "processing_status": {
+            "default": "processed",
+            "title": "Processing Status",
+            "type": "string"
+          },
+          "review_regions": {
+            "default": 0,
+            "title": "Review Regions",
+            "type": "integer"
+          },
+          "sheet_visibility": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sheet Visibility"
+          },
+          "structured_regions": {
+            "default": 0,
+            "title": "Structured Regions",
+            "type": "integer"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "unit_id": {
+            "title": "Unit Id",
+            "type": "string"
+          },
+          "unit_kind": {
+            "default": "document",
+            "title": "Unit Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unit_id",
+          "locator"
+        ],
+        "title": "SourceCoverageUnit",
         "type": "object"
       },
       "SourceFileMetadata": {
@@ -1088,9 +1377,54 @@
       "SourceLocator": {
         "description": "Pinpoints where a line was extracted from within original source document.",
         "properties": {
+          "field_source_cells": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Field Source Cells",
+            "type": "object"
+          },
           "file_name": {
             "title": "File Name",
             "type": "string"
+          },
+          "ocr_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr Confidence"
+          },
+          "page_bbox": {
+            "anyOf": [
+              {
+                "maxItems": 4,
+                "minItems": 4,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Bbox"
           },
           "page_number": {
             "anyOf": [
@@ -1143,6 +1477,59 @@
         "title": "SourceLocator",
         "type": "object"
       },
+      "SourcePreviewCell": {
+        "properties": {
+          "coordinate": {
+            "title": "Coordinate",
+            "type": "string"
+          },
+          "is_formula": {
+            "default": false,
+            "title": "Is Formula",
+            "type": "boolean"
+          },
+          "selected": {
+            "default": false,
+            "title": "Selected",
+            "type": "boolean"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "coordinate",
+          "value"
+        ],
+        "title": "SourcePreviewCell",
+        "type": "object"
+      },
+      "SourcePreviewRow": {
+        "properties": {
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/SourcePreviewCell"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "is_target": {
+            "default": false,
+            "title": "Is Target",
+            "type": "boolean"
+          },
+          "row_number": {
+            "title": "Row Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row_number"
+        ],
+        "title": "SourcePreviewRow",
+        "type": "object"
+      },
       "SourceType": {
         "enum": [
           "EMAIL_TEXT",
@@ -1153,6 +1540,43 @@
         ],
         "title": "SourceType",
         "type": "string"
+      },
+      "SpreadsheetSourcePreview": {
+        "properties": {
+          "file_name": {
+            "title": "File Name",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/SourcePreviewRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "sheet_name": {
+            "title": "Sheet Name",
+            "type": "string"
+          },
+          "target_cells": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Target Cells",
+            "type": "array"
+          },
+          "target_row": {
+            "title": "Target Row",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "file_name",
+          "sheet_name",
+          "target_row"
+        ],
+        "title": "SpreadsheetSourcePreview",
+        "type": "object"
       },
       "ValidationError": {
         "properties": {
@@ -2391,6 +2815,209 @@
           }
         },
         "summary": "Get Original Source"
+      }
+    },
+    "/api/rfqs/{case_id}/source/pages/{page_number}": {
+      "get": {
+        "description": "Render one bounded PDF page as a safe image for source verification.",
+        "operationId": "get_pdf_source_page_api_rfqs__case_id__source_pages__page_number__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "page_number",
+            "required": true,
+            "schema": {
+              "title": "Page Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/png": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Pdf Source Page"
+      }
+    },
+    "/api/rfqs/{case_id}/source/preview": {
+      "get": {
+        "description": "Return a small read-only worksheet window centered on source evidence.",
+        "operationId": "get_spreadsheet_source_preview_api_rfqs__case_id__source_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sheet_name",
+            "required": true,
+            "schema": {
+              "title": "Sheet Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "row_number",
+            "required": true,
+            "schema": {
+              "title": "Row Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_cells",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target Cells"
+            }
+          },
+          {
+            "in": "query",
+            "name": "radius",
+            "required": false,
+            "schema": {
+              "default": 4,
+              "maximum": 10,
+              "minimum": 0,
+              "title": "Radius",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpreadsheetSourcePreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Spreadsheet Source Preview"
       }
     },
     "/v1/approved-quotes/{quote_id}/send": {

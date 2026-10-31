@@ -1,0 +1,127 @@
+"""Run one synthetic Luna-backed RFQ through human review and draft export.
+
+Requires RFQ_LLM_ENABLED=true plus the Luna endpoint and key in environment
+variables. No upload, credential, or model response text is printed or retained.
+"""
+
+from __future__ import annotations
+
+import sys
+import tempfile
+from pathlib import Path
+
+from rfq_assistant.cases.manager import CaseManager
+from rfq_assistant.exports.generator import ExportGenerator
+from rfq_assistant.ingestion.ai_extraction import GroundedLLMExtractor
+from rfq_assistant.ingestion.storage import DocumentStorage
+from rfq_assistant.matching.catalog import CatalogRepository
+from rfq_assistant.schemas.enums import ReviewDecision
+from rfq_assistant.schemas.models import (
+    CatalogItem,
+    ExportRequest,
+    RFQLineItemUpdate,
+)
+
+
+def main() -> int:
+    extractor = GroundedLLMExtractor.from_environment()
+    if extractor is None:
+        print("e2e=not_run reason=luna_adapter_not_configured")
+        return 2
+
+    catalog = CatalogRepository()
+    catalog.add_item(
+        CatalogItem(
+            internal_sku="SYN-FC-4821",
+            manufacturer="Fabrikam Controls",
+            manufacturer_part_number="FC-4821",
+            description="Synthetic auxiliary contact block",
+        )
+    )
+    source_text = (
+        "Please quote 12 units of FC-4821 from Fabrikam Controls, "
+        "an auxiliary contact block."
+    )
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="rfq-luna-e2e-") as temporary_root:
+            root = Path(temporary_root)
+            manager = CaseManager(
+                catalog=catalog,
+                storage=DocumentStorage(root / "uploads"),
+                llm_extractor=extractor,
+            )
+            case = manager.create_case_from_text(
+                source_text,
+                title="SYNTHETIC Luna full-flow check",
+            )
+            lines = manager.get_lines(case.case_id)
+            if len(lines) != 1:
+                print(f"e2e=failed stage=extraction line_count={len(lines)}")
+                return 1
+
+            line = lines[0]
+            exact_match = (
+                line.requested_manufacturer == "Fabrikam Controls"
+                and line.requested_mpn == "FC-4821"
+                and line.quantity == 12
+                and line.match_status.value == "EXACT_MATCH"
+                and line.selected_catalog_sku == "SYN-FC-4821"
+            )
+            review_plan = manager.get_review_plan(case.case_id)
+            sample_selected = line.line_id in review_plan.sample_line_ids
+            if not exact_match or not sample_selected:
+                warning_codes = sorted(
+                    {warning.code for warning in line.extraction_warnings}
+                )
+                print(
+                    "e2e=review_required "
+                    f"exact_match={exact_match} sample={sample_selected} "
+                    f"warning_codes={','.join(warning_codes) or 'none'}"
+                )
+                return 1
+
+            manager.update_line(
+                case.case_id,
+                line.line_id,
+                RFQLineItemUpdate(
+                    expected_version=line.version,
+                    review_decision=ReviewDecision.APPROVED,
+                    actor="Synthetic reviewer",
+                ),
+            )
+            reviewed_lines = manager.get_lines(case.case_id)
+            manifest = ExportGenerator(
+                catalog,
+                root / "exports",
+            ).generate_export(
+                case,
+                reviewed_lines,
+                ExportRequest(
+                    case_id=case.case_id,
+                    actor="Synthetic reviewer",
+                    format="csv",
+                ),
+            )
+            passed = (
+                reviewed_lines[0].review_decision == ReviewDecision.APPROVED
+                and manifest.is_draft
+            )
+            print(
+                f"e2e={'pass' if passed else 'failed'} "
+                f"line_count={len(reviewed_lines)} exact_catalog_match={exact_match} "
+                f"human_sample={sample_selected} reviewer_approved="
+                f"{reviewed_lines[0].review_decision == ReviewDecision.APPROVED} "
+                f"draft_export={manifest.is_draft} "
+                f"llm_calls={case.llm_call_count} "
+                f"validation_calls={case.llm_review_call_count} "
+                "tokens="
+                f"{'known' if case.llm_input_tokens is not None and case.llm_output_tokens is not None else 'unavailable'}"
+            )
+            return 0 if passed else 1
+    finally:
+        extractor.close()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

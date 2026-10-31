@@ -5,10 +5,67 @@ restarts. It is a single-workspace local/demo store, not a tenant-isolation laye
 """
 
 import json
+import logging
 import sqlite3
 import time
+import zlib
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+
+MAX_PROCESSING_ARTIFACT_BYTES = 10 * 1024 * 1024
+log = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class StateStore(Protocol):
+    """Persistence contract shared by cases, catalog, and ingestion workers.
+
+    Implementations must preserve the transaction and lease-fencing semantics
+    used by ``SQLiteStateStore``. This interface is not evidence that the
+    current SQLite implementation is safe across hosts.
+    """
+
+    def enqueue_ingestion_job(self, case_id: str, source_digest: str) -> str: ...
+    def reconcile_processing_cases(self) -> int: ...
+    def claim_ingestion_job(
+        self, worker_id: str, lease_seconds: float = 90.0, max_attempts: int = 3
+    ) -> Optional[Dict[str, Any]]: ...
+    def heartbeat_ingestion_job(
+        self, job_id: str, worker_id: str, lease_seconds: float = 90.0
+    ) -> bool: ...
+    def owns_ingestion_job(self, job_id: str, worker_id: str) -> bool: ...
+    def finish_ingestion_job(self, job_id: str, worker_id: str) -> bool: ...
+    def fail_ingestion_job(
+        self, job_id: str, worker_id: str, error_code: str, max_attempts: int = 3
+    ) -> str: ...
+    def get_ingestion_job(self, case_id: str) -> Optional[Dict[str, Any]]: ...
+    def failed_ingestion_case_ids(self) -> List[str]: ...
+    def save_case_snapshot_if_job_owned(
+        self, case: Any, lines: List[Any], events: List[Any], job_id: str, worker_id: str
+    ) -> bool: ...
+    def load_case_snapshot(self, case_id: str) -> Optional[Dict[str, Any]]: ...
+    def load_cases(self) -> List[Dict[str, Any]]: ...
+    def load_lines(self, case_id: str) -> List[Dict[str, Any]]: ...
+    def load_audit_events(self, case_id: str) -> List[Dict[str, Any]]: ...
+    def save_case_snapshot(self, case: Any, lines: List[Any], events: List[Any]) -> None: ...
+    def delete_case(self, case_id: str) -> bool: ...
+    def load_processing_artifact(
+        self, case_id: str, artifact_name: str, source_digest: str, profile_digest: str
+    ) -> Optional[Dict[str, Any]]: ...
+    def save_processing_artifact(
+        self,
+        case_id: str,
+        artifact_name: str,
+        source_digest: str,
+        profile_digest: str,
+        payload: Any,
+        *,
+        job_id: Optional[str] = None,
+        worker_id: Optional[str] = None,
+    ) -> bool: ...
+    def load_catalog(self) -> List[Dict[str, Any]]: ...
+    def replace_catalog(self, items: List[Any]) -> None: ...
+    def delete_catalog(self) -> None: ...
 
 
 class SQLiteStateStore:
@@ -38,7 +95,7 @@ class SQLiteStateStore:
                     case_id TEXT NOT NULL REFERENCES rfq_cases(case_id) ON DELETE CASCADE,
                     line_id TEXT NOT NULL,
                     position INTEGER NOT NULL,
-                    payload TEXT NOT NULL,
+                    payload BLOB NOT NULL,
                     PRIMARY KEY (case_id, line_id)
                 );
                 CREATE TABLE IF NOT EXISTS audit_events (
@@ -68,6 +125,15 @@ class SQLiteStateStore:
                 );
                 CREATE INDEX IF NOT EXISTS ingestion_jobs_ready_idx
                     ON ingestion_jobs(state, available_at, created_at);
+                CREATE TABLE IF NOT EXISTS processing_artifacts (
+                    case_id TEXT NOT NULL REFERENCES rfq_cases(case_id) ON DELETE CASCADE,
+                    artifact_name TEXT NOT NULL,
+                    source_digest TEXT NOT NULL,
+                    profile_digest TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY (case_id, artifact_name)
+                );
                 """
             )
 
@@ -142,7 +208,7 @@ class SQLiteStateStore:
                 (now, now, max_attempts),
             )
             row = connection.execute(
-                "SELECT job_id, case_id, source_digest, attempts FROM ingestion_jobs "
+                "SELECT job_id, case_id, source_digest, attempts, available_at FROM ingestion_jobs "
                 "WHERE state='queued' AND available_at <= ? ORDER BY created_at, job_id LIMIT 1",
                 (now,),
             ).fetchone()
@@ -158,6 +224,9 @@ class SQLiteStateStore:
                 "case_id": row["case_id"],
                 "source_digest": row["source_digest"],
                 "attempt": int(row["attempts"]) + 1,
+                # Time spent ready in the queue, excluding an intentional
+                # retry backoff before the job became claimable again.
+                "queue_wait_ms": max(0.0, (now - float(row["available_at"])) * 1000.0),
             }
 
     def heartbeat_ingestion_job(self, job_id: str, worker_id: str, lease_seconds: float = 90.0) -> bool:
@@ -251,6 +320,66 @@ class SQLiteStateStore:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM ingestion_jobs WHERE case_id=?", (case_id,)).fetchone()
             return dict(row) if row is not None else None
+
+    def load_processing_artifact(
+        self, case_id: str, artifact_name: str, source_digest: str, profile_digest: str
+    ) -> Optional[Dict[str, Any]]:
+        """Load a case-scoped derived result only for the exact source/profile key."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload FROM processing_artifacts WHERE case_id=? AND artifact_name=? "
+                "AND source_digest=? AND profile_digest=?",
+                (case_id, artifact_name, source_digest, profile_digest),
+            ).fetchone()
+            if row is None:
+                return None
+            try:
+                decoder = zlib.decompressobj()
+                raw = decoder.decompress(row["payload"], MAX_PROCESSING_ARTIFACT_BYTES + 1)
+                if len(raw) > MAX_PROCESSING_ARTIFACT_BYTES or decoder.unconsumed_tail or not decoder.eof:
+                    return None
+                return json.loads(raw.decode("utf-8"))
+            except (zlib.error, UnicodeDecodeError, json.JSONDecodeError):
+                log.warning("[rfq_artifact_cache] outcome=corrupt case_id=%s artifact=%s", case_id, artifact_name)
+                return None
+
+    def save_processing_artifact(
+        self,
+        case_id: str,
+        artifact_name: str,
+        source_digest: str,
+        profile_digest: str,
+        payload: Any,
+        *,
+        job_id: Optional[str] = None,
+        worker_id: Optional[str] = None,
+    ) -> bool:
+        """Persist derived data, optionally fenced to the current worker lease."""
+        now = time.time()
+        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(raw) > MAX_PROCESSING_ARTIFACT_BYTES:
+            log.info("[rfq_artifact_cache] outcome=too_large case_id=%s artifact=%s bytes=%d", case_id, artifact_name, len(raw))
+            return False
+        serialized = zlib.compress(raw, level=6)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if job_id:
+                owner = connection.execute(
+                    "SELECT 1 FROM ingestion_jobs WHERE job_id=? AND state='processing' "
+                    "AND worker_id=? AND lease_expires_at>?",
+                    (job_id, worker_id, now),
+                ).fetchone()
+                if owner is None:
+                    return False
+            connection.execute(
+                "INSERT INTO processing_artifacts "
+                "(case_id, artifact_name, source_digest, profile_digest, payload, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(case_id, artifact_name) DO UPDATE SET "
+                "source_digest=excluded.source_digest, profile_digest=excluded.profile_digest, "
+                "payload=excluded.payload, created_at=excluded.created_at",
+                (case_id, artifact_name, source_digest, profile_digest, serialized, now),
+            )
+            return True
 
     def failed_ingestion_case_ids(self) -> List[str]:
         with self._connect() as connection:
