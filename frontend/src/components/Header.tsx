@@ -1,271 +1,156 @@
 "use client";
 
-import React, { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  Inbox,
-  Wrench,
-  BookOpen,
-  Plus,
-  Keyboard,
-  Menu,
-  X,
-} from "lucide-react";
+import { useState } from "react";
+import { BookOpen, ChartNoAxesCombined, Inbox, Keyboard, Menu, X } from "lucide-react";
+import { RFQCase } from "@/types";
+
+export type AppTab = "overview" | "inbox" | "workbench" | "catalog";
 
 interface HeaderProps {
-  currentTab: "inbox" | "workbench" | "catalog";
-  onTabChange: (tab: "inbox" | "workbench" | "catalog") => void;
-  onOpenNewRfq: () => void;
+  currentTab: AppTab;
+  onTabChange: (tab: AppTab) => void;
   onOpenShortcuts: () => void;
-  activeCaseId?: string;
+  cases: RFQCase[];
 }
 
-const tabs = [
-  { id: "inbox" as const, label: "RFQs", icon: Inbox },
-  { id: "workbench" as const, label: "Workbench", icon: Wrench },
+const navigation = [
+  { id: "overview" as const, label: "Overview", icon: ChartNoAxesCombined },
+  { id: "inbox" as const, label: "RFQ inbox", icon: Inbox },
   { id: "catalog" as const, label: "Catalog", icon: BookOpen },
 ];
 
-export function Header({
+function ProductMark({ size = 34 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 34 34" fill="none" aria-hidden="true">
+      <rect x="1" y="1" width="32" height="32" rx="8" fill="#142126" />
+      <path d="M10 9.5h9.5l5 5v10H10v-15Z" stroke="#F9FBFC" strokeWidth="1.7" strokeLinejoin="round" />
+      <path d="M19.5 9.8v5h4.8M13.5 18h7M13.5 21.5h4" stroke="#F9FBFC" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="m20.2 22 1.7 1.7 3.6-4" stroke="#F27643" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function NavItems({
   currentTab,
+  cases,
   onTabChange,
-  onOpenNewRfq,
-  onOpenShortcuts,
-  activeCaseId,
-}: HeaderProps) {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  onNavigate,
+}: {
+  currentTab: AppTab;
+  cases: RFQCase[];
+  onTabChange: (tab: AppTab) => void;
+  onNavigate?: () => void;
+}) {
+  const waitingCount = cases.filter((item) => item.status === "NEEDS_REVIEW").length;
+  const activeTab = currentTab === "workbench" ? "inbox" : currentTab;
 
   return (
-    <motion.header
-      initial={{ opacity: 0, y: -10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-      className="sticky top-0 z-50 border-b"
-      style={{
-        background: "rgba(255, 253, 247, 0.88)",
-        backdropFilter: "blur(16px)",
-        WebkitBackdropFilter: "blur(16px)",
-        borderColor: "var(--color-sand-200)",
-      }}
-    >
-      <div className="mx-auto max-w-7xl px-4 sm:px-6">
-        <div className="flex h-14 sm:h-16 items-center justify-between">
-          {/* Left: Logo */}
-          <div className="flex items-center gap-2.5 flex-shrink-0">
-            <h1
-              className="text-base sm:text-lg font-bold tracking-tight"
-              style={{ color: "var(--color-brown-900)" }}
-            >
-              RFQ Assistant
-            </h1>
-            <span
-              className="hidden sm:inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider border"
-              style={{
-                color: "var(--color-amber-700)",
-                backgroundColor: "var(--color-amber-50)",
-                borderColor: "var(--color-amber-200)",
-              }}
-            >
-              Demo
-            </span>
-          </div>
-
-          {/* Center: Desktop Nav */}
-          <nav
-            className="hidden md:flex items-center gap-1"
-            role="navigation"
-            aria-label="Main navigation"
-          >
-            {tabs.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = currentTab === tab.id;
-              const isDisabled = tab.id === "workbench" && !activeCaseId;
-
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => !isDisabled && onTabChange(tab.id)}
-                  disabled={isDisabled}
-                  aria-current={isActive ? "page" : undefined}
-                  title={
-                    isDisabled ? "Open an RFQ case first" : undefined
-                  }
-                  className="relative flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 disabled:opacity-35 disabled:cursor-not-allowed"
-                  style={{
-                    color: isActive
-                      ? "var(--color-amber-700)"
-                      : "var(--color-brown-400)",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isActive && !isDisabled) {
-                      e.currentTarget.style.color =
-                        "var(--color-brown-700)";
-                      e.currentTarget.style.backgroundColor =
-                        "var(--color-sand-100)";
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isActive) {
-                      e.currentTarget.style.color =
-                        "var(--color-brown-400)";
-                      e.currentTarget.style.backgroundColor =
-                        "transparent";
-                    }
-                  }}
-                >
-                  <Icon size={16} />
-                  <span>{tab.label}</span>
-                  {isActive && (
-                    <motion.div
-                      layoutId="activeTab"
-                      className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full"
-                      style={{
-                        backgroundColor: "var(--color-amber-400)",
-                      }}
-                      transition={{
-                        type: "spring",
-                        stiffness: 380,
-                        damping: 30,
-                      }}
-                    />
-                  )}
-                </button>
-              );
-            })}
-          </nav>
-
-          {/* Right: Actions */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onOpenNewRfq}
-              className="hidden sm:inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 hover:shadow-md active:scale-[0.97]"
-              style={{
-                backgroundColor: "var(--color-amber-400)",
-                color: "var(--color-brown-900)",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor =
-                  "var(--color-amber-500)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor =
-                  "var(--color-amber-400)";
-              }}
-            >
-              <Plus size={16} />
-              New RFQ
-            </button>
-            <button
-              onClick={onOpenShortcuts}
-              className="hidden sm:flex items-center justify-center w-9 h-9 rounded-lg transition-colors duration-200"
-              style={{ color: "var(--color-brown-400)" }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor =
-                  "var(--color-sand-100)";
-                e.currentTarget.style.color = "var(--color-brown-700)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "transparent";
-                e.currentTarget.style.color = "var(--color-brown-400)";
-              }}
-              title="Keyboard shortcuts"
-              aria-label="Keyboard shortcuts"
-            >
-              <Keyboard size={18} />
-            </button>
-
-            {/* Mobile menu button */}
-            <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden flex items-center justify-center w-9 h-9 rounded-lg transition-colors duration-200"
-              style={{ color: "var(--color-brown-500)" }}
-              aria-label="Toggle menu"
-            >
-              {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Mobile Menu */}
-      <AnimatePresence>
-        {mobileMenuOpen && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            className="md:hidden overflow-hidden border-t"
-            style={{
-              borderColor: "var(--color-sand-200)",
-              backgroundColor: "var(--color-cream-50)",
+    <nav aria-label="Main navigation" className="mt-8">
+      <p className="px-3 pb-2 text-[12px] font-medium text-[var(--color-brown-500)]">Workspace</p>
+      <div className="space-y-1">
+        {navigation.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            className="rfq-nav-link"
+            aria-current={activeTab === id ? "page" : undefined}
+            onClick={() => {
+              onTabChange(id);
+              onNavigate?.();
             }}
           >
-            <div className="px-4 py-3 space-y-1">
-              {tabs.map((tab) => {
-                const Icon = tab.icon;
-                const isActive = currentTab === tab.id;
-                const isDisabled =
-                  tab.id === "workbench" && !activeCaseId;
+            <Icon size={17} strokeWidth={1.7} aria-hidden="true" />
+            <span>{label}</span>
+            {id === "inbox" && waitingCount > 0 && (
+              <span className="rfq-nav-count" aria-label={`${waitingCount} cases need review`}>
+                {waitingCount}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+    </nav>
+  );
+}
 
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => {
-                      if (!isDisabled) {
-                        onTabChange(tab.id);
-                        setMobileMenuOpen(false);
-                      }
-                    }}
-                    disabled={isDisabled}
-                    className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 disabled:opacity-35"
-                    style={{
-                      color: isActive
-                        ? "var(--color-amber-700)"
-                        : "var(--color-brown-500)",
-                      backgroundColor: isActive
-                        ? "var(--color-amber-50)"
-                        : "transparent",
-                    }}
-                  >
-                    <Icon size={18} />
-                    {tab.label}
-                  </button>
-                );
-              })}
-              <div
-                className="border-t my-2"
-                style={{ borderColor: "var(--color-sand-200)" }}
-              />
-              <button
-                onClick={() => {
-                  onOpenNewRfq();
-                  setMobileMenuOpen(false);
-                }}
-                className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-semibold"
-                style={{
-                  backgroundColor: "var(--color-amber-400)",
-                  color: "var(--color-brown-900)",
-                }}
-              >
-                <Plus size={18} />
-                New RFQ
-              </button>
-              <button
-                onClick={() => {
-                  onOpenShortcuts();
-                  setMobileMenuOpen(false);
-                }}
-                className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium"
-                style={{ color: "var(--color-brown-400)" }}
-              >
-                <Keyboard size={18} />
-                Keyboard shortcuts
-              </button>
+export function Header({ currentTab, onTabChange, onOpenShortcuts, cases }: HeaderProps) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  return (
+    <>
+      <aside className="rfq-sidebar" aria-label="RFQ Assistant navigation">
+        <a href="#main-content" className="flex items-center gap-3 px-2 no-underline">
+          <ProductMark />
+          <span className="min-w-0">
+            <span className="block text-[15px] font-semibold leading-5 text-[#142126]">RFQ Assistant</span>
+            <span className="block text-[12px] leading-4 text-[#52656b]">Quotation workspace</span>
+          </span>
+        </a>
+
+        <NavItems currentTab={currentTab} cases={cases} onTabChange={onTabChange} />
+
+        <div className="mt-auto border-t border-[#dfe7e9] pt-4">
+          <button type="button" className="rfq-nav-link" onClick={onOpenShortcuts}>
+            <Keyboard size={16} strokeWidth={1.7} aria-hidden="true" />
+            <span>Keyboard shortcuts</span>
+          </button>
+          <div className="mt-4 rounded-md border border-[#dfe7e9] bg-[#f8fafb] px-3 py-3">
+            <div className="flex items-center gap-2 text-[13px] font-medium text-[#26373d]">
+              <span className="size-2 rounded-full bg-[#c64c22]" />
+              Local demo
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.header>
+            <p className="mt-1 text-[12px] leading-[17px] text-[#52656b]">Files stay in local storage. Quotes are never sent automatically.</p>
+          </div>
+        </div>
+      </aside>
+
+      <div className="rfq-mobile-topbar">
+        <a href="#main-content" className="flex items-center gap-2.5 no-underline">
+          <ProductMark size={30} />
+          <span className="text-[14px] font-semibold text-[#142126]">RFQ Assistant</span>
+        </a>
+        <button
+          type="button"
+          className="rfq-secondary size-10 !p-0"
+          aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
+          aria-expanded={mobileOpen}
+          onClick={() => setMobileOpen((value) => !value)}
+        >
+          {mobileOpen ? <X size={18} /> : <Menu size={18} />}
+        </button>
+      </div>
+
+      {mobileOpen && (
+        <div className="fixed inset-0 z-[100] bg-[#142126]/30 md:hidden" onClick={() => setMobileOpen(false)}>
+          <div className="h-full w-[min(320px,88vw)] bg-[#f2f6f7] p-4 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between px-2">
+              <div className="flex items-center gap-3"><ProductMark /><span className="font-semibold text-[#142126]">RFQ Assistant</span></div>
+              <button type="button" className="rfq-secondary size-10 !p-0" aria-label="Close navigation" onClick={() => setMobileOpen(false)}><X size={18} /></button>
+            </div>
+            <NavItems currentTab={currentTab} cases={cases} onTabChange={onTabChange} onNavigate={() => setMobileOpen(false)} />
+            <div className="mt-6 border-t border-[#dfe7e9] pt-3">
+              <button type="button" className="rfq-nav-link" onClick={() => { setMobileOpen(false); onOpenShortcuts(); }}><Keyboard size={16} /><span>Keyboard shortcuts</span></button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+export function AppTopbar({ currentTab, activeCaseTitle }: { currentTab: AppTab; activeCaseTitle?: string }) {
+  const pageLabel = currentTab === "workbench" ? activeCaseTitle || "RFQ review" : currentTab === "inbox" ? "RFQ inbox" : currentTab === "catalog" ? "Catalog" : "Overview";
+  return (
+    <div className="rfq-topbar">
+      <div className="flex min-w-0 items-center gap-2 text-[13px]">
+        <span className="shrink-0 text-[#52656b]">Local workspace</span>
+        <span aria-hidden="true" className="text-[#91a3a9]">/</span>
+        <span className="min-w-0 truncate font-medium text-[#26373d]">{pageLabel}</span>
+      </div>
+      <span className="hidden items-center gap-2 text-[12px] text-[#52656b] sm:inline-flex">
+        <span className="size-1.5 rounded-full bg-[#26704c]" />
+        Local storage
+      </span>
+    </div>
   );
 }
