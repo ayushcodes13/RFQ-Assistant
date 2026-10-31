@@ -70,6 +70,30 @@ function formatLocator(locator: SourceLocator): string {
   return parts.join(" · ");
 }
 
+function fieldOriginLabel(origin: NonNullable<RFQLineItem["field_provenance"]>[string]["origin"]): string {
+  switch (origin) {
+    case "DETERMINISTIC":
+      return "Read from document";
+    case "OCR":
+      return "Read with OCR";
+    case "LUNA":
+      return "AI proposed";
+    case "HUMAN":
+      return "Reviewer edited";
+  }
+}
+
+function fieldValidationLabel(status: string): string {
+  const labels: Record<string, string> = {
+    unresolved: "Needs a value",
+    source_grounded: "Source checked",
+    grounded_model_proposal: "Proposal checked",
+    ocr_needs_human_verification: "Check OCR against source",
+    human_reviewed: "Reviewer checked",
+  };
+  return labels[status] ?? status.replaceAll("_", " ");
+}
+
 function hasBlockingIssue(line: RFQLineItem): boolean {
   if (
     line.quantity == null ||
@@ -1001,6 +1025,30 @@ export function WorkbenchView({
                   </code>
                 </dd>
               </div>
+              {Object.keys(selectedLine.field_provenance ?? {}).length > 0 && (
+                <div className="sm:col-span-2 rounded-lg border border-[var(--color-sand-200)] p-3">
+                  <dt className="text-xs font-semibold uppercase tracking-wider mb-2 text-[var(--color-brown-400)]">
+                    Field sources
+                  </dt>
+                  <dd className="space-y-2">
+                    {Object.entries(selectedLine.field_provenance ?? {}).map(([field, provenance]) => (
+                      <div key={field} className="grid grid-cols-[minmax(90px,0.7fr)_minmax(0,2fr)] gap-3 text-xs">
+                        <span className="font-medium text-[var(--color-brown-600)]">{field.replaceAll("_", " ")}</span>
+                        <span className="min-w-0 break-words text-[var(--color-brown-700)]">
+                          <span className="font-medium">{fieldOriginLabel(provenance.origin)}</span>
+                          {provenance.raw_value != null && <> · source “{provenance.raw_value}”</>}
+                          {provenance.proposed_value != null && provenance.proposed_value !== provenance.raw_value && <> · extracted “{provenance.proposed_value}”</>}
+                          <span className="text-[var(--color-brown-400)]"> · {fieldValidationLabel(provenance.validation_status)} · {provenance.review_status.toLowerCase().replaceAll("_", " ")}</span>
+                          {provenance.source_locator.sheet_name && <> · {provenance.source_locator.sheet_name}</>}
+                          {provenance.source_locator.row_number && <> row {provenance.source_locator.row_number}</>}
+                          {provenance.source_locator.page_number && <> · page {provenance.source_locator.page_number}</>}
+                          {provenance.evidence && <span className="mt-0.5 block text-[var(--color-brown-400)]">{provenance.evidence}</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </dd>
+                </div>
+              )}
               {selectedLine.extraction_warnings.length > 0 && (
                 <div className="sm:col-span-2">
                   <dt

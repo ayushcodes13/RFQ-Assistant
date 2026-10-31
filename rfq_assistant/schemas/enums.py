@@ -38,6 +38,15 @@ class ExtractionStatus(str, Enum):
     UNRESOLVED = "UNRESOLVED"
 
 
+class ExtractionOrigin(str, Enum):
+    """How a field value entered the reviewable RFQ line."""
+
+    DETERMINISTIC = "DETERMINISTIC"
+    OCR = "OCR"
+    LUNA = "LUNA"
+    HUMAN = "HUMAN"
+
+
 class MatchStatus(str, Enum):
     EXACT_MATCH = "EXACT_MATCH"
     COLLISION = "COLLISION"

@@ -67,6 +67,8 @@ def test_valid_json_is_typed_and_grounded():
     assert line.requested_manufacturer == "Fabrikam Controls"
     assert line.quantity == 10
     assert line.source_locator.row_number == 1
+    assert line.field_origins["requested_mpn"] == "LUNA"
+    assert line.field_origins["quantity"] == "LUNA"
     assert any(w.code == "LLM_PROPOSED_EXTRACTION" for w in line.extraction_warnings)
     assert len(client.calls) == 2
     assert "Review extracted RFQ line proposals" in client.calls[1][0]

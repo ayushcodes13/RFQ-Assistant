@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import math
+import re
 import threading
 import time
 import uuid
@@ -36,6 +37,7 @@ from rfq_assistant.persistence import StateStore
 from rfq_assistant.schemas.enums import (
     AuditAction,
     CaseStatus,
+    ExtractionOrigin,
     ExtractionStatus,
     MatchStatus,
     ProcessingStage,
@@ -47,6 +49,7 @@ from rfq_assistant.schemas.models import (
     AuditEvent,
     BatchReviewRequest,
     ExtractionWarning,
+    FieldProvenance,
     RFQCase,
     RFQLineItem,
     RFQLineItemUpdate,
@@ -413,6 +416,7 @@ class CaseManager:
                     line_number=draft.line_number,
                     raw_text=draft.raw_text,
                     source_locator=draft.source_locator,
+                    field_provenance=self._build_field_provenance(draft),
                     requested_manufacturer=draft.requested_manufacturer,
                     requested_mpn=draft.requested_mpn,
                     description=draft.description,
@@ -423,6 +427,9 @@ class CaseManager:
                     extraction_warnings=draft.extraction_warnings,
                     match_status=match_res.match_status,
                     selected_catalog_sku=match_res.selected_sku,
+                    matched_catalog_version=self._matched_catalog_version(
+                        match_res.candidates, match_res.selected_sku
+                    ),
                     candidates=match_res.candidates,
                     review_decision=ReviewDecision.PENDING,
                 )
@@ -617,6 +624,60 @@ class CaseManager:
         )
 
     @staticmethod
+    def _build_field_provenance(draft: ParsedLineDraft) -> Dict[str, FieldProvenance]:
+        """Attach source evidence and origin to each customer-requested field."""
+        fields = (
+            "requested_manufacturer", "requested_mpn", "description", "quantity", "unit"
+        )
+        locator = draft.source_locator
+        evidence = locator.text_snippet or draft.raw_text[:240]
+        output: Dict[str, FieldProvenance] = {}
+        for name in fields:
+            value = getattr(draft, name)
+            origin_name = draft.field_origins.get(name)
+            if origin_name is None:
+                origin_name = (
+                    ExtractionOrigin.OCR.value
+                    if locator.ocr_confidence is not None
+                    else ExtractionOrigin.DETERMINISTIC.value
+                )
+            origin = ExtractionOrigin(origin_name)
+            raw_value = draft.field_raw_values.get(name)
+            if raw_value is None and isinstance(value, str) and value:
+                found = re.search(re.escape(value), draft.raw_text, flags=re.IGNORECASE)
+                raw_value = found.group(0) if found else None
+            source_value = str(value) if value is not None else None
+            cell = locator.field_source_cells.get(name)
+            validation_status = "unresolved" if value is None else "source_grounded"
+            if origin == ExtractionOrigin.LUNA:
+                validation_status = "grounded_model_proposal"
+            elif origin == ExtractionOrigin.OCR and value is not None:
+                validation_status = "ocr_needs_human_verification"
+            output[name] = FieldProvenance(
+                raw_value=raw_value,
+                proposed_value=source_value,
+                origin=origin,
+                source_locator=locator,
+                evidence=(f"Cell {cell}: " if cell else "") + evidence,
+                validation_status=validation_status,
+                warnings=[
+                    warning.model_copy(deep=True)
+                    for warning in draft.extraction_warnings
+                    if warning.code != "LLM_PROPOSED_EXTRACTION"
+                ],
+            )
+        return output
+
+    @staticmethod
+    def _matched_catalog_version(candidates, selected_sku: Optional[str]) -> Optional[str]:
+        if not selected_sku:
+            return None
+        candidate = next(
+            (item for item in candidates if item.catalog_item.internal_sku == selected_sku), None
+        )
+        return candidate.catalog_item.catalog_version if candidate else None
+
+    @staticmethod
     def _llm_segments(
         drafts, content: bytes, filename: str, source_type: SourceType,
         evidence_segments: Optional[List[EvidenceSegment]] = None,
@@ -661,6 +722,7 @@ class CaseManager:
                 for field in ("requested_mpn", "requested_manufacturer", "description", "quantity", "unit"):
                     if getattr(target, field) in (None, "") and getattr(proposal, field) not in (None, ""):
                         setattr(target, field, getattr(proposal, field))
+                        target.field_origins[field] = ExtractionOrigin.LUNA.value
                 target.extraction_warnings.extend(proposal.extraction_warnings)
             elif proposal.source_segment_id in candidates_by_id:
                 proposal.line_number = max(
@@ -882,6 +944,9 @@ class CaseManager:
             line.match_status = rematch.match_status
             line.selected_catalog_sku = rematch.selected_sku
             line.candidates = rematch.candidates
+            line.matched_catalog_version = self._matched_catalog_version(
+                rematch.candidates, rematch.selected_sku
+            )
 
         if update.requested_manufacturer is not None and update.requested_manufacturer != line.requested_manufacturer:
             material_changes.append("requested_manufacturer")
@@ -899,6 +964,9 @@ class CaseManager:
             line.match_status = rematch.match_status
             line.selected_catalog_sku = rematch.selected_sku
             line.candidates = rematch.candidates
+            line.matched_catalog_version = self._matched_catalog_version(
+                rematch.candidates, rematch.selected_sku
+            )
 
         if update.selected_catalog_sku is not None and update.selected_catalog_sku != line.selected_catalog_sku:
             material_changes.append("selected_catalog_sku")
@@ -913,6 +981,8 @@ class CaseManager:
             )
             line.selected_catalog_sku = update.selected_catalog_sku
             line.match_status = MatchStatus.MANUAL_OVERRIDE
+            selected_item = self.catalog.get_by_sku(update.selected_catalog_sku)
+            line.matched_catalog_version = selected_item.catalog_version if selected_item else None
 
         if update.unit is not None and update.unit != line.unit:
             material_changes.append("unit")
@@ -986,6 +1056,28 @@ class CaseManager:
             line.review_decision = update.review_decision
             line.reviewed_by = update.actor
             line.reviewed_at = datetime.utcnow()
+
+        for field in (
+            "requested_manufacturer", "requested_mpn", "description", "quantity", "unit"
+        ):
+            if field not in material_changes:
+                continue
+            old = line.field_provenance.get(field) or FieldProvenance(
+                source_locator=line.source_locator
+            )
+            value = getattr(line, field)
+            line.field_provenance[field] = old.model_copy(update={
+                "proposed_value": str(value) if value is not None else None,
+                "origin": ExtractionOrigin.HUMAN,
+                "evidence": update.reviewer_notes or "Reviewer edited this field.",
+                "validation_status": "human_reviewed",
+                "revision": old.revision + 1,
+                "review_status": line.review_decision,
+            })
+
+        if update.review_decision is not None:
+            for provenance in line.field_provenance.values():
+                provenance.review_status = line.review_decision
 
         if update.reviewer_notes is not None:
             line.reviewer_notes = update.reviewer_notes

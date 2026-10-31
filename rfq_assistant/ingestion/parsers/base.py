@@ -38,6 +38,8 @@ class ParsedLineDraft(BaseModel):
     # Internal link used only while merging a grounded model fallback with a
     # deterministic candidate. It is not copied into the persisted RFQ schema.
     source_segment_id: Optional[str] = None
+    field_origins: dict[str, str] = Field(default_factory=dict)
+    field_raw_values: dict[str, Optional[str]] = Field(default_factory=dict)
     extraction_warnings: List[ExtractionWarning] = Field(default_factory=list)
 
 

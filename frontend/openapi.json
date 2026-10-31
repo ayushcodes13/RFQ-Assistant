@@ -483,6 +483,17 @@
         "title": "ExportRequest",
         "type": "object"
       },
+      "ExtractionOrigin": {
+        "description": "How a field value entered the reviewable RFQ line.",
+        "enum": [
+          "DETERMINISTIC",
+          "OCR",
+          "LUNA",
+          "HUMAN"
+        ],
+        "title": "ExtractionOrigin",
+        "type": "string"
+      },
       "ExtractionStatus": {
         "enum": [
           "EXTRACTED",
@@ -514,6 +525,77 @@
           "message"
         ],
         "title": "ExtractionWarning",
+        "type": "object"
+      },
+      "FieldProvenance": {
+        "description": "Versioned source and review record for one extracted line field.",
+        "properties": {
+          "evidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/ExtractionOrigin",
+            "default": "DETERMINISTIC"
+          },
+          "proposed_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Value"
+          },
+          "raw_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Value"
+          },
+          "review_status": {
+            "$ref": "#/components/schemas/ReviewDecision",
+            "default": "PENDING"
+          },
+          "revision": {
+            "default": 1,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "source_locator": {
+            "$ref": "#/components/schemas/SourceLocator"
+          },
+          "validation_status": {
+            "default": "source_grounded",
+            "title": "Validation Status",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/ExtractionWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source_locator"
+        ],
+        "title": "FieldProvenance",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -856,6 +938,13 @@
             "title": "Extraction Warnings",
             "type": "array"
           },
+          "field_provenance": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FieldProvenance"
+            },
+            "title": "Field Provenance",
+            "type": "object"
+          },
           "line_id": {
             "title": "Line Id",
             "type": "string"
@@ -867,6 +956,17 @@
           "match_status": {
             "$ref": "#/components/schemas/MatchStatus",
             "default": "NO_MATCH"
+          },
+          "matched_catalog_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched Catalog Version"
           },
           "notes": {
             "anyOf": [

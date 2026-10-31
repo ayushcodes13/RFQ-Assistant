@@ -667,6 +667,13 @@ class GroundedLLMExtractor:
                 quantity=normalized_quantity,
                 unit=line.unit,
                 source_segment_id=line.segment_id,
+                field_origins={
+                    name: "LUNA"
+                    for name in (
+                        "requested_manufacturer", "requested_mpn", "description", "quantity", "unit"
+                    )
+                    if getattr(line, name) is not None
+                },
                 extraction_warnings=[*segment.warnings, ExtractionWarning(
                     code="LLM_PROPOSED_EXTRACTION",
                     message="Fields were proposed by an LLM and require human verification against the original source.",
