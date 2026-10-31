@@ -1,317 +1,314 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { CatalogItem } from "@/types";
-import { importCatalogCSV, listCatalog } from "@/services/api";
+import React, { useState, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Upload,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+  FileSpreadsheet,
+  Info,
+} from "lucide-react";
+import { importCatalogCSV } from "@/services/api";
+import { CatalogImportSummary } from "@/types";
+import { MotionWrapper } from "@/components/ui/MotionWrapper";
+import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
 export function CatalogView() {
-  const [items, setItems] = useState<CatalogItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [importSummary, setImportSummary] = useState<any>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState<CatalogImportSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
 
-  const loadItems = async () => {
-    setLoading(true);
-    try {
-      const data = await listCatalog();
-      setItems(data);
-    } catch (e: any) {
-      console.error(e);
-    } finally {
-      setLoading(false);
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f && f.name.endsWith(".csv")) {
+      setFile(f);
+      setError(null);
+    } else {
+      setError("Please upload a .csv file");
     }
-  };
-
-  useEffect(() => {
-    loadItems();
   }, []);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || !e.target.files[0]) return;
-    setUploading(true);
+  const handleImport = async () => {
+    if (!file) return;
+    setImporting(true);
+    setError(null);
+    setResult(null);
     try {
-      const res = await importCatalogCSV(e.target.files[0]);
-      setImportSummary(res.summary);
-      loadItems();
-    } catch (err: any) {
-      alert(`Import failed: ${err.message}`);
+      const res = await importCatalogCSV(file);
+      setResult(res.summary);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Import failed";
+      setError(msg);
     } finally {
-      setUploading(false);
+      setImporting(false);
     }
   };
 
-  const filtered = items.filter(
-    (i) =>
-      i.internal_sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      i.manufacturer.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      i.manufacturer_part_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      i.description.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  // Group by MPN to detect catalog collisions
-  const mpnCounts: { [mpn: string]: string[] } = {};
-  items.forEach((i) => {
-    const k = i.manufacturer_part_number.toUpperCase();
-    if (!mpnCounts[k]) mpnCounts[k] = [];
-    if (!mpnCounts[k].includes(i.manufacturer)) mpnCounts[k].push(i.manufacturer);
-  });
-  const collisions = Object.entries(mpnCounts).filter(([_, oems]) => oems.length > 1);
-
   return (
-    <div className="catalog-container">
-      <div className="catalog-header">
-        <div>
-          <h1 className="page-title">Authorized Item Master Catalog</h1>
-          <p className="page-subtitle">
-            Ground-truth catalog containing authorized distributor SKUs and exact manufacturer part numbers.
+    <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+      <MotionWrapper direction="up">
+        <div className="text-center mb-8">
+          <div
+            className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-4"
+            style={{ backgroundColor: "var(--color-amber-50)" }}
+          >
+            <FileSpreadsheet
+              size={28}
+              style={{ color: "var(--color-amber-500)" }}
+            />
+          </div>
+          <h2
+            className="text-xl sm:text-2xl font-bold mb-2"
+            style={{ color: "var(--color-brown-800)" }}
+          >
+            Catalog Import
+          </h2>
+          <p
+            className="text-sm leading-relaxed max-w-md mx-auto"
+            style={{ color: "var(--color-brown-400)" }}
+          >
+            Upload a CSV file containing your authorized product catalog.
+            Required columns: Internal SKU, Manufacturer, Manufacturer Part
+            Number.
           </p>
         </div>
+      </MotionWrapper>
 
-        <div className="header-actions">
-          <label className="import-btn">
-            {uploading ? "Importing CSV..." : "📁 Import Catalog CSV"}
-            <input
-              type="file"
-              accept=".csv"
-              className="hidden-file-input"
-              disabled={uploading}
-              onChange={handleFileUpload}
-            />
-          </label>
+      <MotionWrapper direction="up" delay={0.1}>
+        {/* Drop zone */}
+        <div
+          className={`relative rounded-xl border-2 border-dashed p-8 sm:p-10 text-center cursor-pointer transition-all duration-300 mb-4 ${
+            dragOver ? "scale-[1.01]" : ""
+          }`}
+          style={{
+            borderColor: dragOver
+              ? "var(--color-amber-400)"
+              : file
+                ? "var(--color-success-500)"
+                : "var(--color-sand-300)",
+            backgroundColor: dragOver
+              ? "var(--color-amber-50)"
+              : file
+                ? "var(--color-success-50)"
+                : "var(--color-cream-100)",
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+          onClick={() => {
+            const input = document.getElementById(
+              "catalog-file-input"
+            ) as HTMLInputElement;
+            input?.click();
+          }}
+        >
+          <input
+            id="catalog-file-input"
+            type="file"
+            accept=".csv"
+            onChange={(e) => {
+              setFile(e.target.files?.[0] || null);
+              setError(null);
+            }}
+            className="hidden"
+          />
+
+          <AnimatePresence mode="wait">
+            {file ? (
+              <motion.div
+                key="has-file"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+              >
+                <CheckCircle
+                  size={36}
+                  className="mx-auto mb-3"
+                  style={{ color: "var(--color-success-500)" }}
+                />
+                <p
+                  className="font-semibold text-sm"
+                  style={{ color: "var(--color-success-700)" }}
+                >
+                  {file.name}
+                </p>
+                <p
+                  className="text-xs mt-1"
+                  style={{ color: "var(--color-success-500)" }}
+                >
+                  Click to change file
+                </p>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="no-file"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+              >
+                <Upload
+                  size={36}
+                  className="mx-auto mb-3"
+                  style={{ color: "var(--color-sand-400)" }}
+                />
+                <p
+                  className="font-medium text-sm"
+                  style={{ color: "var(--color-brown-500)" }}
+                >
+                  Drop a CSV file here
+                </p>
+                <p
+                  className="text-xs mt-1"
+                  style={{ color: "var(--color-brown-300)" }}
+                >
+                  or click to browse
+                </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
-      </div>
 
-      {importSummary && (
-        <div className="summary-alert">
-          ✓ Imported {importSummary.imported} items. Found {importSummary.duplicates} duplicates,{" "}
-          {importSummary.collisions} cross-brand collisions. Total catalog items:{" "}
-          {importSummary.total_catalog_size}.
+        {/* Import button */}
+        <div className="flex justify-center mb-6">
+          <button
+            onClick={handleImport}
+            disabled={!file || importing}
+            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 hover:shadow-md active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{
+              backgroundColor: "var(--color-amber-400)",
+              color: "var(--color-brown-900)",
+            }}
+          >
+            {importing ? (
+              <>
+                <span className="animate-spin-slow inline-block">
+                  ⏳
+                </span>
+                Importing…
+              </>
+            ) : (
+              <>
+                <Upload size={16} />
+                Import catalog
+              </>
+            )}
+          </button>
         </div>
-      )}
+      </MotionWrapper>
 
-      {collisions.length > 0 && (
-        <div className="collision-banner">
-          <div className="banner-title font-bold">
-            ⚠ Cross-Brand Part Number Collisions Detected ({collisions.length}):
-          </div>
-          <div className="collision-list">
-            {collisions.map(([mpn, oems]) => (
-              <span key={mpn} className="collision-tag font-mono">
-                {mpn} → {oems.join(" vs ")}
-              </span>
-            ))}
-          </div>
-          <div className="banner-note">
-            When customer RFQs omit the manufacturer name for these parts, the system flags them for
-            mandatory human brand selection instead of guessing.
-          </div>
-        </div>
-      )}
-
-      <div className="search-bar">
-        <input
-          type="text"
-          className="search-input"
-          placeholder="Filter catalog by SKU, OEM, part number, or description..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-        <div className="item-count font-mono">{filtered.length} items loaded</div>
-      </div>
-
-      <div className="table-card">
-        {loading ? (
-          <div className="loading">Loading catalog items...</div>
-        ) : filtered.length === 0 ? (
-          <div className="empty">No catalog items found.</div>
-        ) : (
-          <table className="catalog-table">
-            <thead>
-              <tr>
-                <th>Internal SKU</th>
-                <th>Manufacturer</th>
-                <th>Manufacturer Part Number</th>
-                <th>Description</th>
-                <th className="align-right">List Price</th>
-                <th className="align-center">Stock</th>
-                <th>Version</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((item) => (
-                <tr key={item.internal_sku}>
-                  <td className="font-mono font-bold text-accent">{item.internal_sku}</td>
-                  <td className="font-bold">{item.manufacturer}</td>
-                  <td className="font-mono">{item.manufacturer_part_number}</td>
-                  <td className="desc-cell">{item.description}</td>
-                  <td className="align-right font-mono">
-                    {item.list_price !== null && item.list_price !== undefined
-                      ? `$${item.list_price.toFixed(2)}`
-                      : "—"}
-                  </td>
-                  <td className="align-center font-mono">
-                    {item.stock_qty !== null && item.stock_qty !== undefined
-                      ? item.stock_qty
-                      : "—"}
-                  </td>
-                  <td className="font-muted font-mono">{item.catalog_version || "v1"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* Error */}
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="flex items-start gap-3 p-4 rounded-xl border mb-4"
+            role="alert"
+            style={{
+              backgroundColor: "var(--color-error-50)",
+              borderColor: "var(--color-error-100)",
+              color: "var(--color-error-700)",
+            }}
+          >
+            <XCircle size={18} className="flex-shrink-0 mt-0.5" />
+            <p className="text-sm">{error}</p>
+          </motion.div>
         )}
-      </div>
+      </AnimatePresence>
 
-      <style jsx>{`
-        .catalog-container {
-          padding: 2rem;
-          max-width: 1200px;
-          margin: 0 auto;
-        }
-        .catalog-header {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          margin-bottom: 1.5rem;
-        }
-        .page-title {
-          font-size: 1.35rem;
-          font-weight: 600;
-          color: var(--text-primary);
-        }
-        .page-subtitle {
-          font-size: 0.875rem;
-          color: var(--text-muted);
-          margin-top: 0.2rem;
-        }
-        .import-btn {
-          background: var(--accent-primary);
-          color: #FFFFFF;
-          padding: 0.5rem 1rem;
-          border-radius: 6px;
-          font-size: 0.875rem;
-          font-weight: 500;
-          cursor: pointer;
-          display: inline-block;
-          border: 1px solid var(--accent-primary);
-          transition: background 0.15s ease;
-        }
-        .import-btn:hover {
-          background: var(--accent-primary-hover);
-        }
-        .hidden-file-input { display: none; }
-        .summary-alert {
-          background: #ECFDF5;
-          border: 1px solid #A7F3D0;
-          color: #065F46;
-          padding: 0.65rem 1rem;
-          border-radius: 6px;
-          font-size: 0.85rem;
-          margin-bottom: 1rem;
-        }
-        .collision-banner {
-          background: #FFFBEB;
-          border: 1px solid #FDE68A;
-          color: #92400E;
-          padding: 0.75rem 1rem;
-          border-radius: 6px;
-          margin-bottom: 1rem;
-          font-size: 0.82rem;
-        }
-        .banner-title {
-          margin-bottom: 0.35rem;
-        }
-        .collision-list {
-          display: flex;
-          gap: 0.4rem;
-          flex-wrap: wrap;
-          margin-bottom: 0.35rem;
-        }
-        .collision-tag {
-          background: #FEF3C7;
-          border: 1px solid #FCD34D;
-          padding: 0.15rem 0.45rem;
-          border-radius: 4px;
-          font-size: 0.75rem;
-        }
-        .banner-note {
-          color: #B45309;
-          font-size: 0.75rem;
-        }
-        .search-bar {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 1rem;
-        }
-        .search-input {
-          width: 380px;
-          padding: 0.5rem 0.75rem;
-          border: 1px solid var(--border-medium);
-          border-radius: 6px;
-          font-size: 0.875rem;
-          background: #FFFFFF;
-          color: var(--text-primary);
-        }
-        .search-input:focus {
-          outline: none;
-          border-color: var(--accent-primary);
-        }
-        .item-count {
-          font-size: 0.8rem;
-          color: var(--text-muted);
-        }
-        .table-card {
-          background: #FFFFFF;
-          border: 1px solid var(--border-light);
-          border-radius: 8px;
-          box-shadow: var(--shadow-sm);
-          overflow: hidden;
-        }
-        .catalog-table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 0.875rem;
-          text-align: left;
-        }
-        .catalog-table th {
-          background: #F8FAFC;
-          padding: 0.75rem 1rem;
-          font-weight: 600;
-          font-size: 0.75rem;
-          text-transform: uppercase;
-          color: var(--text-muted);
-          border-bottom: 1px solid var(--border-light);
-        }
-        .catalog-table td {
-          padding: 0.85rem 1rem;
-          border-bottom: 1px solid var(--border-light);
-          color: var(--text-secondary);
-        }
-        .catalog-table tr:hover td {
-          background: #F8FAFC;
-          color: var(--text-primary);
-        }
-        .desc-cell {
-          max-width: 400px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .align-right { text-align: right; }
-        .align-center { text-align: center; }
-        .font-mono { font-family: var(--font-mono); }
-        .font-bold { font-weight: 600; color: var(--text-primary); }
-        .font-muted { color: var(--text-muted); }
-        .text-accent { color: var(--accent-primary); }
-        .loading, .empty {
-          padding: 3rem;
-          text-align: center;
-          color: var(--text-muted);
-          font-size: 0.875rem;
-        }
-      `}</style>
+      {/* Result */}
+      <AnimatePresence>
+        {result && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            className="rounded-xl border p-5"
+            style={{
+              backgroundColor: "var(--color-success-50)",
+              borderColor: "var(--color-success-100)",
+            }}
+          >
+            <h3
+              className="text-sm font-semibold mb-3 flex items-center gap-2"
+              style={{ color: "var(--color-success-700)" }}
+            >
+              <CheckCircle size={16} />
+              Import results
+            </h3>
+            <div className="grid grid-cols-3 gap-3">
+              <div
+                className="text-center rounded-lg p-3"
+                style={{ backgroundColor: "rgba(255,255,255,0.6)" }}
+              >
+                <div
+                  className="text-2xl font-bold"
+                  style={{ color: "var(--color-success-700)" }}
+                >
+                  {result.imported}
+                </div>
+                <div
+                  className="text-xs font-medium mt-0.5"
+                  style={{ color: "var(--color-success-600)" }}
+                >
+                  Imported
+                </div>
+              </div>
+              <div
+                className="text-center rounded-lg p-3"
+                style={{ backgroundColor: "rgba(255,255,255,0.6)" }}
+              >
+                <div
+                  className="text-2xl font-bold"
+                  style={{ color: "var(--color-warning-600)" }}
+                >
+                  {result.duplicates}
+                </div>
+                <div
+                  className="text-xs font-medium mt-0.5"
+                  style={{ color: "var(--color-warning-600)" }}
+                >
+                  Duplicates
+                </div>
+              </div>
+              <div
+                className="text-center rounded-lg p-3"
+                style={{ backgroundColor: "rgba(255,255,255,0.6)" }}
+              >
+                <div
+                  className="text-2xl font-bold"
+                  style={{ color: "var(--color-error-600)" }}
+                >
+                  {result.collisions}
+                </div>
+                <div
+                  className="text-xs font-medium mt-0.5"
+                  style={{ color: "var(--color-error-600)" }}
+                >
+                  MPN collisions
+                </div>
+              </div>
+            </div>
+            <p
+              className="text-xs mt-3"
+              style={{ color: "var(--color-success-600)" }}
+            >
+              Catalog now contains {result.total_catalog_size} item
+              {result.total_catalog_size === 1 ? "" : "s"}.
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

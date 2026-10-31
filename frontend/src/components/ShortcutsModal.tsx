@@ -1,201 +1,133 @@
 "use client";
 
 import React from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { X, Keyboard } from "lucide-react";
 
 interface ShortcutsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+const shortcuts = [
+  { keys: "Tab", action: "Navigate between cells" },
+  { keys: "Enter", action: "Confirm cell edit" },
+  { keys: "Escape", action: "Cancel edit / close modal" },
+  { keys: "Ctrl/⌘ + F", action: "Search extracted rows" },
+  { keys: "Double-click", action: "Edit a cell value" },
+];
+
 export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <div>
-            <h2 className="modal-title">Keyboard Shortcuts & Operator Agreement</h2>
-            <p className="modal-subtitle">RFQ Assistant v0.1 — Industrial Inside-Sales Workbench</p>
-          </div>
-          <button className="close-btn" onClick={onClose}>
-            ✕
-          </button>
-        </div>
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(42, 35, 24, 0.4)" }}
+          onClick={onClose}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            transition={{
+              duration: 0.35,
+              ease: [0.16, 1, 0.3, 1],
+            }}
+            className="w-full max-w-sm rounded-2xl overflow-hidden shadow-xl"
+            style={{
+              backgroundColor: "var(--color-cream-50)",
+              border: "1px solid var(--color-sand-200)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="Keyboard shortcuts"
+          >
+            {/* Header */}
+            <div
+              className="flex items-center justify-between px-5 py-4 border-b"
+              style={{ borderColor: "var(--color-sand-200)" }}
+            >
+              <h2
+                className="text-lg font-bold flex items-center gap-2"
+                style={{ color: "var(--color-brown-800)" }}
+              >
+                <Keyboard size={20} />
+                Shortcuts
+              </h2>
+              <button
+                onClick={onClose}
+                className="p-1.5 rounded-lg transition-colors duration-200"
+                style={{ color: "var(--color-brown-300)" }}
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
 
-        <div className="modal-body">
-          <section className="section">
-            <h3 className="section-title">⌨ Keyboard Navigation</h3>
-            <div className="shortcut-table">
-              <div className="shortcut-row">
-                <span className="key-combo font-mono">Tab / Shift+Tab</span>
-                <span className="key-desc">Navigate through editable quantity and part fields</span>
-              </div>
-              <div className="shortcut-row">
-                <span className="key-combo font-mono">Enter</span>
-                <span className="key-desc">Commit cell edit and save changes</span>
-              </div>
-              <div className="shortcut-row">
-                <span className="key-combo font-mono">Esc</span>
-                <span className="key-desc">Close dialogs and modals</span>
-              </div>
-              <div className="shortcut-row">
-                <span className="key-combo font-mono">Click Row</span>
-                <span className="key-desc">Synchronizes and highlights exact source document locator</span>
+            {/* Body */}
+            <div className="px-5 py-4">
+              <div className="space-y-0">
+                {shortcuts.map((s, i) => (
+                  <motion.div
+                    key={s.keys}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{
+                      delay: i * 0.05,
+                      duration: 0.3,
+                      ease: [0.16, 1, 0.3, 1],
+                    }}
+                    className="flex items-center justify-between py-3 border-b last:border-b-0"
+                    style={{ borderColor: "var(--color-sand-100)" }}
+                  >
+                    <span
+                      className="text-sm"
+                      style={{ color: "var(--color-brown-600)" }}
+                    >
+                      {s.action}
+                    </span>
+                    <kbd
+                      className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-mono font-medium border"
+                      style={{
+                        backgroundColor: "var(--color-sand-50)",
+                        borderColor: "var(--color-sand-200)",
+                        color: "var(--color-brown-600)",
+                      }}
+                    >
+                      {s.keys}
+                    </kbd>
+                  </motion.div>
+                ))}
               </div>
             </div>
-          </section>
 
-          <section className="section">
-            <h3 className="section-title">🛡 Safety Invariants & Engineering Working Rules</h3>
-            <ul className="rules-list">
-              <li>
-                <strong>No Automatic Quotation Dispatch:</strong> Generated worksheets and email replies are
-                strictly labeled as drafts for staff review. No email is ever sent automatically.
-              </li>
-              <li>
-                <strong>No Fabricated Part Numbers or Substitutions:</strong> Exact matching requires normalized
-                part number AND manufacturer agreement. A text similarity score is not engineering evidence.
-              </li>
-              <li>
-                <strong>Unresolved Fields Block Final Export:</strong> Missing quantities, brand collisions, and
-                unknown items require explicit human review or selection of partial draft export.
-              </li>
-              <li>
-                <strong>Immutable Audit Trail:</strong> Every cell modification, approval, and export is recorded
-                with timestamps and operator attribution.
-              </li>
-            </ul>
-          </section>
-
-          <div className="modal-footer">
-            <button className="close-action-btn" onClick={onClose}>
-              Got it, close
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <style jsx>{`
-        .modal-backdrop {
-          position: fixed;
-          top: 0; left: 0; right: 0; bottom: 0;
-          background: rgba(15, 23, 42, 0.4);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 100;
-        }
-        .modal-dialog {
-          background: #FFFFFF;
-          border-radius: 8px;
-          width: 90%;
-          max-width: 580px;
-          box-shadow: var(--shadow-lg);
-          border: 1px solid var(--border-light);
-          overflow: hidden;
-        }
-        .modal-header {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          padding: 1.25rem 1.5rem;
-          border-bottom: 1px solid var(--border-light);
-          background: #FFFFFF;
-        }
-        .modal-title {
-          font-size: 1.15rem;
-          font-weight: 600;
-          color: var(--text-primary);
-        }
-        .modal-subtitle {
-          font-size: 0.82rem;
-          color: var(--text-muted);
-          margin-top: 0.2rem;
-        }
-        .close-btn {
-          background: none;
-          border: none;
-          font-size: 1.1rem;
-          cursor: pointer;
-          color: var(--text-muted);
-        }
-        .close-btn:hover {
-          color: var(--text-primary);
-        }
-        .modal-body {
-          padding: 1.5rem;
-          display: flex;
-          flex-direction: column;
-          gap: 1.25rem;
-        }
-        .section-title {
-          font-size: 0.85rem;
-          font-weight: 600;
-          color: var(--text-primary);
-          margin-bottom: 0.65rem;
-          text-transform: uppercase;
-        }
-        .shortcut-table {
-          display: flex;
-          flex-direction: column;
-          gap: 0.45rem;
-          background: #F8FAFC;
-          padding: 0.85rem;
-          border-radius: 6px;
-          border: 1px solid var(--border-light);
-        }
-        .shortcut-row {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          font-size: 0.82rem;
-        }
-        .key-combo {
-          background: #FFFFFF;
-          border: 1px solid var(--border-medium);
-          padding: 0.15rem 0.5rem;
-          border-radius: 4px;
-          font-weight: 600;
-          color: var(--text-primary);
-          box-shadow: var(--shadow-sm);
-        }
-        .key-desc {
-          color: var(--text-secondary);
-        }
-        .rules-list {
-          padding-left: 1.25rem;
-          font-size: 0.82rem;
-          color: var(--text-secondary);
-          display: flex;
-          flex-direction: column;
-          gap: 0.45rem;
-          line-height: 1.45;
-        }
-        .rules-list strong {
-          color: var(--text-primary);
-        }
-        .modal-footer {
-          display: flex;
-          justify-content: flex-end;
-          padding-top: 0.5rem;
-        }
-        .close-action-btn {
-          background: var(--accent-primary);
-          color: #FFFFFF;
-          border: 1px solid var(--accent-primary);
-          padding: 0.5rem 1rem;
-          border-radius: 6px;
-          font-size: 0.85rem;
-          font-weight: 500;
-          cursor: pointer;
-          transition: background 0.15s ease;
-        }
-        .close-action-btn:hover {
-          background: var(--accent-primary-hover);
-        }
-        .font-mono { font-family: var(--font-mono); }
-      `}</style>
-    </div>
+            {/* Footer */}
+            <div
+              className="flex justify-end px-5 py-4 border-t"
+              style={{ borderColor: "var(--color-sand-200)" }}
+            >
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-lg text-sm font-medium border transition-all duration-200"
+                style={{
+                  color: "var(--color-brown-500)",
+                  borderColor: "var(--color-sand-200)",
+                  backgroundColor: "var(--color-cream-100)",
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

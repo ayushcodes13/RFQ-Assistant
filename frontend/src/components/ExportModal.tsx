@@ -1,8 +1,16 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { RFQCase } from "@/types";
-import { exportWorksheet, getCase, getEmailDraft, getExportDownloadUrl } from "@/services/api";
+import React, { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  X,
+  Download,
+  AlertTriangle,
+  CheckCircle,
+  FileDown,
+} from "lucide-react";
+import { exportWorksheet, resolveDownloadUrl } from "@/services/api";
+import { ExportManifest, RFQCase } from "@/types";
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -10,405 +18,295 @@ interface ExportModalProps {
   onClose: () => void;
 }
 
-export function ExportModal({ isOpen, caseData, onClose }: ExportModalProps) {
-  const [allowPartial, setAllowPartial] = useState(false);
-  const [format, setFormat] = useState<"xlsx" | "csv">("xlsx");
+export function ExportModal({
+  isOpen,
+  caseData,
+  onClose,
+}: ExportModalProps) {
   const [exporting, setExporting] = useState(false);
-  const [emailDraft, setEmailDraft] = useState<string>("");
-  const [copiedEmail, setCopiedEmail] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [freshCase, setFreshCase] = useState<RFQCase | null>(null);
-  const [statusLoading, setStatusLoading] = useState(false);
-  const [statusError, setStatusError] = useState<string | null>(null);
+  const [allowPartial, setAllowPartial] = useState(false);
+  const [manifest, setManifest] = useState<ExportManifest | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // Case props can be stale after inline review. Always refetch from the
-  // backend on open; it owns the authoritative export eligibility.
-  useEffect(() => {
-    if (!isOpen) return;
-    let active = true;
-    setAllowPartial(false);
-    setFreshCase(null);
-    setStatusError(null);
-    setStatusLoading(true);
-    getCase(caseData.case_id)
-      .then((value) => { if (active) setFreshCase(value); })
-      .catch(() => { if (active) setStatusError("Cannot verify the latest review status. Close and reopen export."); })
-      .finally(() => { if (active) setStatusLoading(false); });
-    return () => { active = false; };
-  }, [isOpen, caseData.case_id]);
-
-  useEffect(() => {
-    if (isOpen) {
-      getEmailDraft(caseData.case_id)
-        .then((res) => setEmailDraft(res.draft))
-        .catch(() => setEmailDraft("Failed to generate email draft."));
-    }
-  }, [isOpen, caseData.case_id]);
-
-  if (!isOpen) return null;
-
-  const hasUnresolved = (freshCase?.unresolved_count ?? 0) > 0;
-  const canExport = !!freshCase && !statusLoading && !statusError && (!hasUnresolved || allowPartial);
-
-  const handleDownload = async () => {
-    setErrorMsg(null);
+  const handleExport = async () => {
     setExporting(true);
+    setError(null);
+    setDownloadUrl(null);
+    setManifest(null);
     try {
-      // Race defense: verify current backend state again at the moment of export.
-      const verified = await getCase(caseData.case_id);
-      setFreshCase(verified);
-      if (verified.unresolved_count > 0 && !allowPartial) {
-        throw new Error("Review status changed. Resolve remaining lines or choose a partial draft.");
-      }
-      const manifest = await exportWorksheet(
-        caseData.case_id,
-        allowPartial,
-        format,
-        "Inside Sales"
-      );
-      // Trigger file download
-      const downloadUrl = getExportDownloadUrl(caseData.case_id, manifest.export_id);
-      window.open(downloadUrl, "_blank");
-    } catch (err: any) {
-      setErrorMsg(err.message || "Export validation failed.");
+      const res = await exportWorksheet(caseData.case_id, allowPartial);
+      setManifest(res);
+      setDownloadUrl(resolveDownloadUrl(res.download_url));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Export failed";
+      setError(msg);
     } finally {
       setExporting(false);
     }
   };
 
-  const handleCopyEmail = () => {
-    navigator.clipboard.writeText(emailDraft);
-    setCopiedEmail(true);
-    setTimeout(() => setCopiedEmail(false), 2500);
-  };
+  if (!isOpen) return null;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <div>
-            <h2 className="modal-title">Export Quotation Worksheet</h2>
-            <p className="modal-subtitle">Case #{caseData.case_id} — {caseData.title}</p>
-          </div>
-          <button className="close-btn" onClick={onClose}>
-            ✕
-          </button>
-        </div>
-
-        <div className="modal-body">
-          {errorMsg && <div className="error-banner">⚠ {errorMsg}</div>}
-
-          {/* Validation Status Summary */}
-          <div className={`status-summary-card ${statusLoading || statusError || hasUnresolved ? "warning" : "success"}`}>
-            <div className="status-summary-header">
-              <span className="summary-icon">{hasUnresolved ? "⚠" : "✓"}</span>
-              <span className="summary-title font-bold">
-                {statusLoading ? "Checking latest review status..."
-                  : statusError ? "Current review status unavailable"
-                  : hasUnresolved ? `${freshCase?.unresolved_count ?? 0} Unresolved Line(s) Pending Review`
-                  : "All Line Items Approved and Grounded"}
-              </span>
-            </div>
-            <p className="summary-desc">
-              {statusLoading ? "Checking the backend before enabling export."
-                : statusError || !freshCase ? "Cannot safely export without a fresh case status."
-                : hasUnresolved
-                  ? "Some lines have missing quantities, brand collisions, critical warnings or pending review. Full validated exports are blocked."
-                  : "The latest backend review state reports all line items approved and eligible for a draft worksheet."}
-            </p>
-          </div>
-
-          {/* Format & Mode Selection */}
-          <div className="options-grid">
-            <div className="form-group">
-              <label className="form-label">Worksheet Format:</label>
-              <div className="radio-group">
-                <label className="radio-label">
-                  <input
-                    type="radio"
-                    name="export-fmt"
-                    checked={format === "xlsx"}
-                    onChange={() => setFormat("xlsx")}
-                  />
-                  <span>Excel Workbook (.xlsx)</span>
-                </label>
-                <label className="radio-label">
-                  <input
-                    type="radio"
-                    name="export-fmt"
-                    checked={format === "csv"}
-                    onChange={() => setFormat("csv")}
-                  />
-                  <span>Comma-Separated Values (.csv)</span>
-                </label>
-              </div>
-            </div>
-
-            {hasUnresolved && (
-              <div className="partial-box">
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={allowPartial}
-                    onChange={(e) => setAllowPartial(e.target.checked)}
-                  />
-                  <span className="checkbox-text font-bold">
-                    Allow Partial Draft Export (Include unresolved lines with DRAFT banner)
-                  </span>
-                </label>
-                <div className="checkbox-hint">
-                  Required to export when lines remain unverified. Watermarked as internal draft.
-                </div>
-              </div>
-            )}
-          </div>
-
-          <button
-            className="download-btn"
-            disabled={exporting || !canExport}
-            onClick={handleDownload}
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(42, 35, 24, 0.4)" }}
+          onClick={onClose}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            transition={{
+              duration: 0.35,
+              ease: [0.16, 1, 0.3, 1],
+            }}
+            className="w-full max-w-md rounded-2xl overflow-hidden shadow-xl"
+            style={{
+              backgroundColor: "var(--color-cream-50)",
+              border: "1px solid var(--color-sand-200)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="Export draft"
           >
-            {exporting ? "Generating Worksheet..." : `Download Quote Preparation Worksheet (${format.toUpperCase()})`}
-          </button>
-
-          {/* Unsent Email Draft Box */}
-          <div className="email-draft-section">
-            <div className="email-header">
-              <div className="email-title">
-                ✉ Unsent Customer Clarification Draft (Staff Sends Manually):
-              </div>
-              <button className="copy-btn" onClick={handleCopyEmail}>
-                {copiedEmail ? "✓ Copied to Clipboard!" : "Copy Draft Text"}
+            {/* Header */}
+            <div
+              className="flex items-center justify-between px-5 py-4 border-b"
+              style={{ borderColor: "var(--color-sand-200)" }}
+            >
+              <h2
+                className="text-lg font-bold flex items-center gap-2"
+                style={{ color: "var(--color-brown-800)" }}
+              >
+                <FileDown size={20} />
+                Export Draft
+              </h2>
+              <button
+                onClick={onClose}
+                className="p-1.5 rounded-lg transition-colors duration-200"
+                style={{ color: "var(--color-brown-300)" }}
+                aria-label="Close"
+              >
+                <X size={18} />
               </button>
             </div>
-            <textarea
-              className="email-textarea font-mono"
-              rows={8}
-              readOnly
-              value={emailDraft}
-            />
-          </div>
 
-          <div className="safety-footer-notice">
-            ⚠ <strong>Safety Invariant:</strong> No automatic emails or purchase orders will ever be sent.
-            Unit prices are blank unless authorized. Staff retains commercial ownership of quotations.
-          </div>
-        </div>
-      </div>
+            {/* Body */}
+            <div className="px-5 py-5">
+              {/* Draft warning */}
+              <div
+                className="flex items-start gap-3 p-4 rounded-xl border mb-4"
+                style={{
+                  backgroundColor: "var(--color-warning-50)",
+                  borderColor: "var(--color-warning-100)",
+                }}
+              >
+                <AlertTriangle
+                  size={18}
+                  className="flex-shrink-0 mt-0.5"
+                  style={{ color: "var(--color-warning-600)" }}
+                />
+                <p
+                  className="text-sm leading-relaxed"
+                  style={{ color: "var(--color-warning-700)" }}
+                >
+                  This export is a{" "}
+                  <strong className="font-semibold">DRAFT</strong>. It
+                  requires independent review and approval before use as
+                  a customer quotation.
+                </p>
+              </div>
 
-      <style jsx>{`
-        .modal-backdrop {
-          position: fixed;
-          top: 0; left: 0; right: 0; bottom: 0;
-          background: rgba(15, 23, 42, 0.4);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 100;
-        }
-        .modal-dialog {
-          background: #FFFFFF;
-          border-radius: 8px;
-          width: 90%;
-          max-width: 640px;
-          box-shadow: var(--shadow-lg);
-          border: 1px solid var(--border-light);
-          max-height: 90vh;
-          overflow-y: auto;
-        }
-        .modal-header {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          padding: 1.25rem 1.5rem;
-          border-bottom: 1px solid var(--border-light);
-          background: #FFFFFF;
-        }
-        .modal-title {
-          font-size: 1.15rem;
-          font-weight: 600;
-          color: var(--text-primary);
-        }
-        .modal-subtitle {
-          font-size: 0.82rem;
-          color: var(--text-muted);
-          margin-top: 0.2rem;
-        }
-        .close-btn {
-          background: none;
-          border: none;
-          font-size: 1.1rem;
-          cursor: pointer;
-          color: var(--text-muted);
-        }
-        .close-btn:hover {
-          color: var(--text-primary);
-        }
-        .modal-body {
-          padding: 1.5rem;
-          display: flex;
-          flex-direction: column;
-          gap: 1.25rem;
-        }
-        .error-banner {
-          background: #FEF2F2;
-          color: #991B1B;
-          border: 1px solid #FECACA;
-          padding: 0.65rem 1rem;
-          border-radius: 6px;
-          font-size: 0.85rem;
-        }
-        .status-summary-card {
-          border-radius: 6px;
-          padding: 0.85rem 1rem;
-          border: 1px solid transparent;
-        }
-        .status-summary-card.warning {
-          background: #FFFBEB;
-          border-color: #FDE68A;
-          color: #92400E;
-        }
-        .status-summary-card.success {
-          background: #ECFDF5;
-          border-color: #A7F3D0;
-          color: #065F46;
-        }
-        .status-summary-header {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          font-size: 0.92rem;
-          margin-bottom: 0.25rem;
-        }
-        .summary-desc {
-          font-size: 0.82rem;
-          line-height: 1.4;
-        }
-        .options-grid {
-          display: flex;
-          flex-direction: column;
-          gap: 0.85rem;
-          background: #F8FAFC;
-          padding: 1rem;
-          border-radius: 6px;
-          border: 1px solid var(--border-light);
-        }
-        .form-label {
-          font-size: 0.82rem;
-          font-weight: 600;
-          color: var(--text-secondary);
-          margin-bottom: 0.35rem;
-          display: block;
-        }
-        .radio-group {
-          display: flex;
-          gap: 1.5rem;
-        }
-        .radio-label {
-          display: flex;
-          align-items: center;
-          gap: 0.45rem;
-          font-size: 0.85rem;
-          color: var(--text-primary);
-          cursor: pointer;
-        }
-        .partial-box {
-          border-top: 1px solid var(--border-light);
-          padding-top: 0.75rem;
-        }
-        .checkbox-label {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          cursor: pointer;
-        }
-        .checkbox-text {
-          font-size: 0.85rem;
-          color: #92400E;
-          font-weight: 500;
-        }
-        .checkbox-hint {
-          font-size: 0.75rem;
-          color: var(--text-muted);
-          margin-left: 1.4rem;
-          margin-top: 0.15rem;
-        }
-        .download-btn {
-          background: var(--accent-primary);
-          border: 1px solid var(--accent-primary);
-          color: #FFFFFF;
-          padding: 0.65rem 1rem;
-          border-radius: 6px;
-          font-size: 0.875rem;
-          font-weight: 500;
-          cursor: pointer;
-          transition: background 0.15s ease;
-        }
-        .download-btn:hover:not(:disabled) {
-          background: var(--accent-primary-hover);
-        }
-        .download-btn:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-        }
-        .email-draft-section {
-          border: 1px solid var(--border-light);
-          border-radius: 6px;
-          overflow: hidden;
-          background: #FFFFFF;
-        }
-        .email-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          background: #F8FAFC;
-          padding: 0.5rem 0.75rem;
-          border-bottom: 1px solid var(--border-light);
-        }
-        .email-title {
-          font-size: 0.78rem;
-          font-weight: 600;
-          color: var(--text-secondary);
-        }
-        .copy-btn {
-          background: #FFFFFF;
-          border: 1px solid var(--border-medium);
-          color: var(--text-secondary);
-          padding: 0.25rem 0.6rem;
-          border-radius: 4px;
-          font-size: 0.75rem;
-          font-weight: 500;
-          cursor: pointer;
-        }
-        .copy-btn:hover {
-          background: var(--bg-subtle);
-          color: var(--text-primary);
-        }
-        .email-textarea {
-          width: 100%;
-          padding: 0.75rem;
-          border: none;
-          font-size: 0.8rem;
-          line-height: 1.4;
-          resize: vertical;
-          background: #FAFAFA;
-          color: var(--text-primary);
-        }
-        .safety-footer-notice {
-          font-size: 0.75rem;
-          color: var(--text-muted);
-          line-height: 1.4;
-          padding: 0.6rem 0.8rem;
-          background: #F8FAFC;
-          border: 1px solid var(--border-light);
-          border-radius: 6px;
-        }
-        .safety-footer-notice strong {
-          color: var(--text-secondary);
-        }
-        .font-mono { font-family: var(--font-mono); }
-        .font-bold { font-weight: 600; }
-      `}</style>
-    </div>
+              {/* Case info */}
+              <div
+                className="rounded-xl p-4 mb-4"
+                style={{
+                  backgroundColor: "var(--color-sand-50)",
+                }}
+              >
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <span
+                      className="text-xs font-semibold uppercase tracking-wider"
+                      style={{ color: "var(--color-brown-400)" }}
+                    >
+                      Case
+                    </span>
+                    <p
+                      className="font-medium truncate"
+                      style={{ color: "var(--color-brown-700)" }}
+                    >
+                      {caseData.title || caseData.case_id.slice(0, 12)}
+                    </p>
+                  </div>
+                  <div>
+                    <span
+                      className="text-xs font-semibold uppercase tracking-wider"
+                      style={{ color: "var(--color-brown-400)" }}
+                    >
+                      Status
+                    </span>
+                    <p
+                      className="font-medium"
+                      style={{ color: "var(--color-brown-700)" }}
+                    >
+                      {caseData.status}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Partial export option */}
+              <label
+                className="flex items-start gap-2.5 p-3 rounded-lg border mb-4 cursor-pointer"
+                style={{
+                  borderColor: "var(--color-sand-200)",
+                  backgroundColor: "var(--color-cream-100)",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={allowPartial}
+                  onChange={(e) => setAllowPartial(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span className="text-xs leading-relaxed" style={{ color: "var(--color-brown-600)" }}>
+                  <strong className="font-semibold">Allow partial draft export.</strong>{" "}
+                  Unresolved lines stay in the worksheet and are clearly marked as
+                  draft, instead of blocking the export. A human must still review
+                  every line before sending anything to a customer.
+                </span>
+              </label>
+
+              {/* Error */}
+              <AnimatePresence>
+                {error && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="flex items-start gap-2 p-3 rounded-lg mb-4"
+                    role="alert"
+                    style={{
+                      backgroundColor: "var(--color-error-50)",
+                      color: "var(--color-error-700)",
+                    }}
+                  >
+                    <X size={16} className="flex-shrink-0 mt-0.5" />
+                    <p className="text-xs">{error}</p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Download / Generate */}
+              <AnimatePresence mode="wait">
+                {downloadUrl ? (
+                  <motion.div
+                    key="ready"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 8 }}
+                    className="text-center py-4"
+                  >
+                    <CheckCircle
+                      size={36}
+                      className="mx-auto mb-3"
+                      style={{ color: "var(--color-success-500)" }}
+                    />
+                    <p
+                      className="text-sm font-semibold mb-3"
+                      style={{ color: "var(--color-success-700)" }}
+                    >
+                      Export ready!
+                    </p>
+                    {manifest && (
+                      <p
+                        className="text-xs mb-3"
+                        style={{ color: "var(--color-brown-500)" }}
+                      >
+                        {manifest.approved_lines} approved of{" "}
+                        {manifest.total_lines} lines ·{" "}
+                        {manifest.unresolved_lines_omitted} unresolved ·{" "}
+                        {manifest.is_draft ? "DRAFT" : "final"}
+                      </p>
+                    )}
+                    <a
+                      href={downloadUrl}
+                      download
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 hover:shadow-md"
+                      style={{
+                        backgroundColor: "var(--color-amber-400)",
+                        color: "var(--color-brown-900)",
+                      }}
+                    >
+                      <Download size={16} />
+                      Download worksheet
+                    </a>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="generate"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="text-center"
+                  >
+                    <button
+                      onClick={handleExport}
+                      disabled={exporting}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 hover:shadow-md active:scale-[0.97] disabled:opacity-40"
+                      style={{
+                        backgroundColor: "var(--color-amber-400)",
+                        color: "var(--color-brown-900)",
+                      }}
+                    >
+                      {exporting ? (
+                        <>
+                          <span className="animate-spin-slow inline-block">
+                            ⏳
+                          </span>
+                          Generating…
+                        </>
+                      ) : (
+                        <>
+                          <FileDown size={16} />
+                          Generate draft export
+                        </>
+                      )}
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Footer */}
+            <div
+              className="flex justify-end px-5 py-4 border-t"
+              style={{ borderColor: "var(--color-sand-200)" }}
+            >
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-lg text-sm font-medium border transition-all duration-200"
+                style={{
+                  color: "var(--color-brown-500)",
+                  borderColor: "var(--color-sand-200)",
+                  backgroundColor: "var(--color-cream-100)",
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
