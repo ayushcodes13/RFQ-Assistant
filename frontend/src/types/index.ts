@@ -35,6 +35,7 @@ export interface CatalogImportSummary {
   duplicates: number;
   collisions: number;
   total_catalog_size: number;
+  catalog_version: string | null;
 }
 
 export interface CatalogImportResponse {

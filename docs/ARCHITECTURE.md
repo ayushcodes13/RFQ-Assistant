@@ -132,6 +132,7 @@ The review plan classifies every non-clean row as an exception, selects up to fi
 6. Do not silently deduplicate identical part numbers requested on different lines; retain quantities, packaging and notes per source.
 7. Exports must validate quantity > 0, supported unit, mandatory columns, cleared conflicts and explicit reviewer authorization.
 8. Review actions are versioned; a fresh parse must not silently replace human corrections.
+9. Every match is tied to a catalog snapshot. Replacing the active CSV atomically installs a new SHA-256-versioned snapshot; rows retain their original candidate evidence, block validated export, and require explicit rematching and fresh human approval before they become eligible again.
 
 ## Prototype API proposal
 
@@ -141,6 +142,7 @@ The review plan classifies every non-clean row as an exception, selects up to fi
 - PATCH /api/rfqs/{id}/lines/{line_id} — human correction, optimistic concurrency control.
 - POST /api/rfqs/{id}/review — confirm a set of line decisions with actor ID.
 - POST /api/catalogs/import — validate/import tenant-authorized CSV.
+- POST /api/rfqs/{id}/lines/{line_id}/rematch — explicitly refresh a stale match against the active catalog snapshot and revoke the previous approval.
 - POST /api/rfqs/{id}/exports — request draft export after validation.
 - GET /api/rfqs/{id}/exports/{export_id} — download authorized artifact.
 - DELETE /api/rfqs/{id} — delete case and uploaded artifacts subject to agreed retention policy.

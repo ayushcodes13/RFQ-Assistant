@@ -201,7 +201,7 @@ def test_retry_reuses_versioned_parser_artifact_but_not_other_profiles(tmp_path,
 
     parser = CountingParser()
     monkeypatch.setattr(manager_module, "get_parser", lambda *_args, **_kwargs: parser)
-    original_match = manager.matcher.match_line
+    original_match = manager_module.ExactMatchEngine.match_line
     fail_once = {"value": True}
 
     def fail_first_match(*args, **kwargs):
@@ -210,7 +210,7 @@ def test_retry_reuses_versioned_parser_artifact_but_not_other_profiles(tmp_path,
             raise RuntimeError("synthetic interruption after extraction")
         return original_match(*args, **kwargs)
 
-    monkeypatch.setattr(manager.matcher, "match_line", fail_first_match)
+    monkeypatch.setattr(manager_module.ExactMatchEngine, "match_line", fail_first_match)
     try:
         manager.create_case_from_upload(
             "request.csv", content, _existing_case_id=case.case_id,

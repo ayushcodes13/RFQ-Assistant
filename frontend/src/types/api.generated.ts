@@ -217,6 +217,26 @@ export interface paths {
         patch: operations["update_rfq_line_api_rfqs__case_id__lines__line_id__patch"];
         trace?: never;
     };
+    "/api/rfqs/{case_id}/lines/{line_id}/rematch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rematch Rfq Line
+         * @description Refresh one line's catalog match and require the reviewer to approve it again.
+         */
+        post: operations["rematch_rfq_line_api_rfqs__case_id__lines__line_id__rematch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/rfqs/{case_id}/review": {
         parameters: {
             query?: never;
@@ -480,7 +500,7 @@ export interface components {
          * AuditAction
          * @enum {string}
          */
-        AuditAction: "CASE_CREATED" | "PARSED" | "LINE_EDITED" | "LINE_APPROVED" | "LINE_REJECTED" | "LINE_FLAGGED" | "CATALOG_IMPORTED" | "EXPORTED";
+        AuditAction: "CASE_CREATED" | "PARSED" | "LINE_EDITED" | "LINE_APPROVED" | "LINE_REJECTED" | "LINE_FLAGGED" | "CATALOG_IMPORTED" | "CATALOG_REMATCHED" | "EXPORTED";
         /**
          * AuditEvent
          * @description Immutable audit entry for traceability.
@@ -767,6 +787,8 @@ export interface components {
              * @default default
              */
             catalog_id: string | null;
+            /** Catalog Version */
+            catalog_version?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -862,6 +884,11 @@ export interface components {
             candidates?: components["schemas"]["MatchCandidate"][];
             /** Case Id */
             case_id: string;
+            /**
+             * Catalog Rematch Required
+             * @default false
+             */
+            catalog_rematch_required: boolean;
             /** Description */
             description?: string | null;
             /** @default EXTRACTED */
@@ -943,6 +970,19 @@ export interface components {
             selected_catalog_sku?: string | null;
             /** Unit */
             unit?: string | null;
+        };
+        /**
+         * RematchLineRequest
+         * @description Explicitly rematch one stale line against the active catalog snapshot.
+         */
+        RematchLineRequest: {
+            /**
+             * Actor
+             * @default Inside Sales
+             */
+            actor: string;
+            /** Expected Version */
+            expected_version: number;
         };
         /**
          * ReviewDecision
@@ -1593,6 +1633,45 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["RFQLineItemUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RFQLineItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rematch_rfq_line_api_rfqs__case_id__lines__line_id__rematch_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-API-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                case_id: string;
+                line_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RematchLineRequest"];
             };
         };
         responses: {

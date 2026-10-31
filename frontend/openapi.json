@@ -10,6 +10,7 @@
           "LINE_REJECTED",
           "LINE_FLAGGED",
           "CATALOG_IMPORTED",
+          "CATALOG_REMATCHED",
           "EXPORTED"
         ],
         "title": "AuditAction",
@@ -681,6 +682,17 @@
             "default": "default",
             "title": "Catalog Id"
           },
+          "catalog_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Version"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -915,6 +927,11 @@
           "case_id": {
             "title": "Case Id",
             "type": "string"
+          },
+          "catalog_rematch_required": {
+            "default": false,
+            "title": "Catalog Rematch Required",
+            "type": "boolean"
           },
           "description": {
             "anyOf": [
@@ -1223,6 +1240,26 @@
           "expected_version"
         ],
         "title": "RFQLineItemUpdateRequest",
+        "type": "object"
+      },
+      "RematchLineRequest": {
+        "description": "Explicitly rematch one stale line against the active catalog snapshot.",
+        "properties": {
+          "actor": {
+            "default": "Inside Sales",
+            "title": "Actor",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_version"
+        ],
+        "title": "RematchLineRequest",
         "type": "object"
       },
       "ReviewDecision": {
@@ -2650,6 +2687,97 @@
           }
         },
         "summary": "Update Rfq Line"
+      }
+    },
+    "/api/rfqs/{case_id}/lines/{line_id}/rematch": {
+      "post": {
+        "description": "Refresh one line's catalog match and require the reviewer to approve it again.",
+        "operationId": "rematch_rfq_line_api_rfqs__case_id__lines__line_id__rematch_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "line_id",
+            "required": true,
+            "schema": {
+              "title": "Line Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RematchLineRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RFQLineItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rematch Rfq Line"
       }
     },
     "/api/rfqs/{case_id}/review": {

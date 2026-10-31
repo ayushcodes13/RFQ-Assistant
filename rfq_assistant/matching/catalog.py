@@ -3,6 +3,8 @@
 import csv
 import io
 import math
+import hashlib
+import threading
 from typing import Dict, List, Optional
 from pydantic import ValidationError
 
@@ -21,6 +23,7 @@ class CatalogRepository:
 
     def __init__(self, state_store: Optional[StateStore] = None):
         self.state_store = state_store
+        self._lock = threading.RLock()
         self._items_by_sku: Dict[str, CatalogItem] = {}
         self._items_by_normalized_mpn: Dict[str, List[CatalogItem]] = {}
         if self.state_store:
@@ -28,32 +31,60 @@ class CatalogRepository:
                 self.add_item(CatalogItem.model_validate(payload))
 
     def clear(self):
-        self._items_by_sku.clear()
-        self._items_by_normalized_mpn.clear()
-        if self.state_store:
-            self.state_store.delete_catalog()
+        with self._lock:
+            if self.state_store:
+                self.state_store.delete_catalog()
+            self._items_by_sku.clear()
+            self._items_by_normalized_mpn.clear()
 
     def add_item(self, item: CatalogItem):
-        self._items_by_sku[item.internal_sku] = item
-        norm_mpn = normalize_mpn(item.manufacturer_part_number)
-        if norm_mpn:
-            if norm_mpn not in self._items_by_normalized_mpn:
-                self._items_by_normalized_mpn[norm_mpn] = []
-            self._items_by_normalized_mpn[norm_mpn].append(item)
+        with self._lock:
+            self._items_by_sku[item.internal_sku] = item
+            norm_mpn = normalize_mpn(item.manufacturer_part_number)
+            if norm_mpn:
+                if norm_mpn not in self._items_by_normalized_mpn:
+                    self._items_by_normalized_mpn[norm_mpn] = []
+                self._items_by_normalized_mpn[norm_mpn].append(item)
 
     def get_by_sku(self, sku: str) -> Optional[CatalogItem]:
-        return self._items_by_sku.get(sku)
+        with self._lock:
+            return self._items_by_sku.get(sku)
 
     def get_by_normalized_mpn(self, norm_mpn: str) -> List[CatalogItem]:
-        return self._items_by_normalized_mpn.get(norm_mpn, [])
+        with self._lock:
+            return list(self._items_by_normalized_mpn.get(norm_mpn, []))
 
     def list_all(self) -> List[CatalogItem]:
-        return list(self._items_by_sku.values())
+        with self._lock:
+            return list(self._items_by_sku.values())
+
+    def snapshot(self) -> "CatalogRepository":
+        """Return an isolated read-only-by-convention view of one active catalog state."""
+        with self._lock:
+            snapshot = CatalogRepository()
+            snapshot._replace_indexes(list(self._items_by_sku.values()))
+            return snapshot
 
     def count(self) -> int:
-        return len(self._items_by_sku)
+        with self._lock:
+            return len(self._items_by_sku)
 
-    def import_csv(self, csv_content: bytes, version: str = "v1") -> Dict[str, int]:
+    def import_csv(
+        self, csv_content: bytes, version: str = "v1"
+    ) -> Dict[str, int | str | None]:
+        """Add validated rows to the existing catalog (legacy additive behavior)."""
+        with self._lock:
+            return self._import_csv(csv_content, version, replace_snapshot=False)
+
+    def replace_csv(self, csv_content: bytes) -> Dict[str, int | str | None]:
+        """Atomically replace the active item-master snapshot from a complete CSV."""
+        version = f"sha256:{hashlib.sha256(csv_content).hexdigest()}"
+        with self._lock:
+            return self._import_csv(csv_content, version, replace_snapshot=True)
+
+    def _import_csv(
+        self, csv_content: bytes, version: str, *, replace_snapshot: bool
+    ) -> Dict[str, int | str | None]:
         """Validate every row before changing the item master.
 
         Failures are all-or-nothing: never leave half an imported catalog or
@@ -138,19 +169,20 @@ class CatalogRepository:
             except ValidationError as exc:
                 raise CatalogImportError(f"Catalog row {row_num} is invalid: {exc}") from exc
 
-            if sku in self._items_by_sku:
+            if not replace_snapshot and sku in self._items_by_sku:
                 duplicate_count += 1
             else:
                 staged.append(item)
 
-        if not staged and duplicate_count == 0:
+        if not staged and (replace_snapshot or duplicate_count == 0):
             raise CatalogImportError("Catalog CSV contains no importable item rows.")
 
-        # Commit only after every input row has passed validation.
-        for item in staged:
-            self.add_item(item)
+        # Persist first, then atomically publish the new in-memory indexes. If
+        # storage fails, readers continue to observe the prior complete snapshot.
+        next_items = staged if replace_snapshot else [*self._items_by_sku.values(), *staged]
         if self.state_store:
-            self.state_store.replace_catalog(self.list_all())
+            self.state_store.replace_catalog(next_items)
+        self._replace_indexes(next_items)
 
         collision_count = sum(
             1 for items in self._items_by_normalized_mpn.values()
@@ -161,4 +193,21 @@ class CatalogRepository:
             "duplicates": duplicate_count,
             "collisions": collision_count,
             "total_catalog_size": len(self._items_by_sku),
+            "catalog_version": version if replace_snapshot else self.active_version,
         }
+
+    def _replace_indexes(self, items: List[CatalogItem]) -> None:
+        by_sku = {item.internal_sku: item for item in items}
+        by_mpn: Dict[str, List[CatalogItem]] = {}
+        for item in items:
+            norm_mpn = normalize_mpn(item.manufacturer_part_number)
+            if norm_mpn:
+                by_mpn.setdefault(norm_mpn, []).append(item)
+        self._items_by_sku = by_sku
+        self._items_by_normalized_mpn = by_mpn
+
+    @property
+    def active_version(self) -> Optional[str]:
+        with self._lock:
+            versions = {item.catalog_version for item in self._items_by_sku.values()}
+            return next(iter(versions)) if len(versions) == 1 else None

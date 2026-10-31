@@ -81,3 +81,54 @@ def test_catalog_schema_validation_error_is_reported_without_mutation(monkeypatc
         repo.import_csv((HEADER + "SKU-1,Schneider,PN-1,Relay,1,2\n").encode())
 
     assert repo.count() == 0
+
+
+def test_replace_csv_publishes_one_versioned_snapshot_and_persists_it(tmp_path):
+    store = SQLiteStateStore(tmp_path / "catalog.sqlite3")
+    repo = CatalogRepository(state_store=store)
+    first = (
+        HEADER
+        + "SKU-1,Schneider Electric,PN-1,Relay,1.25,3\n"
+        + "SKU-2,Siemens,PN-2,PLC,5,8\n"
+    ).encode()
+    first_result = repo.replace_csv(first)
+    assert first_result["catalog_version"].startswith("sha256:")
+    first_version = first_result["catalog_version"]
+    assert all(item.catalog_version == first_version for item in repo.list_all())
+
+    second = (HEADER + "SKU-1,Schneider Electric,PN-1,Updated relay,1.5,4\n").encode()
+    second_result = repo.replace_csv(second)
+
+    assert second_result["catalog_version"] != first_version
+    assert repo.count() == 1
+    assert repo.get_by_sku("SKU-2") is None
+    assert repo.get_by_sku("SKU-1").description == "Updated relay"
+    restored = CatalogRepository(state_store=SQLiteStateStore(tmp_path / "catalog.sqlite3"))
+    assert restored.list_all() == repo.list_all()
+
+
+def test_failed_catalog_replacement_leaves_previous_snapshot_intact(tmp_path, monkeypatch):
+    store = SQLiteStateStore(tmp_path / "catalog.sqlite3")
+    repo = CatalogRepository(state_store=store)
+    old_csv = (HEADER + "SKU-1,Schneider Electric,PN-1,Relay,1.25,3\n").encode()
+    repo.replace_csv(old_csv)
+    old_item = repo.get_by_sku("SKU-1")
+
+    with pytest.raises(CatalogImportError):
+        repo.replace_csv((HEADER + "SKU-2,Siemens,PN-2,PLC,not-a-price,2\n").encode())
+
+    assert repo.count() == 1
+    assert repo.get_by_sku("SKU-1") == old_item
+    assert repo.get_by_sku("SKU-2") is None
+
+    def fail_persist(_items):
+        raise OSError("synthetic SQLite write failure")
+
+    monkeypatch.setattr(store, "replace_catalog", fail_persist)
+    new_csv = (HEADER + "SKU-2,Siemens,PN-2,PLC,5,2\n").encode()
+    with pytest.raises(OSError, match="synthetic SQLite write failure"):
+        repo.replace_csv(new_csv)
+
+    assert repo.count() == 1
+    assert repo.get_by_sku("SKU-1") == old_item
+    assert repo.get_by_sku("SKU-2") is None
