@@ -77,7 +77,7 @@ class RFQLineItem(BaseModel):
 
 class RFQLineItemUpdate(BaseModel):
     """Payload for human reviewer correcting or approving a line item."""
-    expected_version: Optional[int] = None
+    expected_version: Optional[int] = Field(default=None, ge=1)
     requested_manufacturer: Optional[str] = None
     requested_mpn: Optional[str] = None
     description: Optional[str] = None
@@ -88,6 +88,11 @@ class RFQLineItemUpdate(BaseModel):
     review_decision: Optional[ReviewDecision] = None
     reviewer_notes: Optional[str] = None
     actor: str = "Inside Sales"
+
+
+class RFQLineItemUpdateRequest(RFQLineItemUpdate):
+    """Public reviewer edit contract; every API write must be version-checked."""
+    expected_version: int = Field(..., ge=1)
 
 
 class BatchReviewRequest(BaseModel):

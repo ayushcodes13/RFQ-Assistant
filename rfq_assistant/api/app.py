@@ -34,7 +34,7 @@ from rfq_assistant.schemas.models import (
     ExportRequest,
     RFQCase,
     RFQLineItem,
-    RFQLineItemUpdate,
+    RFQLineItemUpdateRequest,
     ReviewPlan,
 )
 
@@ -337,7 +337,7 @@ def get_original_source(
 def update_rfq_line(
     case_id: str,
     line_id: str,
-    update: RFQLineItemUpdate,
+    update: RFQLineItemUpdateRequest,
     current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     update.actor = current_user.name

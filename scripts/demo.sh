@@ -74,7 +74,7 @@ echo $! > "$RUNTIME/backend.pid"
 cd "$ROOT/frontend"
 RFQ_ASSISTANT_API_URL="http://127.0.0.1:$BACKEND_PORT" \
 RFQ_E2E_NEXT_DIST_DIR=".next-demo" \
-  "$NODE" ./node_modules/next/dist/bin/next dev --hostname 127.0.0.1 --port "$FRONTEND_PORT" \
+  "$NODE" ./node_modules/next/dist/bin/next dev --webpack --hostname 127.0.0.1 --port "$FRONTEND_PORT" \
     > "$RUNTIME/logs/frontend.log" 2>&1 &
 echo $! > "$RUNTIME/frontend.pid"
 cd "$ROOT"
