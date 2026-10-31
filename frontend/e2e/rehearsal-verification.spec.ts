@@ -35,6 +35,7 @@ type ApiLine = {
 type ApiAuditEvent = { action: string };
 type ApiCatalogItem = { manufacturer_part_number: string };
 type LineReviewUpdate = {
+  expected_version: number;
   quantity: number | null;
   unit: string;
   requested_mpn: string | null;
@@ -469,6 +470,7 @@ test("Rehearsal D — send route is simulated-only (no external transport)", asy
         caseId: createdCase.case_id,
         lineId: line.line_id,
         update: {
+          expected_version: line.version,
           quantity: line.quantity,
           unit: line.unit || "EA",
           requested_mpn: line.requested_mpn,

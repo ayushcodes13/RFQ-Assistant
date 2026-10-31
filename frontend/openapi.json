@@ -142,11 +142,6 @@
       },
       "Body_create_rfq_api_rfqs_post": {
         "properties": {
-          "actor": {
-            "default": "Inside Sales",
-            "title": "Actor",
-            "type": "string"
-          },
           "customer_label": {
             "anyOf": [
               {
@@ -861,8 +856,8 @@
         "title": "RFQLineItem",
         "type": "object"
       },
-      "RFQLineItemUpdate": {
-        "description": "Payload for human reviewer correcting or approving a line item.",
+      "RFQLineItemUpdateRequest": {
+        "description": "Public reviewer edit contract; every API write must be version-checked.",
         "properties": {
           "actor": {
             "default": "Inside Sales",
@@ -881,15 +876,9 @@
             "title": "Description"
           },
           "expected_version": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expected Version"
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
           },
           "notes": {
             "anyOf": [
@@ -979,7 +968,10 @@
             "title": "Unit"
           }
         },
-        "title": "RFQLineItemUpdate",
+        "required": [
+          "expected_version"
+        ],
+        "title": "RFQLineItemUpdateRequest",
         "type": "object"
       },
       "ReviewDecision": {
@@ -2081,7 +2073,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RFQLineItemUpdate"
+                "$ref": "#/components/schemas/RFQLineItemUpdateRequest"
               }
             }
           },

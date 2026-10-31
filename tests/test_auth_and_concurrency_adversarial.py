@@ -142,7 +142,7 @@ def test_authenticated_actor_cannot_be_spoofed(client, monkeypatch):
     # Attempt to spoof actor as "Chief Financial Officer"
     resp = client.patch(
         f"/api/rfqs/{case.case_id}/lines/{line.line_id}",
-        json={"review_decision": "APPROVED", "actor": "Chief Financial Officer"},
+        json={"review_decision": "APPROVED", "expected_version": line.version, "actor": "Chief Financial Officer"},
         headers=headers,
     )
     assert resp.status_code == 200
@@ -188,6 +188,12 @@ def test_optimistic_concurrency_conflict_detection(client):
     case = case_manager.create_case_from_text(raw_text="20 pcs LC1D09BD Schneider", title="Concurrency Test")
     line = case_manager.get_lines(case.case_id)[0]
     assert line.version == 1
+
+    missing_version = client.patch(
+        f"/api/rfqs/{case.case_id}/lines/{line.line_id}",
+        json={"quantity": 22.0},
+    )
+    assert missing_version.status_code == 422
 
     # First reviewer updates the line (version moves from 1 to 2)
     resp1 = client.patch(

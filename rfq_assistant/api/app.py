@@ -34,7 +34,7 @@ from rfq_assistant.schemas.models import (
     ExportRequest,
     RFQCase,
     RFQLineItem,
-    RFQLineItemUpdate,
+    RFQLineItemUpdateRequest,
     ReviewPlan,
 )
 
@@ -191,7 +191,6 @@ async def create_rfq(
     pasted_text: Optional[str] = Form(None),
     title: Optional[str] = Form(None),
     customer_label: Optional[str] = Form(None),
-    actor: str = Form("Inside Sales"),
     current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     """Creates draft case from an uploaded file or pasted email text with malware defense."""
@@ -338,7 +337,7 @@ def get_original_source(
 def update_rfq_line(
     case_id: str,
     line_id: str,
-    update: RFQLineItemUpdate,
+    update: RFQLineItemUpdateRequest,
     current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     update.actor = current_user.name

@@ -17,6 +17,7 @@ Maintain a synthetic annotated corpus covering:
 - Blank quantities, zero/negative quantities and unit ambiguity.
 - Headerless CSVs: first record must remain a line item, never mistaken for a header.
 - Empty/header-only RFQs and document-level fatal parse errors: block case creation and clean up partially saved files.
+- Whitespace-only pasted text and header-only CSV/XLSX files: reject before creating a case or storing source bytes. Pasted text above 500 non-empty regions is rejected before persistence; file parsers keep their format-specific limits and failure behavior.
 - Nonempty quantity with missing MPN and description: preserve as an unresolved review row instead of silently dropping it.
 - Catalog duplicate IDs, unknown SKU, stale price, malformed CSV.
 - Catalog imports are atomic: any malformed row, duplicate SKU inside an upload, missing OEM/MPN or invalid/nonfinite price or stock quantity rejects the entire import without changing existing catalog matching.
@@ -61,6 +62,7 @@ values, version numbers, audit events, catalog rows, and source files remain
 available after the original manager objects are discarded.
 
 **UI:** keyboard-only editing, source navigation, warning notices, export confirmation, empty/loading/error states and prevention of accidental approval.
+The export dialog must announce itself as modal, contain keyboard focus while open, close on Escape, and return focus to its opener. Line-edit API requests must include the version shown to the reviewer; missing versions are rejected and stale versions return 409.
 
 **Contract:** `frontend/openapi.json` is checked in and verified against the live FastAPI app by `tests/test_openapi_contract.py`. Frontend wire types are generated from that schema with `npm run gen:types`; `npm run check:types` fails CI if the generated file is stale.
 
@@ -76,7 +78,7 @@ Run the reproducible API corpus from the repository root with:
 
 The runner creates isolated temporary SQLite, upload, and export state, then exercises 30 synthetic documents through intake, extraction, source retrieval, exact catalog validation, review, CSV/XLSX export, download, and audit verification. The corpus contains 8 pasted-text RFQs, 8 CSVs, 7 generated XLSX files, and 7 native PDFs. In the latest run, all 30 full flows passed in 1.39 seconds (median 28.3 ms per document; maximum 47.6 ms). It then issued 128 concurrent synthetic case-creation requests using 16 workers; all 128 succeeded with unique case IDs in 0.50 seconds. Results are local engineering evidence only, not a representative customer accuracy or production capacity benchmark. The seven PDFs reuse one existing synthetic PDF fixture. Separate legacy XLS tests cover conversion controls and upload-to-match flow, with an additional real LibreOffice round-trip on synthetic data. The concurrency phase stresses intake only, not simultaneous review/export or multi-user authorization.
 
-Latest local verification for this work: the full Python suite passed (**319 tests**, 6 dependency deprecation warnings); `npm run lint`, `npx tsc --noEmit`, and the PR CI production build passed; isolated Playwright browser E2E passed **7/7** on synthetic local services. The synthetic API corpus passed **30/30** full flows; its latest timing details are recorded in `docs/EXTRACTION_AND_PERFORMANCE_AUDIT.md`. These synthetic results are not customer accuracy or production load evidence.
+Latest local verification for this branch (2026-10-31): the full Python suite passed (**323 tests**, 6 dependency deprecation warnings); `npm run lint`, `npx tsc --noEmit`, and `npm run build` passed; focused Playwright browser E2E passed (**1/1**) for paste, review, export, keyboard modal behavior and download. The synthetic API corpus's latest recorded result remains **30/30** full flows; timing details are in `docs/EXTRACTION_AND_PERFORMANCE_AUDIT.md`. These synthetic results are not customer accuracy or production load evidence.
 
 **Security:** dangerous uploads, oversized sheets, path traversal, prompt injection, tenant isolation, retention/deletion and leaked logs.
 

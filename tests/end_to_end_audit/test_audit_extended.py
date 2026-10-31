@@ -1255,10 +1255,11 @@ class TestAuthAndSecurityExtended:
 
         # Approve line as admin
         lines_resp = client.get(f"/api/rfqs/{case_id}/lines", headers=admin_headers)
-        line_id = lines_resp.json()[0]["line_id"]
+        line = lines_resp.json()[0]
+        line_id = line["line_id"]
         client.patch(
             f"/api/rfqs/{case_id}/lines/{line_id}",
-            json={"review_decision": "APPROVED"},
+            json={"review_decision": "APPROVED", "expected_version": line["version"]},
             headers=admin_headers,
         )
 
@@ -1507,11 +1508,12 @@ class TestConcurrencyExtended:
                 if lines_resp.status_code != 200:
                     errors.append(f"Get lines failed for {n}")
                     return
-                line_id = lines_resp.json()[0]["line_id"]
+                line = lines_resp.json()[0]
+                line_id = line["line_id"]
 
                 patch_resp = client.patch(
                     f"/api/rfqs/{case_id}/lines/{line_id}",
-                    json={"review_decision": "APPROVED", "actor": "Tester"},
+                    json={"review_decision": "APPROVED", "expected_version": line["version"], "actor": "Tester"},
                 )
                 if patch_resp.status_code != 200:
                     errors.append(f"Approve failed for {n}: {patch_resp.status_code} {patch_resp.text[:200]}")
@@ -1648,12 +1650,13 @@ class TestConcurrencyExtended:
 
                 # Get line
                 lines_resp = client.get(f"/api/rfqs/{case_id}/lines")
-                line_id = lines_resp.json()[0]["line_id"]
+                line = lines_resp.json()[0]
+                line_id = line["line_id"]
 
                 # Approve
                 patch_resp = client.patch(
                     f"/api/rfqs/{case_id}/lines/{line_id}",
-                    json={"review_decision": "APPROVED", "actor": "Tester"},
+                    json={"review_decision": "APPROVED", "expected_version": line["version"], "actor": "Tester"},
                 )
                 if patch_resp.status_code != 200:
                     errors.append(f"[{n}] Approve failed: {patch_resp.status_code}")
