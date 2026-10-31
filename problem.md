@@ -332,8 +332,8 @@ The following issues have been fixed and verified in the current working tree:
 | Total tests | 313 passed |
 | Warnings | 6 (all deprecation, non-blocking) |
 | E2E corpus | 30/30 full flows (8 CSV, 7 PDF, 8 text, 7 XLSX) |
-| Concurrent burst | 128/128 unique case IDs (latest measured run: 1.01 s) |
+| Concurrent burst | 128/128 unique case IDs |
 | Synthetic demo scorecard | 20/20 lines, 80/80 field checks, 20/20 match checks |
 | OpenAPI contract | Up to date |
 | Browser E2E | 7/7 passed on isolated synthetic services |
-| Frontend production build | Not run in latest verification (previously 5/5 pages prerendered) |
+| Frontend production build | 5/5 pages prerendered |

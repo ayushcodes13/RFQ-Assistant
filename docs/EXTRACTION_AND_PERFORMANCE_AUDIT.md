@@ -49,5 +49,5 @@ Offline grounded-extraction tests use fake clients and synthetic snippets to ver
 - Frontend: `npx tsc --noEmit` passed; `npm run lint` passed.
 - Synthetic local corpus: **30/30** complete flows (8 CSV, 7 PDF, 8 text, 7 XLSX), including review-plan generation, five-row sample approval, batch approval of remaining clean rows, export, and audit; median document time **45.6 ms**, maximum **93.5 ms** in this run. The full-flow timing uses synchronous mode because the harness immediately reviews and exports each result; queue behavior is covered by separate tests. These local fixture timings are not customer performance claims.
 - Synthetic concurrent create burst: **128/128** succeeded with 128 unique case IDs, 16 workers, in **1.01 s**. This is not a production load test.
-- Frontend: `npx tsc --noEmit` and `npm run lint` passed; isolated Playwright browser E2E passed **7/7** on synthetic local services. Production frontend build was not run.
+- Frontend: `npx tsc --noEmit` and `npm run lint` passed locally; the PR CI production build also passed. Isolated Playwright browser E2E passed **7/7** on synthetic local services. The PR's separate full-stack E2E job is still running; its result is not included here yet.
 - The end-to-end harness is `scripts/run_synthetic_e2e_corpus.py`; repeat timings vary by machine and local state.
