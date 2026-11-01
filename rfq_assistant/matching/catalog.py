@@ -88,9 +88,10 @@ class CatalogRepository:
             versioned_by_sku = {item.internal_sku: item for item in versioned}
             for proposal in proposals:
                 if proposal.get("review_status") == "accepted":
-                    sku = (proposal.get("current_item") or {}).get("internal_sku")
-                    if sku in versioned_by_sku:
-                        proposal["current_item"] = versioned_by_sku[sku].model_dump(mode="json")
+                    current_item = proposal.get("current_item")
+                    sku_value = current_item.get("internal_sku") if isinstance(current_item, dict) else None
+                    if isinstance(sku_value, str) and sku_value in versioned_by_sku:
+                        proposal["current_item"] = versioned_by_sku[sku_value].model_dump(mode="json")
             if self.state_store:
                 self.state_store.commit_catalog_update_batch(versioned, proposals, expected_versions)
             self._replace_indexes(versioned)

@@ -200,3 +200,7 @@ One full backend run initially caught a quantity-grounding regression for `order
 - `git diff --check` → passed.
 
 The ten-case suite proves that ten distinct input shapes are exercised locally; it does not prove that every LLM extraction is complete. Prior live GPT-6 Luna browser probes still show forwarded corrections and mixed-language requests can omit items or quantities. The safe demo path is to show the source, pending review, exception/manual recovery, stock gate, and distributor data proposal flow; do not present unreviewed model output as a finished quotation or claim broad extraction accuracy. No quote was sent during this pass.
+
+### CI hardening follow-up
+
+The first PR checks found Bandit flagging a dynamically assembled, parameterized `IN` query and mypy flagging a mixed proposal-ID type plus optional currency passed to ERPNext. The batch now uses fixed-parameter lookups, proposal IDs are type-narrowed, and ERPNext rejects missing currency rather than defaulting or inventing one. Follow-up local verification: **571 backend tests passed**, **20 E2E tests passed**, `mypy --ignore-missing-imports rfq_assistant` passed, and `bandit -r rfq_assistant -ll` reported no issues. GitHub CI is being rerun for the follow-up commit.

@@ -493,12 +493,14 @@ class SQLiteStateStore:
         """Commit active catalog and reviewed proposals in one SQLite transaction."""
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            current_rows = connection.execute(
-                "SELECT proposal_id, payload FROM catalog_update_proposals WHERE proposal_id IN (%s)"
-                % ",".join("?" for _ in expected_versions),
-                tuple(expected_versions),
-            ).fetchall()
-            current = {row["proposal_id"]: json.loads(row["payload"]) for row in current_rows}
+            current = {}
+            for proposal_id in expected_versions:
+                row = connection.execute(
+                    "SELECT proposal_id, payload FROM catalog_update_proposals WHERE proposal_id = ?",
+                    (proposal_id,),
+                ).fetchone()
+                if row:
+                    current[row["proposal_id"]] = json.loads(row["payload"])
             if set(current) != set(expected_versions):
                 raise ValueError("One or more catalog proposals no longer exist.")
             for proposal_id, expected_version in expected_versions.items():
