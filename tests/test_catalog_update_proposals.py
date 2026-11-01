@@ -527,3 +527,130 @@ def test_catalog_update_api_retains_source_and_rejection_is_audited(
         assert rejected.json()[0]["review_status"] == "rejected"
         assert rejected.json()[0]["reviewed_by"]
         assert catalog.get_by_sku("SKU-EXISTING").stock_qty == 8
+
+class PartialRevisionClient:
+    """Only emits values grounded in the new correction, not old proposal data."""
+    def __init__(self, fields):
+        self.fields = fields
+        self.last_context = None
+
+    def complete(self, *, system: str, user: str) -> str:
+        import json
+        payload = json.loads(user)
+        self.last_context = payload.get("revision_context")
+        segment = payload["source_excerpts"][0]
+        return json.dumps({"proposals": [{
+            **self.fields,
+            "segment_id": segment["segment_id"],
+            "evidence_quote": segment["text"],
+        }]})
+
+
+def test_short_rejected_stock_revision_retains_identity_and_original_provenance(tmp_path):
+    model = PartialRevisionClient({"stock_qty": 12})
+    service, catalog, _ = isolated_service(tmp_path, client=model)
+    original = service.stage(
+        content=canonical_csv(
+            "SKU-EXISTING,Siemens,6ES7134-6GD01-0BA1,Analog input module,42.50,USD,18"
+        ), filename="old-stock.csv", actor="Distributor",
+    )[0]
+    service.review_batch([{
+        "proposal_id": original.proposal_id, "expected_version": original.version,
+        "decision": "reject",
+    }], actor="Distributor")
+    correction = service.stage(
+        content=b"Stock is 12, not 18.", filename="correction.txt",
+        actor="Distributor", revision_of=original.proposal_id,
+    )[0]
+    assert model.last_context["proposal_id"] == original.proposal_id
+    assert correction.revision_of == original.proposal_id
+    assert correction.evidence_quote == "Stock is 12, not 18."
+    assert correction.proposed_values["internal_sku"] == "SKU-EXISTING"
+    assert correction.proposed_values["manufacturer"] == "Siemens"
+    assert correction.proposed_values["manufacturer_part_number"] == "6ES7134-6GD01-0BA1"
+    assert correction.proposed_values["stock_qty"] == 12
+    assert any(original.proposal_id in warning for warning in correction.source_warnings)
+    assert catalog.get_by_sku("SKU-EXISTING").stock_qty == 8
+
+    service.review_batch([{
+        "proposal_id": correction.proposal_id, "expected_version": correction.version,
+        "decision": "accept",
+    }], actor="Distributor")
+    assert catalog.get_by_sku("SKU-EXISTING").stock_qty == 12
+
+
+def test_rejected_new_item_can_be_completed_by_one_grounded_sku_correction(tmp_path):
+    model = PartialRevisionClient({"internal_sku": "SKU-FIXED"})
+    service, catalog, _ = isolated_service(tmp_path, client=model)
+    import json
+
+    class MissingSkuClient:
+        def complete(self, *, system: str, user: str) -> str:
+            segment = json.loads(user)["source_excerpts"][0]
+            return json.dumps({"proposals": [{
+                "manufacturer": "WAGO",
+                "manufacturer_part_number": "2002-1201",
+                "description": "feed through terminal",
+                "stock_qty": 8,
+                "segment_id": segment["segment_id"],
+                "evidence_quote": segment["text"],
+            }]})
+
+    service.client = MissingSkuClient()
+    original = service.stage(
+        content=b"WAGO 2002-1201 feed through terminal, stock 8.",
+        filename="stock-note.txt", actor="Distributor",
+    )[0]
+    assert original.blocking_reasons
+    service.review_batch([{
+        "proposal_id": original.proposal_id, "expected_version": original.version,
+        "decision": "reject",
+    }], actor="Distributor")
+    service.client = model
+    correction = service.stage(
+        content=b"Internal SKU is SKU-FIXED.", filename="sku-note.txt",
+        actor="Distributor", revision_of=original.proposal_id,
+    )[0]
+    assert correction.proposed_values["internal_sku"] == "SKU-FIXED"
+    assert correction.proposed_values["manufacturer"] == "WAGO"
+    assert correction.proposed_values["stock_qty"] == 8
+    assert not correction.blocking_reasons
+    assert catalog.get_by_sku("SKU-FIXED") is None
+
+
+def test_rejected_proposal_revision_refuses_conflicting_manufacturer(tmp_path):
+    model = PartialRevisionClient({"manufacturer": "Schneider Electric", "stock_qty": 12})
+    service, catalog, _ = isolated_service(tmp_path, client=model)
+    original = service.stage(
+        content=canonical_csv(
+            "SKU-EXISTING,Siemens,6ES7134-6GD01-0BA1,Analog input module,42.50,USD,18"
+        ), filename="old.csv", actor="Distributor",
+    )[0]
+    service.review_batch([{
+        "proposal_id": original.proposal_id, "expected_version": original.version,
+        "decision": "reject",
+    }], actor="Distributor")
+    import pytest
+    with pytest.raises(CatalogUpdateError, match="changes the item's identity"):
+        service.stage(
+            content=b"Schneider Electric stock 12", filename="revision.txt",
+            actor="Distributor", revision_of=original.proposal_id,
+        )
+    assert catalog.get_by_sku("SKU-EXISTING").stock_qty == 8
+
+
+def test_revision_is_only_allowed_after_proposal_rejection(tmp_path):
+    service, _, _ = isolated_service(tmp_path)
+    proposal = service.stage(
+        content=canonical_csv(
+            "SKU-EXISTING,Siemens,6ES7134-6GD01-0BA1,Analog input module,42.50,USD,18"
+        ), filename="old.csv", actor="Distributor",
+    )[0]
+    import pytest
+    with pytest.raises(CatalogUpdateError, match="Only a rejected proposal"):
+        service.stage(
+            content=canonical_csv(
+                "SKU-EXISTING,Siemens,6ES7134-6GD01-0BA1,Analog input module,42.50,USD,12"
+            ), filename="new.csv", actor="Distributor",
+            revision_of=proposal.proposal_id,
+        )

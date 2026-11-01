@@ -81,6 +81,7 @@ function CatalogChange({
         <ul className="mt-1 list-disc pl-5">{blockingReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
       </div>}
       {sourceWarnings.map((warning) => <p key={warning} className="mt-2 text-[12px] text-[#815408]">{warning}</p>)}
+      {proposal.revision_of && <p className="mt-2 text-[12px] text-[#52656b]">Revises rejected proposal <span className="font-mono">{proposal.revision_of}</span>. <a className="underline underline-offset-2" href={`/api/proxy/api/catalogs/updates/${encodeURIComponent(proposal.revision_of)}/source`} target="_blank" rel="noreferrer">Check earlier source</a> before accepting inherited values.</p>}
       <blockquote className="mt-3 border-l-2 border-[#cbd6d9] pl-3 text-[13px] leading-5 text-[#52656b]">“{proposal.evidence_quote}”</blockquote>
       {proposal.review_status === "rejected" && <div className="mt-4 max-w-[760px] rounded-md border border-[#dfe7e9] bg-[#f7f9f9] p-4">
         <p className="text-[13px] font-medium text-[#26373d]">You rejected this proposal. What should change?</p>
