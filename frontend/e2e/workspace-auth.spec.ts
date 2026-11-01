@@ -29,8 +29,10 @@ test("protected proxy preserves each user's identity and role", async ({ page })
   expect(cookie?.httpOnly).toBe(true);
   expect(cookie?.sameSite).toBe("Strict");
   const originalCookie = cookie!;
-  const lastCharacter = originalCookie.value.at(-1);
-  const tamperedValue = `${originalCookie.value.slice(0, -1)}${lastCharacter === "A" ? "B" : "A"}`;
+  const cookieParts = originalCookie.value.split(".");
+  const tag = cookieParts[2];
+  cookieParts[2] = `${tag[0] === "A" ? "B" : "A"}${tag.slice(1)}`;
+  const tamperedValue = cookieParts.join(".");
   await page.context().addCookies([{ ...originalCookie, value: tamperedValue }]);
   expect((await page.request.get(api)).status()).toBe(401);
   await page.context().addCookies([originalCookie]);
