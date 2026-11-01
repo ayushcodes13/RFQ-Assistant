@@ -14,9 +14,9 @@ const nextDistDir = process.env.RFQ_E2E_NEXT_DIST_DIR ?? ".next-e2e";
  */
 export default defineConfig({
   testDir: "./e2e",
-  // The protected login spec requires synthetic credentials and is executed
-  // separately in CI. Never expect anonymous local demos to return 401.
-  testIgnore: process.env.RFQ_WORKSPACE_PASSWORD ? [] : ["**/workspace-auth.spec.ts"],
+  // The protected login spec requires synthetic user keys and runs separately
+  // in CI. Never expect anonymous local demos to return 401.
+  testIgnore: process.env.RFQ_WORKSPACE_TEST_ADMIN_KEY ? [] : ["**/workspace-auth.spec.ts"],
   fullyParallel: false,
   workers: 1,
   retries: process.env.CI ? 1 : 0,
