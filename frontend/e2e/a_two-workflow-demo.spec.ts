@@ -49,7 +49,14 @@ test("distributor reviews manufacturer changes before buyer RFQ uses accepted it
     mimeType: "text/csv",
     buffer: Buffer.from(catalogCsv),
   });
+  const stageResponse = page.waitForResponse((response) =>
+    response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/api/catalogs/updates"),
+  );
   await page.getByRole("button", { name: /Review file changes/ }).click();
+  const stagedResponse = await stageResponse;
+  expect(stagedResponse.ok(), await stagedResponse.text()).toBe(true);
+  const stagedProposals: { proposal_id: string }[] = await stagedResponse.json();
+  expect(stagedProposals).toHaveLength(3);
 
   const acceptedSkus = [skuOmron, skuWago];
   const pendingReview = page.locator('section[aria-labelledby="pending-heading"]');
