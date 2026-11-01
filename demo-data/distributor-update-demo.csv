@@ -1,0 +1,4 @@
+internal_sku,manufacturer,manufacturer_part_number,description,list_price,currency,stock_qty
+SKU-SCH-001,Schneider Electric,LC1D09BD,TeSys D contactor - 3P(3 NO) - AC-3 - <= 440 V 9 A - 24 V DC coil,42.50,,149
+SKU-DEMO-OMR-001,Omron,G2R-1-S,General purpose relay,8.25,USD,35
+SKU-DEMO-WAGO-001,WAGO,2002-1201,Feed-through terminal block,1.80,USD,42
