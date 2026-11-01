@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { createCaseFromSources } from "@/services/api";
 import { RFQCase } from "@/types";
+import { suggestCustomerFromEmail } from "@/lib/customer-suggestion";
 
 interface IngestModalProps {
   isOpen: boolean;
@@ -30,6 +31,7 @@ export function IngestModal({
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sourceCount = files.length + (pasteText.trim() ? 1 : 0);
+  const suggestedCustomer = suggestCustomerFromEmail(pasteText);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -174,8 +176,21 @@ export function IngestModal({
                 }}
               />
 
-              {/* Optional customer label */}
+              {/* A source header is a suggestion, never confirmed identity. */}
+              <label className="mb-1 block text-xs font-semibold" htmlFor="rfq-customer-label" style={{ color: "var(--color-brown-500)" }}>
+                Customer name or company · verify with the request
+              </label>
+              {suggestedCustomer && suggestedCustomer !== customer && (
+                <button type="button" className="mb-2 block rounded-lg border border-[#d6cbbd] bg-white px-3 py-2 text-left text-xs text-[#35484e]"
+                  onClick={() => setCustomer(suggestedCustomer)}>
+                  Email header suggests <strong>{suggestedCustomer}</strong> · Use this name after checking
+                </button>
+              )}
+              {!customer.trim() && (
+                <p className="mb-2 text-xs text-[#78500a]">Customer not verified. The RFQ can be reviewed, but its draft will show Customer not specified.</p>
+              )}
               <input
+                id="rfq-customer-label"
                 type="text"
                 placeholder="Optional customer label"
                 value={customer}
