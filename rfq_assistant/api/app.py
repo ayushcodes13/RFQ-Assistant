@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import (
     Body,
@@ -332,6 +332,8 @@ async def import_catalog(
         old_version = catalog_repo.active_version
         summary = catalog_repo.replace_csv(content)
         new_version = summary.get("catalog_version")
+        if not isinstance(new_version, str):
+            raise HTTPException(status_code=500, detail="Catalog import did not produce a valid catalog version.")
         if new_version != old_version:
             case_manager.handle_catalog_replacement(current_user.name, new_version)
         return {"status": "success", "summary": summary}
@@ -387,7 +389,7 @@ async def stage_catalog_update(
     if file is None and not (pasted_text and pasted_text.strip()):
         raise HTTPException(status_code=400, detail="Paste a distributor note or upload a source file.")
     filename = Path(file.filename or "distributor-update.txt").name if file else "pasted-distributor-update.txt"
-    content = await file.read(10 * 1024 * 1024 + 1) if file else pasted_text.encode("utf-8")
+    content = await file.read(10 * 1024 * 1024 + 1) if file else (pasted_text or "").encode("utf-8")
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Distributor update source exceeds the 10 MB limit.")
     source_warnings: List[str] = []
@@ -757,7 +759,7 @@ def get_spreadsheet_source_preview(
             detail="Inline source preview is available for CSV and XLSX files. Open the original file to inspect this source.",
         )
 
-    selected_cells = []
+    selected_cells: list[str] = []
     for coordinate in target_cells or []:
         if len(selected_cells) >= 20 or not re.fullmatch(r"[A-Z]{1,3}[1-9][0-9]*", coordinate, re.IGNORECASE):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid source cell reference.")
@@ -796,7 +798,7 @@ def get_spreadsheet_source_preview(
                 ]
                 rows.append(SourcePreviewRow(row_number=target_row, is_target=target_row == row_number, cells=cells))
             return SpreadsheetSourcePreview(
-                file_name=case.source_file.file_name,
+                file_name=source_metadata.file_name,
                 sheet_name="CSV",
                 target_row=row_number,
                 target_cells=selected_cells,
@@ -824,13 +826,13 @@ def get_spreadsheet_source_preview(
         if not 1 <= row_number <= max_row:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Source row is not present in this worksheet.")
         columns = min(max(worksheet.max_column or 1, 1), 100)
-        row_numbers = set(range(max(1, row_number - radius), min(max_row, row_number + radius) + 1))
+        row_number_set = set(range(max(1, row_number - radius), min(max_row, row_number + radius) + 1))
         for coordinate in selected_cells:
             column_letters, cell_row = coordinate_from_string(coordinate)
             if cell_row > max_row or column_index_from_string(column_letters) > max_column:
                 raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Source cell is not present in this worksheet.")
-            row_numbers.add(cell_row)
-        row_numbers = sorted(row_numbers)
+            row_number_set.add(cell_row)
+        row_numbers = sorted(row_number_set)
         rows = []
         for target_row in row_numbers:
             formula_cells = next(worksheet.iter_rows(min_row=target_row, max_row=target_row, min_col=1, max_col=columns))
@@ -848,7 +850,7 @@ def get_spreadsheet_source_preview(
                 ))
             rows.append(SourcePreviewRow(row_number=target_row, is_target=target_row == row_number, cells=cells))
         return SpreadsheetSourcePreview(
-            file_name=case.source_file.file_name,
+            file_name=source_metadata.file_name,
             sheet_name=sheet_name,
             target_row=row_number,
             target_cells=selected_cells,
@@ -1252,7 +1254,7 @@ def v1_draft_quote(
                     page=line.source_locator.page_number,
                     sheet=line.source_locator.sheet_name,
                     text_excerpt=line.source_locator.text_snippet,
-                    bbox=line.source_locator.page_bbox,
+                    bbox=(list(line.source_locator.page_bbox) if line.source_locator.page_bbox else None),
                 )
             )
 
@@ -1338,7 +1340,9 @@ def v1_draft_quote(
                 ))
 
     quote_id = f"QUOTE-{case_id.replace('RFQ-', '')}"
-    proposal_status = "not_configured" if distributor_quote_records else "no_retrieved_prices"
+    proposal_status: Literal["grounded", "not_configured", "failed", "no_retrieved_prices"] = (
+        "not_configured" if distributor_quote_records else "no_retrieved_prices"
+    )
     proposal_warnings = []
     extractor = case_manager.llm_extractor
     if extractor and distributor_quote_records:

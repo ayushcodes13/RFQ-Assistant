@@ -52,8 +52,6 @@ class QuoteEvidenceResponse(BaseModel):
 
 
 class CompletionClient(Protocol):
-    model: str
-
     def complete(self, *, system: str, user: str) -> str: ...
 
 
