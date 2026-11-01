@@ -40,7 +40,7 @@ Before proposing code, read the relevant documents. If requirements conflict, do
 - On failed OCR/model calls, preserve the original upload and show a blocking error or manual entry path; never silently omit lines.
 - Source-location provenance and reviewer edits must accompany generated rows and be visible before export.
 - Generated documents are **drafts**, clearly labeled until independently approved.
-- Human review is required for every exception plus a per-case stable, pseudorandom, location-stratified sample of up to 5 otherwise validated rows (review all if there are fewer). After every sampled row is approved without correction, the reviewer may explicitly batch-approve the remaining clean rows; log each approval and who approved it. If a sampled row needs correction, disable batch approval for that case and require row-by-row review of the remaining clean rows. Never auto-approve from model confidence alone.
+- Human review is required individually for every Luna-proposed or otherwise exceptional row, plus a per-case stable, pseudorandom, location-stratified sample of up to 5 otherwise deterministic, validated rows (review all if there are fewer). After every sampled row is approved without correction, the reviewer may explicitly batch-approve the remaining clean rows; log each approval and who approved it. If a sampled row needs correction, disable batch approval for that case and require row-by-row review of the remaining clean rows. Never auto-approve from model confidence alone.
 
 ## Data, security and privacy
 
