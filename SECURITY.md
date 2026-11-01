@@ -17,6 +17,7 @@ RFQ files can contain names, email addresses, purchase quantities, customer pric
 - Default to no outbound network requests from parsing; disclose external AI processors before using them on private customer data.
 - No autonomous quotation transmission or purchasing actions.
 - Require explicit human approval and visible source evidence.
+- The authenticated Next.js API proxy requires an exact same-origin `Origin` header on state-changing requests. SameSite cookies add defense in depth but do not make sibling subdomains cross-site.
 - Keep customer records tenant-scoped and ensure deletion works before a production pilot.
 - Do not use company/employer intellectual property, data or accounts without permission.
 
