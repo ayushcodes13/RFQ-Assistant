@@ -21,7 +21,12 @@ function sourceHref(caseData: RFQCase, source: QuoteDraftSource) {
     return `/api/proxy/api/catalogs/updates/${encodeURIComponent(proposalId)}/source`;
   }
   const sourceDocument = caseData.source_documents?.find((document) => document.source_file.file_id === source.file_id);
-  if (source.file_id.startsWith("RFQ-") || source.file_id === caseData.source_file?.file_id || sourceDocument) {
+  const sourceFile = sourceDocument?.source_file
+    ?? (caseData.source_file?.file_id === source.file_id ? caseData.source_file : null);
+  // Pasted/email text remains visible as an excerpt in the evidence drawer.
+  // Only document-backed evidence should offer an original-file action.
+  if (sourceFile?.source_type === "EMAIL_TEXT") return null;
+  if (sourceFile) {
     const query = sourceDocument ? `?source_file_id=${encodeURIComponent(source.file_id)}` : "";
     const page = source.page == null ? "" : `#page=${source.page}`;
     return `/api/proxy/api/rfqs/${encodeURIComponent(caseData.case_id)}/source${query}${page}`;
@@ -110,8 +115,8 @@ export function QuotePreparationPanel({ caseData }: { caseData: RFQCase }) {
                 <td className="py-2 pr-3 text-right tabular-nums">{money(line.line_total, line.currency)}</td>
                 <td className="py-2 pr-3">{lineErrors.length ? <span className="text-[#84241f]">Needs review</span> : line.requires_human_review ? <span className="text-[#78500a]">Operator review</span> : <span className="text-[#52656b]">Ready for review</span>}</td>
                 <td className="py-2">{(() => {
-                  const visibleSources = line.sources.filter((source) => !(caseData.source_type === "EMAIL_TEXT" && !source.file_id.startsWith("CAT")));
-                  return visibleSources.length ? <div className="flex flex-wrap gap-x-2 gap-y-1">{visibleSources.map((source, index) => <button key={`${source.file_id}-${index}`} type="button" className="inline-flex items-center gap-1 text-left font-medium text-[#344b53] underline underline-offset-2" onClick={() => setSelectedSource({ line: line.line_no, source })} aria-label={`Show evidence for line ${line.line_no}, ${sourceLocation(source)}`}><FileText size={12} aria-hidden="true" />{source.file_id.startsWith("CAT") ? "Catalog" : "Buyer"} · {sourceLocation(source)}</button>)}</div> : caseData.source_type === "EMAIL_TEXT" ? <span className="text-[#667980]">Pasted request text</span> : <span className="text-[#667980]">No source reference</span>;
+                  const visibleSources = line.sources;
+                  return visibleSources.length ? <div className="flex flex-wrap gap-x-2 gap-y-1">{visibleSources.map((source, index) => <button key={`${source.file_id}-${index}`} type="button" className="inline-flex items-center gap-1 text-left font-medium text-[#344b53] underline underline-offset-2" onClick={() => setSelectedSource({ line: line.line_no, source })} aria-label={`Show evidence for line ${line.line_no}, ${sourceLocation(source)}`}><FileText size={12} aria-hidden="true" />{source.file_id.startsWith("CAT") ? "Catalog" : "Buyer"} · {sourceLocation(source)}</button>)}</div> : <span className="text-[#667980]">No source reference recorded</span>;
                 })()}</td>
               </tr>;
             })}</tbody>
@@ -125,7 +130,7 @@ export function QuotePreparationPanel({ caseData }: { caseData: RFQCase }) {
         <aside className="absolute inset-y-0 right-0 flex w-full max-w-[440px] flex-col border-l border-[#d7e1e3] bg-white shadow-xl" role="dialog" aria-modal="true" aria-labelledby="quote-evidence-title">
           <div className="flex items-start justify-between gap-4 border-b border-[#e4eaec] px-5 py-4"><div><h3 id="quote-evidence-title" className="text-base font-semibold text-[#1d2b30]">Source evidence</h3><p className="mt-1 text-xs text-[#52656b]">Line {selectedSource.line} · {sourceLocation(selectedSource.source)}</p></div><button type="button" className="rounded p-1 text-[#52656b] hover:bg-[#f2f5f6]" onClick={() => setSelectedSource(null)} aria-label="Close evidence drawer"><X size={18} /></button></div>
           <div className="flex-1 overflow-y-auto px-5 py-4"><p className="text-xs font-medium text-[#52656b]">{selectedSource.source.file_id.startsWith("CATUP-") ? "Accepted distributor update" : selectedSource.source.file_id.startsWith("CAT-") ? "Active distributor catalog" : "Buyer request"}</p><blockquote className="mt-3 border-l-2 border-[#a83e1c] pl-3 text-sm leading-6 text-[#26373d]">{selectedSource.source.text_excerpt || "No text excerpt was stored for this source."}</blockquote>
-            {sourceHref(caseData, selectedSource.source) ? <a className="mt-5 inline-flex items-center gap-2 text-sm font-medium text-[#344b53] underline underline-offset-2" href={sourceHref(caseData, selectedSource.source)!} target="_blank" rel="noreferrer"><FileText size={15} aria-hidden="true" />Open original source{selectedSource.source.page != null ? ` · page ${selectedSource.source.page}` : ""}</a> : <p className="mt-5 text-xs text-[#667980]">This catalog citation is a stored catalog record excerpt and does not have a separate source document to open.</p>}
+            {sourceHref(caseData, selectedSource.source) ? <a className="mt-5 inline-flex items-center gap-2 text-sm font-medium text-[#344b53] underline underline-offset-2" href={sourceHref(caseData, selectedSource.source)!} target="_blank" rel="noreferrer"><FileText size={15} aria-hidden="true" />Open original source{selectedSource.source.page != null ? ` · page ${selectedSource.source.page}` : ""}</a> : <p className="mt-5 text-xs text-[#667980]">This is a source excerpt. There is no separate document to open for this evidence.</p>}
             {selectedSource.source.bbox?.length === 4 ? <p className="mt-5 text-xs leading-5 text-[#667980]">Parser-recorded document area: {selectedSource.source.bbox.map((value) => `${Math.round(value * 100)}%`).join(", ")}. The original file opens above; the page viewer does not draw this quote-level box yet.</p> : <p className="mt-5 text-xs leading-5 text-[#667980]">The quote draft stores page, sheet, or cell location when available. No bounding box was recorded for this source.</p>}
           </div>
         </aside>
