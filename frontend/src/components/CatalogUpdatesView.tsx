@@ -9,6 +9,10 @@ import {
 } from "@/services/api";
 import { CatalogItem, CatalogUpdateProposal } from "@/types";
 
+function hasOpenableSource(fileName?: string | null): boolean {
+  return /\.(?:csv|xls|xlsx|pdf)$/i.test(fileName ?? "");
+}
+
 function displayValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
   return String(value);
@@ -27,12 +31,14 @@ function CatalogChange({
   onRevise,
   selectedDecision,
   busy,
+  priorSourceName,
 }: {
   proposal: CatalogUpdateProposal;
   onReview: (proposalId: string, decision: "accept" | "reject") => void;
   selectedDecision?: "accept" | "reject";
   onRevise: (proposalId: string, text: string) => void;
   busy: boolean;
+  priorSourceName?: string | null;
 }) {
   const [revision, setRevision] = useState("");
   const changedFields = proposal.changed_fields ?? {};
@@ -57,7 +63,7 @@ function CatalogChange({
             <span className="text-[12px] text-[#52656b]">{proposalLabel(proposal)}</span>
             <span className="text-[12px] text-[#667980]">· {unchanged ? "no review needed" : proposal.review_status}</span>
           </div>
-          <p className="mt-1 text-[12px] text-[#52656b]">{proposal.source_name} · {proposal.source_locator.sheet_name ? `${proposal.source_locator.sheet_name}, ` : ""}{proposal.source_locator.row_number ? `row ${proposal.source_locator.row_number}` : proposal.source_locator.page_number ? `page ${proposal.source_locator.page_number}` : "source text"} · <a className="font-medium underline underline-offset-2" href={`/api/proxy/api/catalogs/updates/${encodeURIComponent(proposal.proposal_id)}/source`} target="_blank" rel="noreferrer">Open original source</a></p>
+          <p className="mt-1 text-[12px] text-[#52656b]">{proposal.source_name} · {proposal.source_locator.sheet_name ? `${proposal.source_locator.sheet_name}, ` : ""}{proposal.source_locator.row_number ? `row ${proposal.source_locator.row_number}` : proposal.source_locator.page_number ? `page ${proposal.source_locator.page_number}` : "source text"} · {hasOpenableSource(proposal.source_name) ? <a className="font-medium underline underline-offset-2" href={`/api/proxy/api/catalogs/updates/${encodeURIComponent(proposal.proposal_id)}/source`} target="_blank" rel="noreferrer">Open original source</a> : <span className="text-[#52656b]">Text evidence shown below</span>}</p>
         </div>
         {proposal.review_status === "pending" && !unchanged && (
           <div className="flex shrink-0 items-center gap-2">
@@ -81,7 +87,7 @@ function CatalogChange({
         <ul className="mt-1 list-disc pl-5">{blockingReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
       </div>}
       {sourceWarnings.map((warning) => <p key={warning} className="mt-2 text-[12px] text-[#815408]">{warning}</p>)}
-      {proposal.revision_of && <p className="mt-2 text-[12px] text-[#52656b]">Revises rejected proposal <span className="font-mono">{proposal.revision_of}</span>. <a className="underline underline-offset-2" href={`/api/proxy/api/catalogs/updates/${encodeURIComponent(proposal.revision_of)}/source`} target="_blank" rel="noreferrer">Check earlier source</a> before accepting inherited values.</p>}
+      {proposal.revision_of && <p className="mt-2 text-[12px] text-[#52656b]">Revises rejected proposal <span className="font-mono">{proposal.revision_of}</span>. {hasOpenableSource(priorSourceName) ? <a className="underline underline-offset-2" href={`/api/proxy/api/catalogs/updates/${encodeURIComponent(proposal.revision_of)}/source`} target="_blank" rel="noreferrer">Check earlier source</a> : <span>Check earlier text evidence in Decision history</span>} before accepting inherited values.</p>}
       <blockquote className="mt-3 border-l-2 border-[#cbd6d9] pl-3 text-[13px] leading-5 text-[#52656b]">“{proposal.evidence_quote}”</blockquote>
       {proposal.review_status === "rejected" && <div className="mt-4 max-w-[760px] rounded-md border border-[#dfe7e9] bg-[#f7f9f9] p-4">
         <p className="text-[13px] font-medium text-[#26373d]">You rejected this proposal. What should change?</p>
@@ -233,7 +239,7 @@ export function CatalogUpdatesView({ initialItem, onInitialItemHandled }: { init
         <div className="flex items-baseline justify-between gap-3 border-b border-[#dfe7e9] pb-2"><h2 id="pending-heading" className="rfq-section-title">Changes to review</h2><span className="rfq-mono text-[12px] text-[#52656b]">{pending.length} pending</span></div>
         {pending.length === 0 ? <p className="py-5 text-[13px] text-[#52656b]">No distributor changes are waiting for a decision.</p> : <>
           <p className="py-3 text-[13px] text-[#52656b]">Mark each proposed record to accept or reject. Nothing changes in active distributor data until you finish this review.</p>
-          {pending.map((proposal) => <CatalogChange key={proposal.proposal_id} proposal={proposal} busy={busyId === "batch"} onReview={chooseDecision} selectedDecision={decisions[proposal.proposal_id]} onRevise={(id, revisionText) => void stage(id, revisionText)} />)}
+          {pending.map((proposal) => <CatalogChange key={proposal.proposal_id} priorSourceName={proposals.find((item) => item.proposal_id === proposal.revision_of)?.source_name} proposal={proposal} busy={busyId === "batch"} onReview={chooseDecision} selectedDecision={decisions[proposal.proposal_id]} onRevise={(id, revisionText) => void stage(id, revisionText)} />)}
           <div className="sticky bottom-3 z-10 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#cbd6d9] bg-white/95 p-4 shadow-lg backdrop-blur">
             <span className="text-[13px] text-[#35484e]">{Object.keys(decisions).length} of {pending.length} decisions marked</span>
             <button type="button" className="rfq-primary" disabled={busyId === "batch" || pending.some((proposal) => !decisions[proposal.proposal_id])} onClick={() => void reviewDone()}>{busyId === "batch" ? <><LoaderCircle size={15} className="animate-spin" aria-hidden="true" />Saving review…</> : "Review done"}</button>
@@ -243,10 +249,10 @@ export function CatalogUpdatesView({ initialItem, onInitialItemHandled }: { init
 
       {unchanged.length > 0 && <details className="mt-6 max-w-[1000px]" aria-label="Rows that already match the catalog">
         <summary className="cursor-pointer border-b border-[#dfe7e9] pb-2 text-[13px] font-medium text-[#52656b]">{unchanged.length} {unchanged.length === 1 ? "row already matches" : "rows already match"} · no decision needed</summary>
-        {unchanged.map((proposal) => <CatalogChange key={proposal.proposal_id} proposal={proposal} busy={false} onReview={chooseDecision} selectedDecision={decisions[proposal.proposal_id]} onRevise={(id, revisionText) => void stage(id, revisionText)} />)}
+        {unchanged.map((proposal) => <CatalogChange key={proposal.proposal_id} priorSourceName={proposals.find((item) => item.proposal_id === proposal.revision_of)?.source_name} proposal={proposal} busy={false} onReview={chooseDecision} selectedDecision={decisions[proposal.proposal_id]} onRevise={(id, revisionText) => void stage(id, revisionText)} />)}
       </details>}
 
-      {history.length > 0 && <section className="mt-8 max-w-[1000px]" aria-labelledby="history-heading"><h2 id="history-heading" className="rfq-section-title border-b border-[#dfe7e9] pb-2">Decision history</h2>{history.map((proposal) => <CatalogChange key={proposal.proposal_id} proposal={proposal} busy={busyId === proposal.proposal_id} onReview={chooseDecision} selectedDecision={decisions[proposal.proposal_id]} onRevise={(id, revisionText) => void stage(id, revisionText)} />)}</section>}
+      {history.length > 0 && <section className="mt-8 max-w-[1000px]" aria-labelledby="history-heading"><h2 id="history-heading" className="rfq-section-title border-b border-[#dfe7e9] pb-2">Decision history</h2>{history.map((proposal) => <CatalogChange key={proposal.proposal_id} priorSourceName={proposals.find((item) => item.proposal_id === proposal.revision_of)?.source_name} proposal={proposal} busy={busyId === proposal.proposal_id} onReview={chooseDecision} selectedDecision={decisions[proposal.proposal_id]} onRevise={(id, revisionText) => void stage(id, revisionText)} />)}</section>}
     </div>
   );
 }
