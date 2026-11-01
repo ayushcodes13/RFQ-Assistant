@@ -781,8 +781,8 @@ class GroundedLLMExtractor:
             return None
         # Display ordinals stay unique when an untrusted row had no usable
         # source ID. They do not replace the original source-region references.
-        for index, line in enumerate(recovered, start=1):
-            line.line_number = index
+        for index, draft in enumerate(recovered, start=1):
+            draft.line_number = index
         return ParsedDocumentResult(
             lines=recovered,
             warnings=[ExtractionWarning(
