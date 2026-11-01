@@ -29,7 +29,7 @@ export function ExportModal({
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [freshCase, setFreshCase] = useState<RFQCase | null>(null);
-  const [checkingStatus, setCheckingStatus] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(true);
   const [statusError, setStatusError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -44,10 +44,8 @@ export function ExportModal({
   useEffect(() => {
     if (!isOpen) return;
     let active = true;
-    setFreshCase(null);
-    setStatusError(null);
-    setAllowPartial(false);
-    setCheckingStatus(true);
+    // This modal is keyed per open by the workspace parent. Initial state is
+    // therefore fresh; async fetch completion performs the only state update.
     void getCase(caseData.case_id)
       .then((value) => { if (active) setFreshCase(value); })
       .catch(() => {
