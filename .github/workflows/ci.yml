@@ -142,9 +142,10 @@ jobs:
       - name: Protected workspace browser security check
         env:
           NEXT_TELEMETRY_DISABLED: "1"
-          RFQ_WORKSPACE_PASSWORD: "synthetic-ci-operator-password-001"
-          RFQ_WORKSPACE_SESSION_SECRET: "synthetic-ci-session-secret-is-long-and-not-reused-001"
         run: |
+          # Runtime-only random test credentials; never commit fixed secrets.
+          export RFQ_WORKSPACE_PASSWORD="$(openssl rand -hex 24)"
+          export RFQ_WORKSPACE_SESSION_SECRET="$(openssl rand -hex 48)"
           cd frontend
           npx playwright test e2e/workspace-auth.spec.ts
 
