@@ -703,10 +703,7 @@ export interface components {
         };
         /** Body_import_catalog_api_catalogs_import_post */
         Body_import_catalog_api_catalogs_import_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** Body_stage_catalog_update_api_catalogs_updates_post */
