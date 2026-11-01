@@ -4,8 +4,7 @@ test("An operator can view, edit and copy an unsent clarification without sendin
   await page.goto("/workspace");
   await page.getByRole("button", { name: /New RFQ/i }).first().click();
   const intake = page.getByRole("dialog", { name: "New RFQ" });
-  await intake.getByRole("button", { name: /Paste text/i }).click();
-  await intake.getByPlaceholder(/Paste email or RFQ text here/i).fill(
+  await intake.getByRole("textbox", { name: "Customer email text" }).fill(
     "Please quote 10 units of Schneider Electric LC1D09BD and confirm missing specifications."
   );
   await intake.getByPlaceholder("Optional case title").fill("Clarification UI synthetic case");

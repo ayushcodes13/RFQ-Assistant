@@ -5,13 +5,16 @@ import hashlib
 import json
 import logging
 import math
+import mimetypes
 import re
+import tempfile
 import threading
 import time
 import uuid
 from datetime import datetime
 from importlib import metadata as package_metadata
 from io import BytesIO, StringIO
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from openpyxl import load_workbook
@@ -19,22 +22,26 @@ from openpyxl import load_workbook
 from rfq_assistant.ingestion import (
     DocumentParserError,
     DocumentStorage,
+    UploadValidationError,
     get_parser,
     validate_file_upload,
 )
 from rfq_assistant.ingestion.ai_extraction import (
-    EvidenceSegment,
-    GroundedLLMExtractor,
     LLM_SCHEMA_VERSION,
     LLM_VALIDATOR_VERSION,
+    EvidenceSegment,
+    GroundedLLMExtractor,
 )
 from rfq_assistant.ingestion.parsers.base import ParsedDocumentResult, ParsedLineDraft
 from rfq_assistant.ingestion.parsers.spreadsheet_parser import identify_columns
 from rfq_assistant.ingestion.source_segments import source_segments
 from rfq_assistant.matching import CatalogRepository, ExactMatchEngine
 from rfq_assistant.matching.normalizer import normalize_manufacturer, normalize_mpn
-from rfq_assistant.quotation.line_rules import blocking_line_issues, stock_shortfall_issue
 from rfq_assistant.persistence import StateStore
+from rfq_assistant.quotation.line_rules import (
+    blocking_line_issues,
+    stock_shortfall_issue,
+)
 from rfq_assistant.schemas.enums import (
     AuditAction,
     CaseStatus,
@@ -45,23 +52,25 @@ from rfq_assistant.schemas.enums import (
     ReviewDecision,
     SourceType,
 )
-
 from rfq_assistant.schemas.models import (
     AuditEvent,
     BatchReviewRequest,
     ExtractionWarning,
     FieldProvenance,
+    RematchLineRequest,
+    ReviewPlan,
     RFQCase,
     RFQLineItem,
     RFQLineItemUpdate,
-    RematchLineRequest,
-    ReviewPlan,
-    SourceFileMetadata,
+    RFQSourceDocument,
     SourceCoverageUnit,
+    SourceFileMetadata,
     SourceLocator,
 )
 
 MAX_TEXT_INTAKE_REGIONS = 500
+MAX_SOURCE_DOCUMENTS_PER_CASE = 6
+MAX_SOURCE_BYTES_PER_CASE = 25 * 1024 * 1024
 
 log = logging.getLogger(__name__)
 
@@ -429,6 +438,10 @@ class CaseManager:
             set_processing_stage(ProcessingStage.MATCHING)
             stage_started = time.perf_counter()
             for draft in parse_result.lines:
+                if case.source_file:
+                    draft.source_locator = draft.source_locator.model_copy(update={
+                        "source_file_id": case.source_file.file_id,
+                    })
                 line_id = f"line-{uuid.uuid4().hex[:8]}"
                 match_res = catalog_matcher.match_line(
                     draft.requested_mpn, draft.requested_manufacturer
@@ -472,6 +485,9 @@ class CaseManager:
             timings["match_ms"] = (time.perf_counter() - stage_started) * 1000
 
             self._lines_by_case[case_id] = lines
+            for document in case.source_documents:
+                document.processing_status = "processed"
+                document.line_count = len(lines)
             self._refresh_source_quantity_conflicts(lines)
             for line in lines:
                 line.catalog_rematch_required = self._line_requires_catalog_rematch(line)
@@ -501,6 +517,9 @@ class CaseManager:
             failed_case = self._cases[case_id]
             failed_case.status = CaseStatus.FAILED
             failed_case.processing_stage = ProcessingStage.FAILED
+            for document in failed_case.source_documents:
+                document.processing_status = "failed"
+                document.error_code = "DOCUMENT_PARSER_ERROR"
             failed_case.source_coverage = exc.source_coverage or failed_case.source_coverage or [SourceCoverageUnit(
                 unit_id="document",
                 locator=SourceLocator(file_name=clean_name),
@@ -538,6 +557,9 @@ class CaseManager:
             failed_case = self._cases[case_id]
             failed_case.status = CaseStatus.FAILED
             failed_case.processing_stage = ProcessingStage.FAILED
+            for document in failed_case.source_documents:
+                document.processing_status = "failed"
+                document.error_code = "PROCESSING_UNEXPECTED_ERROR"
             if not failed_case.source_coverage:
                 failed_case.source_coverage = [SourceCoverageUnit(
                     unit_id="document",
@@ -573,6 +595,433 @@ class CaseManager:
         )
         self.state_store.enqueue_ingestion_job(case.case_id, case.source_file.sha256_digest)
         return case
+
+    def create_case_from_uploads(
+        self,
+        uploads: List[tuple[str, bytes]],
+        *,
+        title: Optional[str] = None,
+        customer_label: Optional[str] = None,
+        actor: str = "Inside Sales",
+        intake_warnings: Optional[List[ExtractionWarning]] = None,
+        defer_processing: bool = False,
+    ) -> RFQCase:
+        """Create one parent RFQ for a bounded set of independent source files."""
+        if not 2 <= len(uploads) <= MAX_SOURCE_DOCUMENTS_PER_CASE:
+            raise UploadValidationError(
+                f"An RFQ must contain between 2 and {MAX_SOURCE_DOCUMENTS_PER_CASE} source documents."
+            )
+        if sum(len(content) for _, content in uploads) > MAX_SOURCE_BYTES_PER_CASE:
+            raise UploadValidationError(
+                f"Combined RFQ source size exceeds the {MAX_SOURCE_BYTES_PER_CASE}-byte limit."
+            )
+
+        prepared = []
+        seen_digests = set()
+        for filename, content in uploads:
+            clean_name, source_type, digest = validate_file_upload(filename, content)
+            self._validate_intake_regions(clean_name, source_type, content)
+            file_id = f"file-{uuid.uuid4().hex[:10]}"
+            stored_name = f"{file_id}_{clean_name}"
+            duplicate = digest in seen_digests
+            seen_digests.add(digest)
+            prepared.append((clean_name, stored_name, content, source_type, digest, file_id, duplicate))
+
+        case_id = f"RFQ-{uuid.uuid4().hex[:8].upper()}"
+        documents = []
+        for clean_name, stored_name, content, source_type, digest, file_id, duplicate in prepared:
+            self.storage.save_file(case_id, stored_name, content)
+            metadata = SourceFileMetadata(
+                file_id=file_id,
+                file_name=clean_name,
+                storage_key=stored_name,
+                source_type=source_type,
+                mime_type=mimetypes.guess_type(clean_name)[0] or "application/octet-stream",
+                size_bytes=len(content),
+                sha256_digest=digest,
+            )
+            documents.append(RFQSourceDocument(
+                source_file=metadata,
+                processing_status="duplicate" if duplicate else "queued",
+                error_code="DUPLICATE_SOURCE" if duplicate else None,
+            ))
+
+        case = RFQCase(
+            case_id=case_id,
+            title=title or f"RFQ Intake - {documents[0].source_file.file_name}",
+            customer_label=customer_label,
+            status=CaseStatus.PROCESSING,
+            processing_stage=ProcessingStage.QUEUED if defer_processing else ProcessingStage.EXTRACTING,
+            source_type=documents[0].source_file.source_type,
+            source_file=documents[0].source_file,
+            source_documents=documents,
+            document_warnings=list(intake_warnings or []),
+        )
+        self._cases[case_id] = case
+        self._lines_by_case[case_id] = []
+        self._audit_events[case_id] = []
+        for document in documents:
+            if document.source_file.source_type == SourceType.EMAIL_TEXT:
+                raw_email = self.storage.get_file(
+                    case_id,
+                    document.source_file.storage_key or document.source_file.file_name,
+                )
+                if raw_email is not None:
+                    case.raw_text = raw_email.decode("utf-8", errors="replace")
+                    break
+        self._record_audit(
+            case_id,
+            actor,
+            AuditAction.CASE_CREATED,
+            notes=f"RFQ received with {len(documents)} source documents.",
+        )
+
+        if defer_processing:
+            if self.state_store is None:
+                self.storage.delete_case(case_id)
+                self._cases.pop(case_id, None)
+                self._lines_by_case.pop(case_id, None)
+                self._audit_events.pop(case_id, None)
+                raise RuntimeError("Asynchronous RFQ processing requires the SQLite state store.")
+            self._persist_case(case_id)
+            digest = hashlib.sha256("".join(doc.source_file.sha256_digest for doc in documents).encode()).hexdigest()
+            self.state_store.enqueue_ingestion_job(case_id, digest)
+            return case
+
+        return self._process_multiple_sources(case_id, actor=actor)
+
+    def _process_multiple_sources(
+        self,
+        case_id: str,
+        *,
+        actor: str,
+        job_id: Optional[str] = None,
+        worker_id: Optional[str] = None,
+        queue_wait_ms: Optional[float] = None,
+    ) -> RFQCase:
+        """Parse each source independently, retain partial successes and merge rows."""
+        case = self._cases[case_id]
+        if job_id and self.state_store and not self.state_store.owns_ingestion_job(job_id, worker_id or ""):
+            raise IngestionLeaseLostError("This worker no longer owns the RFQ processing lease.")
+        case.status = CaseStatus.PROCESSING
+        case.processing_stage = ProcessingStage.EXTRACTING
+        case.source_coverage = []
+        case.document_warnings = [warning for warning in case.document_warnings if warning.code.startswith("ANTIVIRUS_")]
+        self._lines_by_case[case_id] = []
+        prepared_lines: List[RFQLineItem] = []
+        warnings: List[ExtractionWarning] = []
+        coverage: List[SourceCoverageUnit] = []
+        seen_source_hashes = set()
+
+        with tempfile.TemporaryDirectory(prefix="rfq-multi-source-") as temp_dir:
+            temporary_storage = DocumentStorage(Path(temp_dir))
+            parser_manager = CaseManager(
+                self.catalog,
+                storage=temporary_storage,
+                state_store=None,
+                llm_extractor=self.llm_extractor,
+            )
+            for document in case.source_documents:
+                metadata = document.source_file
+                if metadata.sha256_digest in seen_source_hashes:
+                    document.processing_status = "duplicate"
+                    document.error_code = "DUPLICATE_SOURCE"
+                    warnings.append(ExtractionWarning(
+                        code="DUPLICATE_SOURCE",
+                        message=f"Duplicate attachment retained for review: {metadata.file_name}.",
+                    ))
+                    continue
+                seen_source_hashes.add(metadata.sha256_digest)
+                document.processing_status = "processing"
+                document.error_code = None
+                self._persist_case(case_id, job_id=job_id, worker_id=worker_id)
+                content = self.storage.get_file(case_id, metadata.storage_key or metadata.file_name)
+                if content is None:
+                    document.processing_status = "failed"
+                    document.error_code = "SOURCE_MISSING"
+                    warnings.append(ExtractionWarning(
+                        code="SOURCE_MISSING",
+                        message=f"Source attachment is missing and was not processed: {metadata.file_name}.",
+                        severity="error",
+                    ))
+                    continue
+                child_case = parser_manager.create_case_from_upload(
+                    filename=metadata.file_name,
+                    content=content,
+                    title=case.title,
+                    customer_label=case.customer_label,
+                    actor=actor,
+                )
+                child_lines = parser_manager.get_lines(child_case.case_id)
+                child_warnings = list(child_case.document_warnings)
+                child_coverage = list(child_case.source_coverage)
+                if child_case.status == CaseStatus.FAILED:
+                    document.processing_status = "failed"
+                    document.error_code = child_warnings[0].code if child_warnings else "EXTRACTION_FAILED"
+                    warnings.extend(child_warnings or [ExtractionWarning(
+                        code="ATTACHMENT_EXTRACTION_FAILED",
+                        message=f"Attachment could not be processed: {metadata.file_name}.",
+                        severity="error",
+                    )])
+                else:
+                    document.processing_status = "processed"
+                    document.line_count = len(child_lines)
+                    for child_line in child_lines:
+                        source_locator = child_line.source_locator.model_copy(update={
+                            "file_name": metadata.file_name,
+                            "source_file_id": metadata.file_id,
+                        })
+                        provenance = {
+                            field: item.model_copy(update={
+                                "source_locator": item.source_locator.model_copy(update={
+                                    "file_name": metadata.file_name,
+                                    "source_file_id": metadata.file_id,
+                                })
+                            })
+                            for field, item in child_line.field_provenance.items()
+                        }
+                        prepared_lines.append(child_line.model_copy(update={
+                            "case_id": case_id,
+                            "line_id": f"line-{uuid.uuid4().hex[:8]}",
+                            "line_number": len(prepared_lines) + 1,
+                            "source_locator": source_locator,
+                            "field_provenance": provenance,
+                        }))
+                    warnings.extend(child_warnings)
+                for unit in child_coverage:
+                    locator = unit.locator.model_copy(update={
+                        "file_name": metadata.file_name,
+                        "source_file_id": metadata.file_id,
+                    })
+                    coverage.append(unit.model_copy(update={
+                        "unit_id": f"{metadata.file_id}:{unit.unit_id}",
+                        "locator": locator,
+                    }))
+
+        self._flag_cross_source_duplicates(case_id, prepared_lines, warnings)
+        self._lines_by_case[case_id] = prepared_lines
+        case.source_coverage = coverage
+        case.document_warnings.extend(warnings)
+        if not prepared_lines:
+            case.status = CaseStatus.FAILED
+            case.processing_stage = ProcessingStage.FAILED
+            case.document_warnings.append(ExtractionWarning(
+                code="NO_ATTACHMENTS_EXTRACTED",
+                message="No line items could be extracted from the submitted source documents.",
+                severity="error",
+            ))
+            case.unresolved_count = 0
+            self._persist_case(case_id, job_id=job_id, worker_id=worker_id)
+            return case
+        case.processing_stage = ProcessingStage.READY_FOR_REVIEW
+        self._record_audit(
+            case_id,
+            actor,
+            AuditAction.PARSED,
+            notes=f"Processed {len(case.source_documents)} source documents; retained {len(prepared_lines)} line items.",
+        )
+        self._refresh_case_metrics(case_id, job_id=job_id, worker_id=worker_id)
+        self._persist_case(case_id, job_id=job_id, worker_id=worker_id)
+        return case
+
+    def _flag_cross_source_duplicates(
+        self, case_id: str, lines: List[RFQLineItem], warnings: List[ExtractionWarning]
+    ) -> None:
+        groups: Dict[str, List[RFQLineItem]] = {}
+        for line in lines:
+            mpn = normalize_mpn(line.requested_mpn)
+            if mpn:
+                groups.setdefault(mpn, []).append(line)
+        for _, duplicates in groups.items():
+            if len({line.source_locator.source_file_id for line in duplicates}) < 2:
+                continue
+            quantities = {line.quantity for line in duplicates}
+            manufacturers = {
+                normalize_manufacturer(line.requested_manufacturer).casefold()
+                for line in duplicates if normalize_manufacturer(line.requested_manufacturer)
+            }
+            revisions = set()
+            for line in duplicates:
+                evidence = " ".join(filter(None, [line.description, line.source_locator.text_snippet]))
+                match = re.search(
+                    r"\b(?:rev(?:ision)?\.?\s*[:#-]?\s*)([A-Za-z0-9][A-Za-z0-9._-]*)",
+                    evidence,
+                    re.IGNORECASE,
+                )
+                if match:
+                    revisions.add(match.group(1).casefold())
+            conflicts = []
+            if len(manufacturers) > 1:
+                conflicts.append((
+                    "SOURCE_MANUFACTURER_CONFLICT",
+                    "The same part number is attributed to different manufacturers across attachments. Verify the source documents.",
+                ))
+            if len(revisions) > 1:
+                conflicts.append((
+                    "SOURCE_REVISION_CONFLICT",
+                    "The same manufacturer part has different revision details across attachments. Verify the required revision.",
+                ))
+            if len(quantities) > 1:
+                conflicts.append((
+                    "SOURCE_QUANTITY_CONFLICT",
+                    "The same manufacturer part appears in multiple attachments with different quantities. Compare the source documents.",
+                ))
+            if not conflicts:
+                conflicts.append((
+                    "DUPLICATE_SOURCE_LINE",
+                    "The same manufacturer part appears in multiple attachments. Confirm whether this is a duplicate request or separate demand.",
+                ))
+            for line in duplicates:
+                line.extraction_status = ExtractionStatus.NEEDS_CORRECTION
+                for code, message in conflicts:
+                    if not any(warning.code == code for warning in line.extraction_warnings):
+                        line.extraction_warnings.append(ExtractionWarning(code=code, message=message))
+                    if not any(warning.code == code for warning in warnings):
+                        warnings.append(ExtractionWarning(code=code, message=message))
+                if line.review_decision == ReviewDecision.APPROVED:
+                    old_decision = line.review_decision
+                    line.review_decision = ReviewDecision.PENDING
+                    line.reviewed_by = None
+                    line.reviewed_at = None
+                    line.version += 1
+                    self._record_audit(
+                        case_id,
+                        "RFQ source conflict detection",
+                        AuditAction.LINE_FLAGGED,
+                        line_id=line.line_id,
+                        field_name="review_decision",
+                        old_value=old_decision.value,
+                        new_value=ReviewDecision.PENDING.value,
+                        notes="A new source attachment introduced a duplicate or quantity conflict; prior approval was revoked.",
+                    )
+
+        # Distinct MPNs are never collapsed. When the manufacturer and full
+        # normalized description are identical across sources, route the
+        # differing identifiers to a reviewer as a possible source conflict.
+        description_groups: Dict[tuple[str, str], List[RFQLineItem]] = {}
+        for line in lines:
+            manufacturer = normalize_manufacturer(line.requested_manufacturer)
+            description = re.sub(r"\s+", " ", line.description or "").strip().casefold()
+            mpn = normalize_mpn(line.requested_mpn)
+            if manufacturer and mpn:
+                comparable_description = re.sub(re.escape(mpn.casefold()), " ", description)
+                comparable_description = re.sub(
+                    re.escape(manufacturer.casefold()), " ", comparable_description
+                )
+                comparable_description = re.sub(r"\s+", " ", comparable_description).strip(" -,:;.")
+                if len(comparable_description) >= 10:
+                    description_groups.setdefault(
+                        (manufacturer.casefold(), comparable_description), []
+                    ).append(line)
+        for candidates in description_groups.values():
+            if len({line.source_locator.source_file_id for line in candidates}) < 2:
+                continue
+            if len({normalize_mpn(line.requested_mpn) for line in candidates}) < 2:
+                continue
+            code = "SOURCE_PART_NUMBER_CONFLICT"
+            message = "The same manufacturer and description appear with different part numbers across attachments. Verify whether these are the same requested item."
+            if not any(warning.code == code for warning in warnings):
+                warnings.append(ExtractionWarning(code=code, message=message))
+            for line in candidates:
+                line.extraction_status = ExtractionStatus.NEEDS_CORRECTION
+                if not any(warning.code == code for warning in line.extraction_warnings):
+                    line.extraction_warnings.append(ExtractionWarning(code=code, message=message))
+
+    def retry_source_document(self, case_id: str, source_file_id: str, actor: str) -> RFQCase:
+        """Retry one failed attachment without replacing successfully processed sources."""
+        with self._review_lock(case_id):
+            case = self._cases.get(case_id)
+            if case is None:
+                raise ValueError("RFQ case not found.")
+            document = next(
+                (item for item in case.source_documents if item.source_file.file_id == source_file_id),
+                None,
+            )
+            if document is None:
+                raise ValueError("RFQ source document not found.")
+            if document.processing_status != "failed":
+                raise ValueError("Only a failed source document can be retried.")
+            content = self.storage.get_file(
+                case_id,
+                document.source_file.storage_key or document.source_file.file_name,
+            )
+            if content is None:
+                raise ValueError("The original source attachment is unavailable.")
+
+            with tempfile.TemporaryDirectory(prefix="rfq-source-retry-") as temp_dir:
+                parser_manager = CaseManager(
+                    self.catalog,
+                    storage=DocumentStorage(Path(temp_dir)),
+                    state_store=None,
+                    llm_extractor=self.llm_extractor,
+                )
+                child_case = parser_manager.create_case_from_upload(
+                    filename=document.source_file.file_name,
+                    content=content,
+                    title=case.title,
+                    customer_label=case.customer_label,
+                    actor=actor,
+                )
+                if child_case.status == CaseStatus.FAILED:
+                    document.error_code = (
+                        child_case.document_warnings[0].code
+                        if child_case.document_warnings else "ATTACHMENT_EXTRACTION_FAILED"
+                    )
+                    self._persist_case(case_id)
+                    return case
+                child_lines = parser_manager.get_lines(child_case.case_id)
+                lines = self._lines_by_case.setdefault(case_id, [])
+                for child_line in child_lines:
+                    locator = child_line.source_locator.model_copy(update={
+                        "file_name": document.source_file.file_name,
+                        "source_file_id": document.source_file.file_id,
+                    })
+                    provenance = {
+                        field: item.model_copy(update={
+                            "source_locator": item.source_locator.model_copy(update={
+                                "file_name": document.source_file.file_name,
+                                "source_file_id": document.source_file.file_id,
+                            })
+                        })
+                        for field, item in child_line.field_provenance.items()
+                    }
+                    lines.append(child_line.model_copy(update={
+                        "case_id": case_id,
+                        "line_id": f"line-{uuid.uuid4().hex[:8]}",
+                        "line_number": len(lines) + 1,
+                        "source_locator": locator,
+                        "field_provenance": provenance,
+                    }))
+                document.processing_status = "processed"
+                document.error_code = None
+                document.line_count = len(child_lines)
+                case.source_coverage = [
+                    unit for unit in case.source_coverage
+                    if not unit.unit_id.startswith(f"{source_file_id}:")
+                ] + [
+                    unit.model_copy(update={
+                        "unit_id": f"{source_file_id}:{unit.unit_id}",
+                        "locator": unit.locator.model_copy(update={
+                            "file_name": document.source_file.file_name,
+                            "source_file_id": source_file_id,
+                        }),
+                    })
+                    for unit in child_case.source_coverage
+                ]
+                new_warnings = list(child_case.document_warnings)
+            conflict_warnings: List[ExtractionWarning] = []
+            self._flag_cross_source_duplicates(case_id, lines, conflict_warnings)
+            case.document_warnings.extend(new_warnings)
+            case.document_warnings.extend(conflict_warnings)
+            self._record_audit(
+                case_id,
+                actor,
+                AuditAction.PARSED,
+                notes=f"Retried source document {document.source_file.file_name}; extracted {document.line_count} line items.",
+            )
+            self._refresh_case_metrics(case_id)
+            self._persist_case(case_id)
+            return case
 
     def enqueue_case_from_text(
         self, raw_text: str, title: Optional[str] = None,
@@ -617,7 +1066,26 @@ class CaseManager:
             raise DocumentParserError("Queued RFQ source is missing.")
         if case.status != CaseStatus.PROCESSING:
             return case
-        content = self.storage.get_file(case_id, case.source_file.file_name)
+        if len(case.source_documents) > 1:
+            if self.state_store is None:
+                raise DocumentParserError("Queued RFQ sources require the SQLite state store.")
+            job = self.state_store.get_ingestion_job(case_id)
+            expected_digest = hashlib.sha256(
+                "".join(document.source_file.sha256_digest for document in case.source_documents).encode()
+            ).hexdigest()
+            if not job or job.get("source_digest") != expected_digest:
+                raise DocumentParserError("Queued RFQ source manifest does not match the ingestion job.")
+            return self._process_multiple_sources(
+                case_id,
+                actor="RFQ ingestion worker",
+                job_id=job_id,
+                worker_id=worker_id,
+                queue_wait_ms=queue_wait_ms,
+            )
+        content = self.storage.get_file(
+            case_id,
+            case.source_file.storage_key or case.source_file.file_name,
+        )
         if content is None:
             raise DocumentParserError("Queued RFQ upload is missing from local storage.")
         result = self.create_case_from_upload(
@@ -1481,12 +1949,13 @@ class CaseManager:
     @staticmethod
     def _sample_group(line: RFQLineItem) -> str:
         locator = line.source_locator
+        source = locator.source_file_id or locator.file_name
         location = locator.sheet_name or (f"page-{locator.page_number}" if locator.page_number else "text")
         extraction_path = (
             "llm" if any(w.code == "LLM_PROPOSED_EXTRACTION" for w in line.extraction_warnings)
             else "structured"
         )
-        return f"{extraction_path}|{location}"
+        return f"{source}|{extraction_path}|{location}"
 
     def get_review_plan(self, case_id: str) -> ReviewPlan:
         self._sync_case_catalog_metrics(case_id)
@@ -1563,7 +2032,9 @@ class CaseManager:
                 else f"PDF page {locator.page_number}" if locator.page_number
                 else "text/document"
             )
-            sample_rationale[line_id] = f"Representative clean row from {path} · {location}"
+            sample_rationale[line_id] = (
+                f"Representative clean row from {path} · {location} · {locator.file_name}"
+            )
         sampled = set(sample_ids)
         remaining = [
             line.line_id for line in eligible

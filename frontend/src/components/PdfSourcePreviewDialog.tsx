@@ -16,8 +16,9 @@ export function PdfSourcePreviewDialog({ caseId, locator, onClose }: PdfSourcePr
   const { dialogRef, closeButtonRef } = useSourceDrawer(onClose);
   const pageNumber = locator.page_number ?? 1;
   const [x0, y0, x1, y1] = locator.page_bbox ?? [0, 0, 0, 0];
-  const sourceUrl = `/api/proxy/api/rfqs/${encodeURIComponent(caseId)}/source/pages/${pageNumber}`;
-  const originalUrl = `/api/proxy/api/rfqs/${encodeURIComponent(caseId)}/source#page=${pageNumber}`;
+  const sourceQuery = locator.source_file_id ? `?source_file_id=${encodeURIComponent(locator.source_file_id)}` : "";
+  const sourceUrl = `/api/proxy/api/rfqs/${encodeURIComponent(caseId)}/source/pages/${pageNumber}${sourceQuery}`;
+  const originalUrl = `/api/proxy/api/rfqs/${encodeURIComponent(caseId)}/source${sourceQuery}#page=${pageNumber}`;
 
   return (
     <div className="fixed inset-0 z-[80] bg-[#142126]/30" role="presentation" onMouseDown={(event) => {

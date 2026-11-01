@@ -132,6 +132,7 @@ export async function getSpreadsheetSourcePreview(
   sheetName: string,
   rowNumber: number,
   targetCells: string[] = [],
+  sourceFileId?: string,
 ): Promise<SpreadsheetSourcePreview> {
   const query = new URLSearchParams({
     sheet_name: sheetName,
@@ -139,6 +140,7 @@ export async function getSpreadsheetSourcePreview(
     radius: "4",
   });
   targetCells.forEach((cell) => query.append("target_cells", cell));
+  if (sourceFileId) query.set("source_file_id", sourceFileId);
   return getJson<SpreadsheetSourcePreview>(
     `/api/rfqs/${encodeURIComponent(caseId)}/source/preview?${query.toString()}`,
     "Failed to open the source worksheet",
@@ -192,6 +194,28 @@ export async function createCaseFromText(
     body: formData,
   });
   if (!res.ok) throw new Error(await readError(res, "Failed to parse text"));
+  return res.json();
+}
+
+export async function createCaseFromSources(
+  files: File[],
+  pastedText: string,
+  title?: string,
+  customer?: string,
+): Promise<RFQCase> {
+  const formData = new FormData();
+  files.forEach((file) => formData.append("files", file));
+  if (pastedText.trim()) formData.append("pasted_text", pastedText);
+  if (title) formData.append("title", title);
+  if (customer) formData.append("customer_label", customer);
+  const res = await fetch(`${API_BASE}/api/rfqs`, { method: "POST", body: formData });
+  if (!res.ok) throw new Error(await readError(res, "RFQ intake failed"));
+  return res.json();
+}
+
+export async function retrySourceDocument(caseId: string, sourceFileId: string): Promise<RFQCase> {
+  const res = await fetch(`${API_BASE}/api/rfqs/${encodeURIComponent(caseId)}/sources/${encodeURIComponent(sourceFileId)}/retry`, { method: "POST" });
+  if (!res.ok) throw new Error(await readError(res, "Attachment retry failed"));
   return res.json();
 }
 

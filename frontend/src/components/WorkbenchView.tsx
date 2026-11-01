@@ -32,6 +32,7 @@ import {
   updateLineItem,
   listCaseExports,
   listCatalog,
+  retrySourceDocument,
 } from "@/services/api";
 import {
   RFQCase,
@@ -162,6 +163,7 @@ export function WorkbenchView({
   } | null>(null);
   const [editValue, setEditValue] = useState("");
   const [selectedLine, setSelectedLine] = useState<RFQLineItem | null>(null);
+  const selectedSource = caseData.source_documents?.find((document) => document.source_file.file_id === selectedLine?.source_locator.source_file_id)?.source_file ?? caseData.source_file;
   const [showDetail, setShowDetail] = useState(false);
   const [rematchingLineId, setRematchingLineId] = useState<string | null>(null);
   const [showSourcePreview, setShowSourcePreview] = useState(false);
@@ -501,9 +503,9 @@ export function WorkbenchView({
         </div>
         {documentsError && <p className="mt-3 text-sm text-[#84241f]" role="alert">{documentsError}</p>}
         <ul className="mt-3 divide-y divide-[#edf1f2]">
-          {caseData.source_file && <li className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0"><span className="flex min-w-0 items-center gap-2 text-sm text-[#35484e]"><FileText size={15} className="shrink-0 text-[#667980]" aria-hidden="true" /><span className="truncate">{caseData.source_file.file_name}</span><span className="text-xs text-[#667980]">Original request</span></span><a className="text-xs font-medium underline underline-offset-2" href={`/api/proxy/api/rfqs/${encodeURIComponent(caseData.case_id)}/source`} target="_blank" rel="noreferrer">Open</a></li>}
+          {(caseData.source_documents?.length ? caseData.source_documents : caseData.source_file ? [{ source_file: caseData.source_file, processing_status: "processed", line_count: caseData.line_count, error_code: null }] : []).map((source) => <li key={source.source_file.file_id} className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0"><span className="flex min-w-0 items-center gap-2 text-sm text-[#35484e]"><FileText size={15} className="shrink-0 text-[#667980]" aria-hidden="true" /><span className="truncate">{source.source_file.file_name}</span><span className="text-xs text-[#667980]">{source.processing_status} · {source.line_count} lines</span>{source.error_code && <span className="text-xs text-[#84241f]">{source.error_code}</span>}</span><span className="flex items-center gap-3">{source.processing_status === "failed" && <button className="text-xs font-medium underline underline-offset-2" onClick={() => void retrySourceDocument(caseData.case_id, source.source_file.file_id).then(onCaseUpdated).catch((error: unknown) => setDocumentsError(error instanceof Error ? error.message : "Attachment retry failed."))}>Retry</button>}<a className="text-xs font-medium underline underline-offset-2" href={`/api/proxy/api/rfqs/${encodeURIComponent(caseData.case_id)}/source?source_file_id=${encodeURIComponent(source.source_file.file_id)}`} target="_blank" rel="noreferrer">Open</a></span></li>)}
           {documents.map((document) => <li key={document.export_id} className="flex flex-wrap items-center justify-between gap-2 py-2"><span className="flex min-w-0 items-center gap-2 text-sm text-[#35484e]"><FileText size={15} className="shrink-0 text-[#667980]" aria-hidden="true" /><span className="truncate">{document.file_name}</span><span className="text-xs text-[#667980]">Draft · {document.approved_lines}/{document.total_lines} approved</span></span>{document.file_available ? <a className="text-xs font-medium underline underline-offset-2" href={`/api/proxy${document.download_url}`} target="_blank" rel="noreferrer">Open</a> : <span className="text-xs text-[#84241f]" role="alert">{document.problem || "File unavailable"}</span>}</li>)}
-          {!caseData.source_file && documents.length === 0 && !documentsLoading && <li className="py-2 text-sm text-[#667980]">No source or generated documents are recorded for this request.</li>}
+          {!caseData.source_file && !(caseData.source_documents?.length) && documents.length === 0 && !documentsLoading && <li className="py-2 text-sm text-[#667980]">No source or generated documents are recorded for this request.</li>}
         </ul>
         {(caseData.document_warnings ?? []).length > 0 && <div className="mt-2 border-t border-[#edf1f2] pt-2" aria-label="Document problems">{(caseData.document_warnings ?? []).map((warning, index) => <p key={`${warning.code}-${index}`} className="mt-1 flex items-start gap-2 text-xs text-[#815408]" role={warning.severity.toLowerCase() === "error" ? "alert" : "status"}><AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />{warning.message}</p>)}</div>}
       </section>
@@ -1085,18 +1087,18 @@ export function WorkbenchView({
                 <dd style={{ color: "var(--color-brown-700)" }}>
                   {formatLocator(selectedLine.source_locator)}
                   <div className="mt-2">
-                    {(caseData.source_file?.file_name.toLowerCase().endsWith(".xlsx") || caseData.source_file?.file_name.toLowerCase().endsWith(".csv")) &&
+                    {(selectedSource?.file_name.toLowerCase().endsWith(".xlsx") || selectedSource?.file_name.toLowerCase().endsWith(".csv")) &&
                     selectedLine.source_locator.sheet_name && selectedLine.source_locator.row_number ? (
                       <button type="button" onClick={() => setShowSourcePreview(true)} className="rfq-secondary">
                         View source evidence
                       </button>
-                    ) : caseData.source_file?.file_name.toLowerCase().endsWith(".pdf") && selectedLine.source_locator.page_number ? (
+                    ) : selectedSource?.file_name.toLowerCase().endsWith(".pdf") && selectedLine.source_locator.page_number ? (
                       <button type="button" onClick={() => setShowPdfSourcePreview(true)} className="rfq-secondary">
                         View source evidence
                       </button>
                     ) : (
                       <a
-                        href={`/api/proxy/api/rfqs/${encodeURIComponent(caseData.case_id)}/source${selectedLine.source_locator.page_number ? `#page=${selectedLine.source_locator.page_number}` : ""}`}
+                        href={`/api/proxy/api/rfqs/${encodeURIComponent(caseData.case_id)}/source?source_file_id=${encodeURIComponent(selectedLine.source_locator.source_file_id ?? selectedSource?.file_id ?? "")}${selectedLine.source_locator.page_number ? `#page=${selectedLine.source_locator.page_number}` : ""}`}
                         target="_blank"
                         rel="noreferrer"
                         className="rfq-secondary inline-flex"
@@ -1249,6 +1251,7 @@ export function WorkbenchView({
           sheetName={selectedLine.source_locator.sheet_name}
           rowNumber={selectedLine.source_locator.row_number}
           targetCells={Object.values(selectedLine.source_locator.field_source_cells ?? {})}
+          sourceFileId={selectedLine.source_locator.source_file_id ?? undefined}
           onClose={closeSourcePreview}
         />
       )}

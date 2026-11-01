@@ -29,9 +29,8 @@ test("paste RFQ, approve every line, export and download a draft worksheet", asy
 
   const ingestDialog = page.getByRole("dialog", { name: "New RFQ" });
   await expect(ingestDialog).toBeVisible();
-  await ingestDialog.getByRole("button", { name: /Paste text/i }).click();
   await ingestDialog
-    .getByPlaceholder(/Paste email or RFQ text here/i)
+    .getByRole("textbox", { name: "Customer email text" })
     .fill(RFQ_TEXT);
   await ingestDialog
     .getByPlaceholder("Optional case title")
@@ -129,9 +128,8 @@ test("show conflicting quantities from message and attachment as a review blocke
   await page.getByRole("button", { name: /New RFQ/i }).first().click();
 
   const ingestDialog = page.getByRole("dialog", { name: "New RFQ" });
-  await ingestDialog.getByRole("button", { name: /Paste text/i }).click();
   await ingestDialog
-    .getByPlaceholder(/Paste email or RFQ text here/i)
+    .getByRole("textbox", { name: "Customer email text" })
     .fill(CONFLICTING_SOURCE_TEXT);
   await ingestDialog
     .getByPlaceholder("Optional case title")
@@ -149,6 +147,34 @@ test("show conflicting quantities from message and attachment as a review blocke
   await expect(exportDialog.getByText("NEEDS_REVIEW", { exact: true })).toBeVisible();
   await expect(exportDialog.getByText("Export ready!")).toHaveCount(0);
   await expect(exportDialog.getByRole("link", { name: /Download worksheet/i })).toHaveCount(0);
+});
+
+test("combine pasted customer email with two source attachments in one reviewed case", async ({ page }) => {
+  await page.goto("/workspace");
+  await page.getByRole("button", { name: /New RFQ/i }).first().click();
+  const intake = page.getByRole("dialog", { name: "New RFQ" });
+  await intake.getByRole("textbox", { name: "Customer email text" }).fill(
+    "Please quote 3 units Schneider Electric LC1D09BD contactor."
+  );
+  await intake.locator('input[type="file"]').setInputFiles([
+    { name: "buyer-parts-a.txt", mimeType: "text/plain", buffer: Buffer.from("2 units Siemens 6ES7223-1BL32-0XB0 digital module") },
+    { name: "buyer-parts-b.txt", mimeType: "text/plain", buffer: Buffer.from("5 units Phoenix Contact 2900364 terminal block") },
+  ]);
+  await expect(intake.getByText(/buyer-parts-a.txt/)).toBeVisible();
+  await expect(intake.getByText(/buyer-parts-b.txt/)).toBeVisible();
+  await intake.getByPlaceholder("Optional case title").fill("Mixed sources E2E");
+  const created = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/api/rfqs"));
+  await intake.getByRole("button", { name: /Extract line items/i }).click();
+  const createResponse = await created;
+  expect(createResponse.status()).toBe(200);
+  expect((await createResponse.json()).source_documents).toHaveLength(3);
+  await expect(page.getByRole("heading", { name: "Mixed sources E2E" })).toBeVisible({ timeout: 30_000 });
+  const documents = page.getByRole("region", { name: "Documents" });
+  await expect(documents.getByText("customer_email.txt")).toBeVisible({ timeout: 30_000 });
+  await expect(documents.getByText("buyer-parts-a.txt")).toBeVisible();
+  await expect(documents.getByText("buyer-parts-b.txt")).toBeVisible();
+  await expect(page.getByText(/3 lines ·/i)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/sample spans 3 source and extraction groups/i)).toBeVisible();
 });
 
 test("open an extracted XLSX line at its source row and field cells", async ({ page }) => {

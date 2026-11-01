@@ -20,9 +20,11 @@ function sourceHref(caseData: RFQCase, source: QuoteDraftSource) {
     const proposalId = source.file_id.slice("CATUP-".length);
     return `/api/proxy/api/catalogs/updates/${encodeURIComponent(proposalId)}/source`;
   }
-  if (source.file_id.startsWith("RFQ-") || source.file_id === caseData.source_file?.file_id) {
+  const sourceDocument = caseData.source_documents?.find((document) => document.source_file.file_id === source.file_id);
+  if (source.file_id.startsWith("RFQ-") || source.file_id === caseData.source_file?.file_id || sourceDocument) {
+    const query = sourceDocument ? `?source_file_id=${encodeURIComponent(source.file_id)}` : "";
     const page = source.page == null ? "" : `#page=${source.page}`;
-    return `/api/proxy/api/rfqs/${encodeURIComponent(caseData.case_id)}/source${page}`;
+    return `/api/proxy/api/rfqs/${encodeURIComponent(caseData.case_id)}/source${query}${page}`;
   }
   return null;
 }

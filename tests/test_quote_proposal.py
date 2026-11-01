@@ -96,6 +96,58 @@ def test_quote_proposal_only_maps_retrieved_sources_and_api_owns_values(tmp_path
     assert "list price 42.5 USD" in quote_line["sources"][1]["text_excerpt"]
 
 
+def test_multi_source_quote_proposal_keeps_the_source_id_for_each_line(tmp_path, monkeypatch):
+    api = importlib.import_module("rfq_assistant.api.app")
+    catalog = CatalogRepository()
+    for sku, manufacturer, mpn, price in [
+        ("SKU-SYN-1", "Schneider Electric", "LC1D09BD", 42.5),
+        ("SKU-SYN-2", "Phoenix Contact", "2900364", 3.25),
+    ]:
+        catalog.add_item(CatalogItem(
+            internal_sku=sku,
+            manufacturer=manufacturer,
+            manufacturer_part_number=mpn,
+            description="Synthetic component",
+            list_price=price,
+            currency="USD",
+            stock_qty=20,
+            catalog_version="synthetic-v1",
+        ))
+    provider = EvidenceEchoLuna()
+    manager = CaseManager(
+        catalog=catalog,
+        storage=DocumentStorage(tmp_path / "files"),
+        llm_extractor=GroundedLLMExtractor(provider),
+    )
+    case = manager.create_case_from_uploads([
+        ("buyer-a.txt", b"2 pcs Schneider Electric LC1D09BD contactor"),
+        ("buyer-b.txt", b"3 pcs Phoenix Contact 2900364 terminal block"),
+    ])
+    expected_source_ids = {line.requested_mpn: line.source_locator.source_file_id for line in manager.get_lines(case.case_id)}
+    for line in manager.get_lines(case.case_id):
+        manager.update_line(case.case_id, line.line_id, RFQLineItemUpdate(
+            expected_version=line.version,
+            review_decision=ReviewDecision.APPROVED,
+            actor="Synthetic reviewer",
+        ))
+
+    monkeypatch.setattr(api, "catalog_repo", catalog)
+    monkeypatch.setattr(api, "case_manager", manager)
+    monkeypatch.setattr(api, "commercial_service", QuotationCommercialService())
+    monkeypatch.setattr(api, "catalog_update_service", type("NoUpdates", (), {"list_proposals": lambda self: []})())
+    monkeypatch.delenv("REQUIRE_AUTH", raising=False)
+    monkeypatch.delenv("PILOT_API_KEYS", raising=False)
+
+    response = TestClient(api.app).post(f"/v1/rfqs/{case.case_id}/draft-quote")
+    assert response.status_code == 200, response.text
+    draft = response.json()
+    buyer_sources = {
+        line["requested_mpn"]: line["sources"][0]["file_id"]
+        for line in draft["lines"]
+    }
+    assert buyer_sources == expected_source_ids
+
+
 def test_quote_evidence_mapper_rejects_nonverbatim_buyer_citation():
     client = EvidenceEchoLuna(wrong_quote=True)
     service = GroundedQuoteProposalService(client)

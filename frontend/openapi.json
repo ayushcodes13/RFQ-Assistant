@@ -191,6 +191,21 @@
             ],
             "title": "File"
           },
+          "files": {
+            "anyOf": [
+              {
+                "items": {
+                  "contentMediaType": "application/octet-stream",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files"
+          },
           "pasted_text": {
             "anyOf": [
               {
@@ -1207,6 +1222,13 @@
             "title": "Source Coverage",
             "type": "array"
           },
+          "source_documents": {
+            "items": {
+              "$ref": "#/components/schemas/RFQSourceDocument"
+            },
+            "title": "Source Documents",
+            "type": "array"
+          },
           "source_file": {
             "anyOf": [
               {
@@ -1445,6 +1467,13 @@
               "$ref": "#/components/schemas/SourceCoverageUnit"
             },
             "title": "Source Coverage",
+            "type": "array"
+          },
+          "source_documents": {
+            "items": {
+              "$ref": "#/components/schemas/RFQSourceDocument"
+            },
+            "title": "Source Documents",
             "type": "array"
           },
           "source_file": {
@@ -1822,6 +1851,47 @@
         "title": "RFQLineItemUpdateRequest",
         "type": "object"
       },
+      "RFQSourceDocument": {
+        "description": "One original email or attachment and its independent processing result.",
+        "properties": {
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "line_count": {
+            "default": 0,
+            "title": "Line Count",
+            "type": "integer"
+          },
+          "processing_status": {
+            "default": "queued",
+            "enum": [
+              "queued",
+              "processing",
+              "processed",
+              "failed",
+              "duplicate"
+            ],
+            "title": "Processing Status",
+            "type": "string"
+          },
+          "source_file": {
+            "$ref": "#/components/schemas/SourceFileMetadata"
+          }
+        },
+        "required": [
+          "source_file"
+        ],
+        "title": "RFQSourceDocument",
+        "type": "object"
+      },
       "RematchLineRequest": {
         "description": "Explicitly rematch one stale line against the active catalog snapshot.",
         "properties": {
@@ -2105,6 +2175,17 @@
           "source_type": {
             "$ref": "#/components/schemas/SourceType"
           },
+          "storage_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Key"
+          },
           "uploaded_at": {
             "format": "date-time",
             "title": "Uploaded At",
@@ -2206,6 +2287,17 @@
               }
             ],
             "title": "Sheet Name"
+          },
+          "source_file_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source File Id"
           },
           "text_snippet": {
             "anyOf": [
@@ -4063,6 +4155,22 @@
             }
           },
           {
+            "in": "query",
+            "name": "source_file_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source File Id"
+            }
+          },
+          {
             "in": "header",
             "name": "X-API-Key",
             "required": false,
@@ -4139,6 +4247,22 @@
             "schema": {
               "title": "Page Number",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_file_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source File Id"
             }
           },
           {
@@ -4264,6 +4388,22 @@
             }
           },
           {
+            "in": "query",
+            "name": "source_file_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source File Id"
+            }
+          },
+          {
             "in": "header",
             "name": "X-API-Key",
             "required": false,
@@ -4319,6 +4459,87 @@
           }
         },
         "summary": "Get Spreadsheet Source Preview"
+      }
+    },
+    "/api/rfqs/{case_id}/sources/{source_file_id}/retry": {
+      "post": {
+        "description": "Retry one failed attachment while preserving other source results.",
+        "operationId": "retry_rfq_source_document_api_rfqs__case_id__sources__source_file_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_file_id",
+            "required": true,
+            "schema": {
+              "title": "Source File Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RFQCase"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Rfq Source Document"
       }
     },
     "/api/session": {

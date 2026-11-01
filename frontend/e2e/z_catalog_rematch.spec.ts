@@ -7,8 +7,7 @@ test("catalog replacement flags old matches and supports reviewed rematching", a
   await page.getByRole("button", { name: /New RFQ/i }).first().click();
 
   const intake = page.getByRole("dialog", { name: "New RFQ" });
-  await intake.getByRole("button", { name: /Paste text/i }).click();
-  await intake.getByPlaceholder(/Paste email or RFQ text here/i).fill(RFQ_TEXT);
+  await intake.getByRole("textbox", { name: "Customer email text" }).fill(RFQ_TEXT);
   await intake.getByPlaceholder("Optional case title").fill("Catalog rematch end-to-end");
   const createResponse = page.waitForResponse((response) =>
     response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/api/rfqs"),
