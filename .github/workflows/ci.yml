@@ -54,8 +54,7 @@ jobs:
             tests/test_persistence_fault_matrix.py \
             tests/test_redis_provider_pacing.py
 
-      - name: Informational type check (ratchet toward zero errors)
-        continue-on-error: true
+      - name: Python type check
         run: mypy --ignore-missing-imports rfq_assistant
 
       - name: Run pytest
