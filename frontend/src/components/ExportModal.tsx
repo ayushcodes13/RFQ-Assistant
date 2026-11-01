@@ -9,7 +9,7 @@ import {
   CheckCircle,
   FileDown,
 } from "lucide-react";
-import { exportWorksheet, resolveDownloadUrl } from "@/services/api";
+import { exportWorksheet, getCase, resolveDownloadUrl } from "@/services/api";
 import { ExportManifest, RFQCase } from "@/types";
 
 interface ExportModalProps {
@@ -28,6 +28,9 @@ export function ExportModal({
   const [manifest, setManifest] = useState<ExportManifest | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [freshCase, setFreshCase] = useState<RFQCase | null>(null);
+  const [checkingStatus, setCheckingStatus] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
@@ -35,6 +38,24 @@ export function ExportModal({
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  // Always fetch the authoritative case. Parent case props can be older
+  // than edits from another tab, another reviewer, or the current workbench.
+  useEffect(() => {
+    if (!isOpen) return;
+    let active = true;
+    setFreshCase(null);
+    setStatusError(null);
+    setAllowPartial(false);
+    setCheckingStatus(true);
+    void getCase(caseData.case_id)
+      .then((value) => { if (active) setFreshCase(value); })
+      .catch(() => {
+        if (active) setStatusError("Unable to check the latest case status. Close and reopen the export dialog.");
+      })
+      .finally(() => { if (active) setCheckingStatus(false); });
+    return () => { active = false; };
+  }, [isOpen, caseData.case_id]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -81,6 +102,18 @@ export function ExportModal({
     setDownloadUrl(null);
     setManifest(null);
     try {
+      if (!freshCase || checkingStatus || statusError) {
+        throw new Error("Current RFQ review status has not been verified. Reopen the dialog.");
+      }
+      // Recheck at click time too. The backend is always the final export gate.
+      const verified = await getCase(caseData.case_id);
+      setFreshCase(verified);
+      if (verified.status === "PROCESSING" || verified.status === "FAILED") {
+        throw new Error("RFQ processing has not completed successfully.");
+      }
+      if (verified.unresolved_count > 0 && !allowPartial) {
+        throw new Error(`${verified.unresolved_count} line(s) still need review. Complete review or select partial draft.`);
+      }
       const res = await exportWorksheet(caseData.case_id, allowPartial);
       setManifest(res);
       setDownloadUrl(resolveDownloadUrl(res.download_url));
@@ -209,11 +242,21 @@ export function ExportModal({
                       className="font-medium"
                       style={{ color: "var(--color-brown-700)" }}
                     >
-                      {caseData.status}
+                      {checkingStatus ? "Checking…" : statusError ? "Unavailable" : freshCase?.status ?? "Not verified"}
                     </p>
                   </div>
                 </div>
               </div>
+
+              <p className="mb-3 text-xs" aria-live="polite" style={{ color: "var(--color-brown-600)" }}>
+                {checkingStatus
+                  ? "Checking the latest review status before export…"
+                  : statusError || !freshCase
+                  ? statusError ?? "Review status is not verified."
+                  : freshCase.unresolved_count > 0
+                  ? `${freshCase.unresolved_count} line(s) remain unresolved. A validated export will be blocked.`
+                  : "Latest backend review state has been checked."}
+              </p>
 
               {/* Partial export option */}
               <label
@@ -312,7 +355,7 @@ export function ExportModal({
                   >
                     <button
                       onClick={handleExport}
-                      disabled={exporting}
+                      disabled={exporting || checkingStatus || !freshCase || !!statusError}
                       className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 hover:shadow-md active:scale-[0.97] disabled:opacity-40"
                       style={{
                         backgroundColor: "var(--color-amber-400)",
