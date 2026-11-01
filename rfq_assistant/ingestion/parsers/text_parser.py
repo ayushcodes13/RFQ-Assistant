@@ -30,6 +30,26 @@ KNOWN_OEMS = [
 VAGUE_ITEM_REFERENCE = r"sensor from last time|same as previous|the one from last|custom bracket|same .{1,50} as last time"
 
 
+def _standalone_numeric_tokens(value: str) -> list[str]:
+    """Find standalone decimal numbers without backtracking regexes."""
+    tokens: list[str] = []
+    index = 0
+    while index < len(value):
+        if not value[index].isdecimal() or (index and value[index - 1].isalnum()):
+            index += 1
+            continue
+        start = index
+        while index < len(value) and value[index].isdecimal():
+            index += 1
+        if index + 1 < len(value) and value[index] == "." and value[index + 1].isdecimal():
+            index += 1
+            while index < len(value) and value[index].isdecimal():
+                index += 1
+        if index == len(value) or not value[index].isalnum():
+            tokens.append(value[start:index])
+    return tokens
+
+
 def _is_electrical_specification_token(value: str) -> bool:
     """Recognize quantity-like electrical specs without backtracking regexes."""
     token = value.upper()
@@ -322,7 +342,9 @@ class TextParser(BaseDocumentParser):
 
     @classmethod
     def _split_multi_item_clauses(cls, text: str) -> list[str]:
-        separators = re.compile(r"(\s*(?:[;,]|\+|\b(?:and|plus|also)\b)\s*|(?<=[.!?])\s+)", re.IGNORECASE)
+        # Keep separators linear on untrusted input; avoid optional whitespace
+        # around alternatives, which can backtrack on long runs of spaces.
+        separators = re.compile(r"([;,]+|\+|\b(?:and|plus|also)\b|(?<=[.!?])\s+)", re.IGNORECASE)
         parts = separators.split(text)
         if len(parts) < 3:
             return [text]
@@ -441,7 +463,7 @@ class TextParser(BaseDocumentParser):
         )
         if manufacturer_match:
             prefix = text[:manufacturer_match.start()]
-            number_tokens = re.findall(r"(?<![A-Za-z0-9])\d+(?:\.\d+)?(?![A-Za-z0-9])", prefix)
+            number_tokens = _standalone_numeric_tokens(prefix)
             if len(number_tokens) == 1:
                 return float(number_tokens[0]), "EA"
 
