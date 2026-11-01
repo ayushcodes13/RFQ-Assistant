@@ -5,6 +5,7 @@ import io
 import json
 import os
 import re
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -114,6 +115,48 @@ class ExportGenerator:
                 )
             )
         return sorted(records, key=lambda item: item.generated_at, reverse=True)
+
+    def delete_case_exports(self, case_id: str) -> int:
+        """Delete generated export directories whose manifest belongs to this case."""
+        if not re.fullmatch(r"RFQ-[A-F0-9]{8}", case_id):
+            raise OSError("RFQ case ID is not a supported export owner identifier.")
+        if self.base_export_dir.is_symlink():
+            raise OSError("Export root is a symbolic link; refusing case deletion.")
+        if not self.base_export_dir.exists():
+            return 0
+        if not self.base_export_dir.is_dir():
+            raise OSError("Export root is not a directory; refusing case deletion.")
+
+        root = self.base_export_dir.resolve()
+        deleted = 0
+        for export_dir in self.base_export_dir.iterdir():
+            if not re.fullmatch(r"EXP-[A-F0-9]{8}", export_dir.name):
+                continue
+            if export_dir.is_symlink():
+                raise OSError(
+                    "An export directory is a symbolic link; refusing case deletion."
+                )
+            if not export_dir.is_dir():
+                continue
+            try:
+                resolved = export_dir.resolve(strict=True)
+                if resolved.parent != root:
+                    raise OSError("An export directory escaped the configured export root.")
+                manifest_path = export_dir / "manifest.json"
+                if manifest_path.is_symlink() or not manifest_path.is_file():
+                    raise OSError("An export ownership manifest is missing or unsafe.")
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise OSError("An export ownership manifest is unreadable.") from exc
+            if not isinstance(manifest, dict) or not isinstance(
+                manifest.get("case_id"), str
+            ):
+                raise OSError("An export ownership manifest is malformed.")
+            if manifest.get("case_id") != case_id:
+                continue
+            shutil.rmtree(export_dir)
+            deleted += 1
+        return deleted
 
     def generate_export(
         self, case: RFQCase, lines: List[RFQLineItem], request: ExportRequest

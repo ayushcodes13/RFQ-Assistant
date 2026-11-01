@@ -26,6 +26,8 @@ The benchmark makes no network or model calls. It does not measure scanned-PDF O
 
 Storage path hardening includes adversarial traversal/symlink checks and an upgrade check that migrates pre-hash local case/file paths into the opaque hashed layout while preserving existing source bytes and logical metadata. This is a local storage compatibility test; it does not test a production migration across multiple application hosts.
 
+Case deletion coverage verifies that an administrator's explicit delete removes only export directories whose manifest names the deleted case, does not follow symlinked export directories, removes the original source and case state, and makes the old export URL return not found. This does not implement a retention schedule or remove external backups, telemetry, or infrastructure logs.
+
 ## Golden fixture pack
 
 Maintain a synthetic annotated corpus covering:

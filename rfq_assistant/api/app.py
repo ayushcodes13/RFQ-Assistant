@@ -970,7 +970,16 @@ def delete_rfq(
     case_id: str,
     current_user: PilotUser = Depends(require_role(["admin"])),
 ):
-    """Deletes RFQ case (restricted to administrators)."""
+    """Deletes a case, its source data, and generated exports (admin only)."""
+    if not case_manager.get_case(case_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ case not found.")
+    try:
+        export_generator.delete_case_exports(case_id)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Generated RFQ exports could not be deleted safely; the case was retained.",
+        ) from exc
     success = case_manager.delete_case(case_id)
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ case not found.")
