@@ -34,5 +34,8 @@
     "eslint-config-next": "16.4.3",
     "openapi-typescript": "^7.13.0",
     "typescript": "^5"
+  },
+  "overrides": {
+    "minimatch": "11.0.1"
   }
 }
