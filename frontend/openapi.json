@@ -2444,7 +2444,7 @@
     },
     "/api/catalogs/import": {
       "post": {
-        "description": "Imports tenant-authorized catalog CSV (admin only).",
+        "description": "Imports this deployment's single-workspace catalog CSV (admin only).",
         "operationId": "import_catalog_api_catalogs_import_post",
         "parameters": [
           {

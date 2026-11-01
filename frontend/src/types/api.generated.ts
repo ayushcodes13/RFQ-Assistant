@@ -35,7 +35,7 @@ export interface paths {
         put?: never;
         /**
          * Import Catalog
-         * @description Imports tenant-authorized catalog CSV (admin only).
+         * @description Imports this deployment's single-workspace catalog CSV (admin only).
          */
         post: operations["import_catalog_api_catalogs_import_post"];
         delete?: never;
