@@ -176,7 +176,7 @@ test("Rehearsal F — export dialog does not carry a prior case download into a 
   });
   await firstExportDialog.getByRole("button", { name: "Close" }).first().click();
 
-  await page.getByRole("button", { name: "Overview" }).click();
+  await page.getByRole("button", { name: "RFQ inbox" }).click();
   await page.getByRole("button", { name: /New RFQ/i }).first().click();
   const secondIngest = page.getByRole("dialog", { name: "New RFQ" });
   await secondIngest
@@ -493,7 +493,10 @@ test("Rehearsal D — send route is simulated-only (no external transport)", asy
   // Step 3: Register a quote draft via the V1 route.
   const registerResult = await page.evaluate(
     async (caseId: string) => {
-      const res = await fetch(window.location.origin + `/api/proxy/v1/rfqs/${caseId}/draft-quote`, {
+      // The seeded catalog deliberately has no currency. In this synthetic
+      // rehearsal, the operator explicitly chooses USD so the commercial
+      // approval path can be exercised without assuming a currency in product code.
+      const res = await fetch(window.location.origin + `/api/proxy/v1/rfqs/${caseId}/draft-quote?currency=USD`, {
         method: "POST",
       });
       return { status: res.status, body: await res.text() };

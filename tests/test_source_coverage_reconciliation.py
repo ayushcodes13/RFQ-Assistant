@@ -26,20 +26,14 @@ def _coverage(*, structured=0, review=0, filtered=0, nonempty=None):
     )
 
 
-def test_manifest_must_reconcile_structured_regions_to_parsed_lines():
-    with pytest.raises(ValueError, match="structured regions for 1 parsed lines"):
-        ParsedDocumentResult(
-            lines=[
-                ParsedLineDraft(
-                    line_number=1,
-                    raw_text="MPN-1 2 EA",
-                    source_locator=SourceLocator(
-                        file_name="synthetic.txt", row_number=1
-                    ),
-                )
-            ],
-            source_coverage=[_coverage(structured=0)],
-        )
+def test_full_source_extraction_can_propose_multiple_rows_from_one_region():
+    locator = SourceLocator(file_name="synthetic.txt", text_snippet="MPN-1 2 EA; MPN-2 4 EA")
+    result = ParsedDocumentResult(lines=[
+        ParsedLineDraft(line_number=1, raw_text="MPN-1 2 EA", source_locator=locator),
+        ParsedLineDraft(line_number=2, raw_text="MPN-2 4 EA", source_locator=locator),
+    ])
+    assert len(result.lines) == 2
+    assert all(line.source_locator == locator for line in result.lines)
 
 
 def test_manifest_must_reconcile_review_regions_to_candidates():

@@ -57,7 +57,7 @@ test("paste RFQ, approve every line, export and download a draft worksheet", asy
   await sourceAccounting.click();
   await expect(page.getByText(/heuristic region accounting/i)).toBeVisible();
   await expect(
-    page.getByText(/These counts do not prove that every requested item was found/i),
+    page.getByText(/cannot prove that no request was missed/i),
   ).toBeVisible();
 
   // Approve each extracted line. Refetch after each approval replaces the row,
@@ -174,7 +174,13 @@ test("combine pasted customer email with two source attachments in one reviewed 
   await expect(documents.getByText("buyer-parts-a.txt")).toBeVisible();
   await expect(documents.getByText("buyer-parts-b.txt")).toBeVisible();
   await expect(page.getByText(/3 lines ·/i)).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(/sample spans 3 source and extraction groups/i)).toBeVisible();
+  await expect(
+    page.getByText(/Source accounting · 3 non-empty regions across 3 source sections/i),
+  ).toBeVisible();
+  // These unstructured lines need individual source review, so they are not
+  // eligible for the clean deterministic-row sampling shortcut.
+  await expect(page.getByRole("heading", { name: /Quick review/i })).toHaveCount(0);
+  await expect(page.getByText("3 lines · 3 need review", { exact: true })).toBeVisible();
 });
 
 test("open an extracted XLSX line at its source row and field cells", async ({ page }) => {

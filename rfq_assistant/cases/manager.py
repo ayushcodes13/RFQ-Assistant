@@ -57,6 +57,7 @@ from rfq_assistant.schemas.models import (
     BatchReviewRequest,
     ExtractionWarning,
     FieldProvenance,
+    ManualRFQLineCreateRequest,
     RematchLineRequest,
     ReviewPlan,
     RFQCase,
@@ -296,7 +297,12 @@ class CaseManager:
                 timings["parse_ms"] = (time.perf_counter() - stage_started) * 1000
             require_lease()
             set_processing_stage(ProcessingStage.CHECKING_FIELDS)
-            if self.llm_extractor and self._needs_llm_fallback(parse_result):
+            llm_primary_source = src_type in {
+                SourceType.EMAIL_TEXT,
+                SourceType.PDF_NATIVE,
+                SourceType.PDF_SCANNED,
+            }
+            if self.llm_extractor and (llm_primary_source or self._needs_llm_fallback(parse_result)):
                 case.llm_cache_hit = False
                 stage_started = time.perf_counter()
                 try:
@@ -305,6 +311,7 @@ class CaseManager:
                         parse_result.lines, content, clean_name, src_type,
                         parse_result.evidence_segments,
                         parse_result.candidate_segments,
+                        primary_unstructured=llm_primary_source,
                     )
                     cache_profile_fn = getattr(self.llm_extractor, "cache_profile", None)
                     llm_profile = cache_profile_fn() if callable(cache_profile_fn) else None
@@ -369,7 +376,44 @@ class CaseManager:
                             llm_result.model_dump(mode="json"),
                             job_id=_job_id, worker_id=_worker_id,
                         )
-                    if llm_result.lines or parse_result.candidate_segments:
+                    if llm_primary_source and llm_result.lines:
+                        # For email/plain-text/PDF, the model proposes the line
+                        # structure for the whole source. Deterministic parser
+                        # output is a fallback only; it must not silently win
+                        # over a full-source parse that found different rows.
+                        completeness_warning = ExtractionWarning(
+                            code="UNSTRUCTURED_COMPLETENESS_REQUIRES_REVIEW",
+                            message="Unstructured extraction cannot prove every requested line was captured. Compare all proposed rows with the original source before approval.",
+                            severity="warning",
+                        )
+                        for draft in llm_result.lines:
+                            draft.extraction_warnings.append(completeness_warning.model_copy(deep=True))
+                            draft.extraction_warnings.extend(
+                                warning.model_copy(deep=True) for warning in llm_result.warnings
+                            )
+                        for draft in parse_result.lines:
+                            draft.extraction_warnings.append(completeness_warning.model_copy(deep=True))
+                        # Merge one proposal against its exact source span. Do
+                        # not deduplicate by MPN: the same part can appear in a
+                        # correction thread, and a model can omit a different
+                        # part in the same paragraph.
+                        self._merge_llm_proposals(
+                            parse_result, llm_result, parse_result.candidate_segments
+                        )
+                        parse_result.warnings.append(completeness_warning.model_copy(deep=True))
+                    elif llm_primary_source:
+                        for draft in parse_result.lines:
+                            draft.extraction_warnings.extend(llm_result.warnings)
+                            draft.extraction_warnings.append(ExtractionWarning(
+                                code="UNSTRUCTURED_LLM_EXTRACTION_FAILED",
+                                message="The model could not provide a complete field-by-field extraction. This deterministic parse is only a fallback; verify it against the original source before approval.",
+                                severity="warning",
+                            ))
+                        if parse_result.candidate_segments:
+                            parse_result = self._merge_llm_proposals(
+                                parse_result, llm_result, parse_result.candidate_segments
+                            )
+                    elif llm_result.lines or parse_result.candidate_segments:
                         parse_result = self._merge_llm_proposals(
                             parse_result, llm_result, parse_result.candidate_segments
                         )
@@ -377,8 +421,14 @@ class CaseManager:
                         # Preserve deterministic rows and surface the model
                         # failure on unresolved rows; never silently downgrade.
                         for draft in parse_result.lines:
-                            if self._draft_needs_llm(draft):
+                            if self._draft_needs_llm(draft) or llm_primary_source:
                                 draft.extraction_warnings.extend(llm_result.warnings)
+                                if llm_primary_source:
+                                    draft.extraction_warnings.append(ExtractionWarning(
+                                        code="UNSTRUCTURED_LLM_EXTRACTION_FAILED",
+                                        message="The model could not provide a complete field-by-field extraction. This deterministic parse is only a fallback; verify it against the original source before approval.",
+                                        severity="warning",
+                                    ))
                     else:
                         parse_result.warnings.extend(llm_result.warnings)
                 except Exception:
@@ -396,12 +446,40 @@ class CaseManager:
                         )
                     else:
                         for draft in parse_result.lines:
-                            if self._draft_needs_llm(draft):
+                            if self._draft_needs_llm(draft) or llm_primary_source:
                                 draft.extraction_warnings.append(warning)
+                                if llm_primary_source:
+                                    draft.extraction_warnings.append(ExtractionWarning(
+                                        code="UNSTRUCTURED_LLM_EXTRACTION_FAILED",
+                                        message="The model could not provide a complete field-by-field extraction. This deterministic parse is only a fallback; verify it against the original source before approval.",
+                                        severity="warning",
+                                    ))
                     if not parse_result.lines:
                         parse_result.warnings.append(warning)
                 finally:
                     timings["llm_ms"] = (time.perf_counter() - stage_started) * 1000
+            elif src_type in {SourceType.EMAIL_TEXT, SourceType.PDF_NATIVE, SourceType.PDF_SCANNED}:
+                # Never silently discard a non-empty source region that the
+                # or a complete-looking heuristic row. Without Luna, retain
+                # every deterministic row and every candidate with a visible
+                # manual-review warning.
+                if parse_result.candidate_segments:
+                    parse_result = self._merge_llm_proposals(
+                        parse_result,
+                        ParsedDocumentResult(lines=[]),
+                        parse_result.candidate_segments,
+                    )
+                for draft in parse_result.lines:
+                    draft.extraction_warnings.append(ExtractionWarning(
+                        code="UNSTRUCTURED_LLM_NOT_CONFIGURED",
+                        message="GPT-6 Luna is not configured. This deterministic parse is a draft only; verify every row against the original before approval.",
+                        severity="warning",
+                    ))
+                parse_result.warnings.append(ExtractionWarning(
+                    code="UNSTRUCTURED_LLM_NOT_CONFIGURED",
+                    message="GPT-6 Luna is not configured. The original unstructured source was parsed heuristically and requires full human comparison.",
+                    severity="warning",
+                ))
             elif parse_result.candidate_segments:
                 # Never silently discard a non-empty source region that the
                 # deterministic parser could not classify. Without an enabled
@@ -451,7 +529,10 @@ class CaseManager:
 
                 reviewable_warnings = [
                     warning for warning in draft.extraction_warnings
-                    if warning.code != "LLM_PROPOSED_EXTRACTION"
+                    if warning.code not in {
+                        "LLM_PROPOSED_EXTRACTION",
+                        "UNSTRUCTURED_COMPLETENESS_REQUIRES_REVIEW",
+                    }
                 ]
                 extract_status = (
                     ExtractionStatus.NEEDS_CORRECTION
@@ -529,6 +610,17 @@ class CaseManager:
                 processing_status="failed",
                 error_code="DOCUMENT_PARSER_ERROR",
             )]
+            parse_failure_warnings = []
+            failed_result = locals().get("parse_result")
+            if isinstance(failed_result, ParsedDocumentResult):
+                parse_failure_warnings.extend(failed_result.warnings)
+                for draft in failed_result.lines:
+                    parse_failure_warnings.extend(draft.extraction_warnings)
+            warning_codes = {warning.code for warning in failed_case.document_warnings}
+            for warning in parse_failure_warnings:
+                if warning.code not in warning_codes:
+                    failed_case.document_warnings.append(warning)
+                    warning_codes.add(warning.code)
             failed_case.document_warnings.append(ExtractionWarning(
                 code="DOCUMENT_EXTRACTION_FAILED",
                 message=str(exc),
@@ -1389,7 +1481,35 @@ class CaseManager:
         drafts, content: bytes, filename: str, source_type: SourceType,
         evidence_segments: Optional[List[EvidenceSegment]] = None,
         candidate_segments: Optional[List[EvidenceSegment]] = None,
+        *, primary_unstructured: bool = False,
     ) -> List[EvidenceSegment]:
+        if primary_unstructured:
+            if source_type == SourceType.EMAIL_TEXT:
+                if len(drafts) == 1 and not candidate_segments:
+                    return [EvidenceSegment(
+                        segment_id="document-text",
+                        locator=SourceLocator(file_name=filename),
+                        text=content.decode("utf-8", errors="replace"),
+                    )]
+                item_segments = [
+                    EvidenceSegment(
+                        segment_id=draft.source_segment_id or f"draft-line-{draft.line_number}",
+                        locator=draft.source_locator,
+                        text=draft.raw_text,
+                    )
+                    for draft in drafts
+                ]
+                item_segments.extend(candidate_segments or [])
+                if item_segments:
+                    return item_segments
+                return [EvidenceSegment(
+                    segment_id="document-text",
+                    locator=SourceLocator(file_name=filename),
+                    text=content.decode("utf-8", errors="replace"),
+                )]
+            if evidence_segments:
+                return evidence_segments
+            return source_segments(content, filename, source_type)
         if not drafts:
             if candidate_segments:
                 return candidate_segments
@@ -1414,22 +1534,48 @@ class CaseManager:
         candidate_segments = candidate_segments or []
         candidates_by_id = {segment.segment_id: segment for segment in candidate_segments}
         represented_candidates = set()
+        represented_draft_segments = set()
         repair_warning = next(
             (warning for warning in llm_result.warnings if warning.code == "LLM_REPAIR_USED"),
             None,
         )
         drafts_by_segment = {
-            f"draft-line-{draft.line_number}": draft for draft in parse_result.lines
+            draft.source_segment_id or f"draft-line-{draft.line_number}": draft
+            for draft in parse_result.lines
         }
+        if len(parse_result.lines) == 1 and not candidate_segments:
+            drafts_by_segment.setdefault("document-text", parse_result.lines[0])
         for proposal in llm_result.lines:
             if repair_warning:
                 proposal.extraction_warnings.append(repair_warning.model_copy(deep=True))
             target = drafts_by_segment.get(proposal.source_segment_id or "")
             if target is not None:
+                represented_draft_segments.add(
+                    target.source_segment_id or f"draft-line-{target.line_number}"
+                )
                 for field in ("requested_mpn", "requested_manufacturer", "description", "quantity", "unit"):
-                    if getattr(target, field) in (None, "") and getattr(proposal, field) not in (None, ""):
-                        setattr(target, field, getattr(proposal, field))
+                    current_value = getattr(target, field)
+                    proposed_value = getattr(proposal, field)
+                    if current_value in (None, "") and proposed_value not in (None, ""):
+                        setattr(target, field, proposed_value)
                         target.field_origins[field] = ExtractionOrigin.LUNA.value
+                    elif current_value not in (None, "") and proposed_value not in (None, ""):
+                        if field == "requested_mpn":
+                            conflict = normalize_mpn(str(current_value)) != normalize_mpn(str(proposed_value))
+                        elif field == "requested_manufacturer":
+                            conflict = normalize_manufacturer(str(current_value)) != normalize_manufacturer(str(proposed_value))
+                        elif field == "quantity":
+                            conflict = float(current_value) != float(proposed_value)
+                        elif field == "unit":
+                            conflict = str(current_value).strip().casefold() != str(proposed_value).strip().casefold()
+                        else:
+                            conflict = False
+                        if conflict:
+                            target.extraction_warnings.append(ExtractionWarning(
+                                code="DETERMINISTIC_LLM_FIELD_CONFLICT",
+                                message=f"The model and deterministic source pass disagree about {field.replace('_', ' ')}. Check the original source before approving this line.",
+                                severity="error",
+                            ))
                 target.extraction_warnings.extend(proposal.extraction_warnings)
             elif proposal.source_segment_id in candidates_by_id:
                 proposal.line_number = max(
@@ -1446,6 +1592,14 @@ class CaseManager:
                 # Whole-document fallback: model lines are accepted only with
                 # verified source quotes and retain the LLM review warning.
                 output.append(proposal)
+        for draft in parse_result.lines:
+            segment_id = draft.source_segment_id or f"draft-line-{draft.line_number}"
+            if segment_id not in represented_draft_segments:
+                draft.extraction_warnings.append(ExtractionWarning(
+                    code="UNSTRUCTURED_MODEL_OMITTED_DETERMINISTIC_ROW",
+                    message="The extraction model did not return this source-backed item span. Verify that it is requested and review it individually.",
+                    severity="error",
+                ))
         for segment in candidate_segments:
             if segment.segment_id in represented_candidates:
                 continue
@@ -1602,6 +1756,81 @@ class CaseManager:
     ) -> Optional[RFQLineItem]:
         with self._review_lock(case_id):
             return self._update_line_locked(case_id, line_id, update)
+
+    def add_manual_line(
+        self, case_id: str, request: ManualRFQLineCreateRequest, *, actor: str
+    ) -> Optional[RFQLineItem]:
+        """Add a human-entered exception row without claiming document citation."""
+        with self._review_lock(case_id):
+            case = self._cases.get(case_id)
+            if case is None:
+                return None
+            lines = self._lines_by_case.setdefault(case_id, [])
+            locator = SourceLocator(
+                file_name="Manual operator entry",
+                text_snippet=request.source_text[:120],
+            )
+            values = {
+                "requested_manufacturer": request.requested_manufacturer,
+                "requested_mpn": request.requested_mpn,
+                "description": request.description,
+                "quantity": str(request.quantity) if request.quantity is not None else None,
+                "unit": request.unit,
+            }
+            provenance = {
+                field: FieldProvenance(
+                    raw_value=value,
+                    proposed_value=value,
+                    origin=ExtractionOrigin.HUMAN,
+                    source_locator=locator,
+                    evidence=None,
+                    validation_status="manual_entry_unverified",
+                    review_status=ReviewDecision.PENDING,
+                )
+                for field, value in values.items()
+                if value not in (None, "")
+            }
+            match = ExactMatchEngine(self.catalog.snapshot()).match_line(
+                request.requested_mpn, request.requested_manufacturer
+            )
+            warnings = [ExtractionWarning(
+                code="MANUAL_ENTRY_SOURCE_REVIEW_REQUIRED",
+                message="This line was entered manually and has no machine-verified document citation. Check the buyer source before approval.",
+                severity="warning",
+            )]
+            line = RFQLineItem(
+                line_id=f"line-{uuid.uuid4().hex[:8]}",
+                case_id=case_id,
+                line_number=max((item.line_number for item in lines), default=0) + 1,
+                raw_text=request.source_text,
+                source_locator=locator,
+                field_provenance=provenance,
+                requested_manufacturer=request.requested_manufacturer or None,
+                requested_mpn=request.requested_mpn or None,
+                description=request.description or None,
+                quantity=request.quantity,
+                unit=request.unit or "EA",
+                extraction_status=(
+                    ExtractionStatus.EXTRACTED
+                    if request.requested_manufacturer and request.requested_mpn and request.quantity is not None
+                    else ExtractionStatus.NEEDS_CORRECTION
+                ),
+                extraction_warnings=warnings,
+                match_status=match.match_status,
+                selected_catalog_sku=match.selected_sku,
+                matched_catalog_version=self._matched_catalog_version(match.candidates, match.selected_sku),
+                candidates=match.candidates,
+            )
+            lines.append(line)
+            self._record_audit(
+                case_id=case_id,
+                actor=actor,
+                action=AuditAction.LINE_ADDED_MANUALLY,
+                line_id=line.line_id,
+                notes="Manually entered line added; verify it against the original buyer source.",
+            )
+            self._refresh_case_metrics(case_id)
+            return line
 
     def _update_line_locked(
         self, case_id: str, line_id: str, update: RFQLineItemUpdate
@@ -1847,6 +2076,16 @@ class CaseManager:
             line.reviewed_at = datetime.utcnow()
 
         line.catalog_rematch_required = self._line_requires_catalog_rematch(line)
+
+        if any(
+            warning.code == "MANUAL_ENTRY_SOURCE_REVIEW_REQUIRED"
+            for warning in line.extraction_warnings
+        ):
+            line.extraction_status = (
+                ExtractionStatus.EXTRACTED
+                if line.requested_manufacturer and line.requested_mpn and line.quantity is not None
+                else ExtractionStatus.NEEDS_CORRECTION
+            )
 
         for field in (
             "requested_manufacturer", "requested_mpn", "description", "quantity", "unit"

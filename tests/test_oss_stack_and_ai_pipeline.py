@@ -364,6 +364,7 @@ class TestDomainIntegrations:
             quote_id="Q-ERP-1",
             case_id="RFQ-ERP-1",
             customer_name="Delta Engineering",
+            currency="USD",
             lines=[line],
             is_approved=True,
             approved_at="2026-10-27T01:00:00Z",

@@ -31,6 +31,7 @@ export type AuditEvent = Schemas["AuditEvent"] & { recorded_at: string };
 export type ExportManifest = Schemas["ExportManifest"] & { generated_at: string };
 export type ExportDocumentSummary = Schemas["ExportDocumentSummary"];
 export type RFQLineItemUpdate = Schemas["RFQLineItemUpdateRequest"];
+export type ManualRFQLineCreateRequest = Schemas["ManualRFQLineCreateRequest"];
 export type BatchReviewRequest = Schemas["BatchReviewRequest"];
 export type ReviewPlan = Schemas["ReviewPlan"];
 export type SpreadsheetSourcePreview = Schemas["SpreadsheetSourcePreview"];
@@ -52,6 +53,7 @@ export interface QuoteDraftLine {
   catalogue_part_id?: string | null;
   description?: string | null;
   quantity?: string | null;
+  stock_qty?: number | null;
   unit: string;
   unit_price?: string | null;
   currency?: string | null;
@@ -64,7 +66,7 @@ export interface QuoteDraftLine {
 export interface QuoteDraft {
   quote_id: string;
   case_id: string;
-  currency: string;
+  currency?: string | null;
   lines: QuoteDraftLine[];
   total_amount?: string | null;
   validation_errors: string[];

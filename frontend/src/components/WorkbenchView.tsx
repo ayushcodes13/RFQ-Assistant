@@ -33,11 +33,13 @@ import {
   listCaseExports,
   listCatalog,
   retrySourceDocument,
+  addManualRFQLine,
 } from "@/services/api";
 import {
   RFQCase,
   RFQLineItem,
   RFQLineItemUpdate,
+  ManualRFQLineCreateRequest,
   ReviewPlan,
   SourceLocator,
   ExportDocumentSummary,
@@ -163,15 +165,55 @@ export function WorkbenchView({
   } | null>(null);
   const [editValue, setEditValue] = useState("");
   const [selectedLine, setSelectedLine] = useState<RFQLineItem | null>(null);
-  const selectedSource = caseData.source_documents?.find((document) => document.source_file.file_id === selectedLine?.source_locator.source_file_id)?.source_file ?? caseData.source_file;
+  const isManualSource = selectedLine?.source_locator.file_name === "Manual operator entry";
+  const selectedSource = isManualSource ? undefined : caseData.source_documents?.find((document) => document.source_file.file_id === selectedLine?.source_locator.source_file_id)?.source_file ?? caseData.source_file;
   const [showDetail, setShowDetail] = useState(false);
   const [rematchingLineId, setRematchingLineId] = useState<string | null>(null);
   const [showSourcePreview, setShowSourcePreview] = useState(false);
   const [showPdfSourcePreview, setShowPdfSourcePreview] = useState(false);
   const [showClarificationDraft, setShowClarificationDraft] = useState(false);
   const [showAuditHistory, setShowAuditHistory] = useState(false);
+  const [manualSourceText, setManualSourceText] = useState("");
+  const [manualManufacturer, setManualManufacturer] = useState("");
+  const [manualMpn, setManualMpn] = useState("");
+  const [manualDescription, setManualDescription] = useState("");
+  const [manualQuantity, setManualQuantity] = useState("");
+  const [manualUnit, setManualUnit] = useState("EA");
+  const [manualSaving, setManualSaving] = useState(false);
+  const [manualError, setManualError] = useState<string | null>(null);
   const closeSourcePreview = useCallback(() => setShowSourcePreview(false), []);
   const closePdfSourcePreview = useCallback(() => setShowPdfSourcePreview(false), []);
+
+  const handleAddManualLine = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setManualSaving(true);
+    setManualError(null);
+    const request: ManualRFQLineCreateRequest = {
+      source_text: manualSourceText,
+      requested_manufacturer: manualManufacturer.trim() || null,
+      requested_mpn: manualMpn.trim() || null,
+      description: manualDescription.trim() || null,
+      quantity: manualQuantity.trim() ? Number(manualQuantity) : null,
+      unit: manualUnit.trim() || "EA",
+      notes: null,
+    };
+    try {
+      await addManualRFQLine(caseData.case_id, request);
+      setManualSourceText("");
+      setManualManufacturer("");
+      setManualMpn("");
+      setManualDescription("");
+      setManualQuantity("");
+      setManualUnit("EA");
+      await fetchLines();
+      await refreshReviewPlan();
+      await onCaseUpdated();
+    } catch (error: unknown) {
+      setManualError(error instanceof Error ? error.message : "Could not add this line.");
+    } finally {
+      setManualSaving(false);
+    }
+  };
 
   const refreshDocuments = useCallback(async () => {
     setDocumentsLoading(true);
@@ -460,7 +502,7 @@ export function WorkbenchView({
               className="text-xs font-medium"
               style={{ color: "var(--color-brown-400)" }}
             >
-              {lines.length} lines · {unresolvedCount} need review
+              {lines.length} {lines.length === 1 ? "line" : "lines"} · {unresolvedCount} {unresolvedCount === 1 ? "needs" : "need"} review
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -494,6 +536,59 @@ export function WorkbenchView({
         </div>
       </MotionWrapper>
 
+      {["EMAIL_TEXT", "PDF_NATIVE", "PDF_SCANNED"].includes(caseData.source_type) && (
+        <div className="mb-4 border-l-2 border-[#1d5fbf] bg-white px-3 py-2 text-[13px] leading-5 text-[#3d5056]" role="status">
+          Unstructured email, text, and PDF extraction may use GPT-6 Luna when configured; otherwise, heuristic parsing is used. Compare every row with the original because extraction cannot prove that no request was missed.
+        </div>
+      )}
+
+      <details
+        className="mb-4 rounded-lg border border-[#d7e1e3] bg-white px-4 py-3"
+        open={caseData.status === "FAILED" || lines.length === 0}
+      >
+        <summary className="cursor-pointer text-sm font-semibold text-[#1d2b30]">
+          Missing a requested item? Add it manually
+        </summary>
+        <p className="mt-2 text-xs leading-5 text-[#52656b]">
+          Enter what you can verify from the buyer’s request. These values will be marked as manually entered, not as AI-extracted or document-cited. The line stays pending until you complete and review it.
+        </p>
+        <form className="mt-3 space-y-3" onSubmit={handleAddManualLine}>
+          <label className="block text-xs font-medium text-[#35484e]">
+            Request text <span aria-hidden="true">*</span>
+            <textarea
+              required
+              maxLength={4000}
+              value={manualSourceText}
+              onChange={(event) => setManualSourceText(event.target.value)}
+              rows={2}
+              placeholder="Paste or type the exact item request you are adding"
+              className="mt-1 w-full rounded-md border border-[#cbd7da] px-3 py-2 text-sm"
+            />
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <label className="text-xs font-medium text-[#35484e]">Manufacturer
+              <input value={manualManufacturer} onChange={(event) => setManualManufacturer(event.target.value)} maxLength={200} className="mt-1 w-full rounded-md border border-[#cbd7da] px-3 py-2 text-sm" />
+            </label>
+            <label className="text-xs font-medium text-[#35484e]">Manufacturer part number
+              <input value={manualMpn} onChange={(event) => setManualMpn(event.target.value)} maxLength={200} className="mt-1 w-full rounded-md border border-[#cbd7da] px-3 py-2 text-sm" />
+            </label>
+            <label className="text-xs font-medium text-[#35484e]">Quantity
+              <input type="number" min="0.000001" step="any" value={manualQuantity} onChange={(event) => setManualQuantity(event.target.value)} className="mt-1 w-full rounded-md border border-[#cbd7da] px-3 py-2 text-sm" />
+            </label>
+            <label className="text-xs font-medium text-[#35484e]">Description
+              <input value={manualDescription} onChange={(event) => setManualDescription(event.target.value)} maxLength={1000} className="mt-1 w-full rounded-md border border-[#cbd7da] px-3 py-2 text-sm" />
+            </label>
+            <label className="text-xs font-medium text-[#35484e]">Unit
+              <input value={manualUnit} onChange={(event) => setManualUnit(event.target.value)} maxLength={40} className="mt-1 w-full rounded-md border border-[#cbd7da] px-3 py-2 text-sm" />
+            </label>
+          </div>
+          {manualError && <p className="text-sm text-[#84241f]" role="alert">{manualError}</p>}
+          <button type="submit" disabled={manualSaving || !manualSourceText.trim()} className="rfq-primary disabled:opacity-50">
+            {manualSaving ? "Adding line…" : "Add line to review"}
+          </button>
+        </form>
+      </details>
+
       <QuotePreparationPanel caseData={caseData} />
 
       <section className="mb-4 rounded-lg border border-[#d7e1e3] bg-white px-4 py-3" aria-labelledby="documents-heading">
@@ -526,7 +621,7 @@ export function WorkbenchView({
             <summary className="cursor-pointer font-medium">
               Source accounting · {totals.regions} non-empty regions across {coverage.length} source sections
               <span className="ml-2 font-normal text-[#687b81]">
-                {totals.structured} parsed · {totals.review} sent to review · {totals.filtered} metadata filtered
+                {totals.structured} source region{totals.structured === 1 ? "" : "s"} parsed · {totals.review} candidate region{totals.review === 1 ? "" : "s"} sent to review · {totals.filtered} metadata region{totals.filtered === 1 ? "" : "s"} filtered
                 {totals.ocrFailures > 0 && ` · ${totals.ocrFailures} OCR failures`}
                 {(totals.hiddenRows > 0 || totals.hiddenColumns > 0) && ` · ${totals.hiddenRows} hidden rows, ${totals.hiddenColumns} hidden columns`}
               </span>
@@ -534,7 +629,7 @@ export function WorkbenchView({
             <ul className="mt-2 space-y-1 pl-5 text-xs text-[#52656b]">
               {coverage.map((unit) => (
                 <li key={unit.unit_id}>
-                  {unit.unit_id}: {unit.nonempty_regions} regions · {unit.structured_regions} parsed · {unit.review_regions} review · {unit.filtered_regions} filtered
+                  {unit.unit_id}: {unit.nonempty_regions} non-empty regions · {unit.structured_regions} parsed source regions · {unit.review_regions} candidate regions · {unit.filtered_regions} metadata regions filtered
                   {unit.coverage_basis === "structured_rows" ? " · deterministic row accounting" : " · heuristic region accounting"}
                   {unit.ocr_failures > 0 && ` · ${unit.ocr_failures} OCR failures`}
                   {unit.ocr_status && unit.ocr_status !== "not_needed" && ` · OCR ${unit.ocr_status}`}
@@ -553,7 +648,7 @@ export function WorkbenchView({
               ))}
             </ul>
             <div className="mt-2 text-xs text-[#52656b]">
-              Spreadsheet rows and cells are counted deterministically, but row classification may still need review. PDF, email, and text region counts are heuristic. These counts do not prove that every requested item was found; compare them with the original source.
+              Spreadsheet rows are counted deterministically. Email, text, and PDF regions are heuristic; Luna can split one region into several proposed items. Region counts do not prove that every requested item was found, so compare every row with the original source.
             </div>
             <div className="mt-2 text-xs text-[#52656b]">
               {caseData.parse_cache_hit && <span>Deterministic extraction reused from the same source and parser profile. </span>}
@@ -628,7 +723,7 @@ export function WorkbenchView({
       <MotionWrapper direction="up" delay={0.1}>
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-4">
           <div className="flex items-center gap-1.5 flex-wrap">
-            {filterConfig.map((f) => (
+            {filterConfig.filter((f) => f.id !== "sample" || Boolean(reviewPlan?.sample_line_ids.length)).map((f) => (
               <button
                 key={f.id}
                 type="button"
@@ -1085,9 +1180,11 @@ export function WorkbenchView({
                   Source
                 </dt>
                 <dd style={{ color: "var(--color-brown-700)" }}>
-                  {formatLocator(selectedLine.source_locator)}
+                  {isManualSource ? "Manual operator entry · no document citation" : formatLocator(selectedLine.source_locator)}
                   <div className="mt-2">
-                    {(selectedSource?.file_name.toLowerCase().endsWith(".xlsx") || selectedSource?.file_name.toLowerCase().endsWith(".csv")) &&
+                    {isManualSource ? (
+                      <p className="max-w-prose text-xs text-[#52656b]">Entered by the operator from the buyer request. Compare the text below with the original in Documents.</p>
+                    ) : (selectedSource?.file_name.toLowerCase().endsWith(".xlsx") || selectedSource?.file_name.toLowerCase().endsWith(".csv")) &&
                     selectedLine.source_locator.sheet_name && selectedLine.source_locator.row_number ? (
                       <button type="button" onClick={() => setShowSourcePreview(true)} className="rfq-secondary">
                         View source evidence

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Header, AppTopbar, AppTab } from "@/components/Header";
-import { OverviewView } from "@/components/OverviewView";
 import { InboxView } from "@/components/InboxView";
 import { WorkbenchView } from "@/components/WorkbenchView";
 import { CatalogView } from "@/components/CatalogView";
@@ -28,7 +27,7 @@ export default function Home() {
     return () => { active = false; };
   }, [router]);
 
-  const [currentTab, setCurrentTab] = useState<AppTab>("overview");
+  const [currentTab, setCurrentTab] = useState<AppTab>("inbox");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [cases, setCases] = useState<RFQCase[]>([]);
   const [activeCase, setActiveCase] = useState<RFQCase | null>(null);
@@ -105,17 +104,6 @@ export default function Home() {
       <div className="rfq-sheet">
         <AppTopbar currentTab={currentTab} activeCaseTitle={activeCase?.title} />
         <main id="main-content" className="min-h-0 flex-1">
-          {currentTab === "overview" && (
-            <OverviewView
-              cases={cases}
-              loading={loadingCases}
-              error={casesError}
-              onOpenNewRfq={() => setIsIngestOpen(true)}
-              onOpenInbox={() => setCurrentTab("inbox")}
-              onSelectCase={handleSelectCase}
-              onRefresh={() => void fetchCases()}
-            />
-          )}
           {currentTab === "inbox" && (
             <InboxView
               cases={cases}

@@ -10,6 +10,7 @@ import {
   RFQCaseSummary,
   RFQLineItem,
   RFQLineItemUpdate,
+  ManualRFQLineCreateRequest,
   ReviewPlan,
   QuoteDraft,
   SpreadsheetSourcePreview,
@@ -95,6 +96,18 @@ export async function updateLineItem(
     "PATCH",
     update,
     "Failed to update line item"
+  );
+}
+
+export async function addManualRFQLine(
+  caseId: string,
+  request: ManualRFQLineCreateRequest,
+): Promise<RFQLineItem> {
+  return sendJson<RFQLineItem>(
+    `/api/rfqs/${encodeURIComponent(caseId)}/lines`,
+    "POST",
+    request,
+    "Could not add the manual review line",
   );
 }
 
@@ -253,21 +266,13 @@ export async function stageCatalogUpdate(input: { text?: string; file?: File; re
   return res.json();
 }
 
-async function reviewCatalogUpdate(proposalId: string, decision: "accept" | "reject", note?: string): Promise<CatalogUpdateProposal> {
-  return sendJson<CatalogUpdateProposal>(
-    `/api/catalogs/updates/${encodeURIComponent(proposalId)}/${decision}`,
+export async function reviewCatalogUpdates(decisions: { proposal_id: string; expected_version: number; decision: "accept" | "reject" }[]): Promise<CatalogUpdateProposal[]> {
+  return sendJson<CatalogUpdateProposal[]>(
+    "/api/catalogs/updates/review",
     "POST",
-    { note },
-    decision === "accept" ? "Change could not be applied" : "Change could not be rejected",
+    { decisions },
+    "Catalog changes could not be committed",
   );
-}
-
-export function acceptCatalogUpdate(proposalId: string): Promise<CatalogUpdateProposal> {
-  return reviewCatalogUpdate(proposalId, "accept");
-}
-
-export function rejectCatalogUpdate(proposalId: string): Promise<CatalogUpdateProposal> {
-  return reviewCatalogUpdate(proposalId, "reject");
 }
 
 export async function importCatalogCSV(file: File): Promise<CatalogImportResponse> {

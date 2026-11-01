@@ -93,6 +93,7 @@ review work without claiming that a five-row sample proves accuracy.
 - Match service: canonicalized *exact* part number + manufacturer matching over an imported catalog; possible collisions remain unresolved.
 - Export: deterministic XLSX/CSV, quote-preparation template, plain text **unsent** email draft.
 - Workbench documents: `GET /api/rfqs/{case_id}/exports` lists case-scoped generated worksheets and reports missing artifacts; original-source metadata and extraction warnings come from the case record. Recorded stock shortfalls are shared line blockers for readiness and export validation, and prevent approval until catalog stock is corrected.
+- Manual recovery: `POST /api/rfqs/{case_id}/lines` lets a reviewer add a source-text-backed row after extraction misses it. The row is labeled as operator-entered, gets HUMAN field provenance and an explicit no-machine-citation warning, is checked by the same exact catalog matcher and stock gates, and remains pending for individual review. It does not rewrite the original source or count as a parsed document region.
 - Auth: the protected single-workspace web UI validates each operator's own API key and keeps it in an encrypted, short-lived, HTTP-only session cookie. The same per-user key reaches FastAPI so backend roles and audit actors remain distinct; a shared privileged frontend API key is not used. Keys may be explicitly bound to one workspace ID, but startup rejects credentials containing multiple workspace IDs because persistence and every resource operation are still single-workspace. This is an identity/configuration guard, not tenant isolation. Use one isolated deployment and data store per customer until tenant-scoped database, catalog, worker, export, and file operations are implemented and adversarially tested.
 
 ## Components
@@ -147,6 +148,90 @@ review work without claiming that a five-row sample proves accuracy.
         sample passes -> explicit remaining-clean batch approval
         exceptions remain individual -> export blockers -> draft XLSX/CSV
                                           + unsent email
+
+## Operator workflows
+
+The interface has three work areas: **RFQ inbox** (start/open a buyer request),
+**Catalog** (inspect and edit the currently approved item data), and **Update data**
+(submit distributor documents or notes and review proposed catalog changes). The
+collapsible sidebar stays available in the request detail view. A request opens as
+its own workbench, similar to a project detail: source documents, processing and
+validation outcomes, every extracted row, source evidence, review history, and any
+generated draft documents remain together under one case.
+
+### Buyer request, from upload to draft
+
+```mermaid
+flowchart TD
+    A[Buyer email text, PDF, CSV or workbook] --> B[Validate file and retain original]
+    B --> C{Source shape}
+    C -->|CSV or XLSX with recognizable fields| D[Deterministic row extraction]
+    C -->|Email, text or PDF| E[GPT-6 Luna proposes line-item JSON from the full source]
+    D --> F[Pydantic schema and deterministic field checks]
+    E --> F
+    F --> G[Verbatim source and numeric grounding checks]
+    G --> H[Second Luna pass checks proposed fields against source]
+    H --> I[Exceptions and source-stratified human review]
+    I --> J[Exact manufacturer plus part-number catalog match]
+    J --> K[Reviewer checks customer identity, quantities, matches and stock]
+    K --> L[Application retrieves approved catalog prices and source records]
+    L --> M[Optional Luna evidence mapping selects only supplied source excerpts]
+    M --> N[Pydantic and deterministic Decimal validation]
+    N --> O[Draft worksheet and unsent reply]
+    O --> P[Human approval and normal customer process]
+```
+
+For unstructured customer email, pasted text, and PDF, Luna proposes fields from
+the full source so one paragraph can become multiple rows and context can travel
+across adjacent lines. The deterministic parser still supplies source coverage,
+OCR, and fallback evidence; Luna output cannot override the schema, source quote,
+numeric grounding, exact-match, stock, or reviewer gates. Every model-proposed
+row stays pending review. Region counts are not item counts and do not establish
+that the model found every requested item; reviewers compare the complete table
+with the original. When Luna is unavailable, the app retains any deterministic
+preview but marks it as an unstructured fallback for manual verification.
+
+CSV/XLSX rows with recognized structure remain deterministic for repeatability;
+rows with missing or ambiguous required fields can still be sent to Luna as a
+bounded fallback. This keeps a structured file from paying for a model call just
+to restate its columns.
+
+Pydantic validation is local schema validation, not a model call. It checks types
+and required shapes before business rules run. Price lookup is performed by the
+application against the active approved catalog. Luna does not search the whole
+database or invent prices. The optional quote evidence pass can select only the
+buyer and distributor excerpts already retrieved by application code; deterministic
+checks verify both excerpts are verbatim and contain the required part, quantity,
+price, and currency evidence. `Decimal` code calculates line and grand totals,
+and a second deterministic validation checks those results. A full unstructured
+quote can therefore involve an extraction proposal, its independent consistency
+pass, and a later evidence-mapping call at quote preparation.
+
+### Distributor data update
+
+```mermaid
+flowchart LR
+    A[Upload distributor file or paste a note] --> B[Retain original source]
+    B --> C{Source shape}
+    C -->|Recognized table| D[Deterministic extraction]
+    C -->|Unstructured note or document| E[GPT-6 Luna proposes fields]
+    D --> F[Validate schema, source quotes and values]
+    E --> F
+    F --> G[Compare with active catalog]
+    G --> H[Show new, changed, unchanged or blocked data with citations]
+    H -->|Accept| I[Write reviewed proposal and audit event]
+    H -->|Reject| J[Leave active catalog unchanged]
+    J --> K[Distributor describes correction or supplies a new source]
+    K --> E
+```
+
+Accept and reject decisions are selected per proposed item and remain staged in the UI. The final `Review done` request must include every pending actionable proposal at its expected version. SQLite commits accepted catalog rows and every decision in one transaction; a stale or incomplete batch applies nothing. Reject leaves catalog data unchanged and opens a correction composer for a revised proposal. Each proposal shows the current value, proposed value, source excerpt, location, and original file. `Review done` does not accept unchecked changes.
+
+The catalog stock count is an availability check. A request above recorded stock
+is flagged for a human decision; the system does not invent a partial shipment.
+Drafting a quote does not reserve or subtract inventory. Inventory reservation
+belongs to a later, human-confirmed order/ERP workflow, which is outside this
+single-host quotation-preparation prototype.
 
 Deterministic parse/OCR artifacts are zlib-compressed, limited to 10 MiB raw, and cached only within the same case. A worker retry reuses them only when source digest, parser profile, source-segmenter version, and relevant parser-library versions match. The artifact write is fenced by the live worker lease and case deletion removes it. Validated model results can also be reused only when `RFQ_LLM_DEPLOYMENT_VERSION` explicitly pins an immutable deployment revision; the key includes that version, model, prompt/schema/validator versions, and the exact source segments. Without that environment value, model-result caching is disabled. Both cache types are case-scoped and are removed with the case. The Luna client reuses one HTTP connection pool, applies process-local request pacing and concurrency bounds with a circuit breaker, retries transient timeouts/408/429/5xx at most once by default, honors only short provider `Retry-After` values inside its configured retry budget, and leaves malformed outputs to the single bounded repair/validation flow. Permanent errors, open-circuit rejections, and long quota waits return promptly to the explicit human-review path. The case records parser profile hash, cache-hit state, queue wait and stage durations, and (when Luna runs) model/deployment label, prompt hash, schema and validator versions, extraction/repair/validation call counts, and token usage when returned by the provider. Queue-depth/outcome metrics and provider deployment immutability still need operational verification. These provider controls are local to one process; a multi-process or multi-host deployment needs a shared limiter and breaker.
 
@@ -228,8 +313,7 @@ The review plan classifies every non-clean row as an exception, selects up to fi
 - POST /api/catalogs/import — validate/import tenant-authorized CSV.
 - POST /api/catalogs/updates — stage proposed catalog/reference changes from pasted text or an authorized file; does not mutate active records.
 - GET /api/catalogs/updates — list staged, accepted, rejected and reopened change proposals.
-- POST /api/catalogs/updates/{proposal_id}/accept — validate the pending proposal and apply one versioned update with an audit record.
-- POST /api/catalogs/updates/{proposal_id}/reject — record rejection without changing active catalog/reference records.
+- POST /api/catalogs/updates/review — validate all pending proposal versions and atomically apply accepted records plus accepted/rejected decisions after the distributor clicks Review done.
 - POST /api/catalogs/updates/{proposal_id}/reopen — create a revision from the user's plain-language correction and link it to the prior proposal.
 - GET /api/distributor-sources — **planned** searchable inventory for authorized distributor reference documents; arbitrary reference documents are not yet independently indexed.
 - POST /api/distributor-sources — **planned** upload and stage for a searchable source library. Today, accepted item facts from catalog updates retain their source evidence and can be retrieved for the matching item.

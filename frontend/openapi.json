@@ -23,6 +23,7 @@
           "CASE_CREATED",
           "PARSED",
           "LINE_EDITED",
+          "LINE_ADDED_MANUALLY",
           "LINE_APPROVED",
           "LINE_REJECTED",
           "LINE_FLAGGED",
@@ -408,6 +409,35 @@
         "title": "CaseStatus",
         "type": "string"
       },
+      "CatalogBatchReviewRequest": {
+        "properties": {
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogUpdateDecision"
+            },
+            "minItems": 1,
+            "title": "Decisions",
+            "type": "array"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "decisions"
+        ],
+        "title": "CatalogBatchReviewRequest",
+        "type": "object"
+      },
       "CatalogItem": {
         "description": "An approved record from the distributor's item master.",
         "properties": {
@@ -480,6 +510,35 @@
           "description"
         ],
         "title": "CatalogItem",
+        "type": "object"
+      },
+      "CatalogUpdateDecision": {
+        "properties": {
+          "decision": {
+            "enum": [
+              "accept",
+              "reject"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "proposal_id": {
+            "minLength": 1,
+            "title": "Proposal Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposal_id",
+          "expected_version",
+          "decision"
+        ],
+        "title": "CatalogUpdateDecision",
         "type": "object"
       },
       "CatalogUpdateProposal": {
@@ -648,25 +707,6 @@
           "created_by"
         ],
         "title": "CatalogUpdateProposal",
-        "type": "object"
-      },
-      "CatalogUpdateReviewRequest": {
-        "description": "Optional reviewer note for an explicit proposal decision.",
-        "properties": {
-          "note": {
-            "anyOf": [
-              {
-                "maxLength": 2000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
-          }
-        },
-        "title": "CatalogUpdateReviewRequest",
         "type": "object"
       },
       "ExportDocumentSummary": {
@@ -982,6 +1022,95 @@
           "status"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "ManualRFQLineCreateRequest": {
+        "description": "Reviewer-entered line for recovering an item the parser could not resolve.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "requested_manufacturer": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Manufacturer"
+          },
+          "requested_mpn": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Mpn"
+          },
+          "source_text": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Source Text",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "EA",
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "source_text"
+        ],
+        "title": "ManualRFQLineCreateRequest",
         "type": "object"
       },
       "MatchCandidate": {
@@ -2763,20 +2892,11 @@
         "summary": "Stage Catalog Update"
       }
     },
-    "/api/catalogs/updates/{proposal_id}/accept": {
+    "/api/catalogs/updates/review": {
       "post": {
-        "description": "Apply one complete, grounded proposal and invalidate stale RFQ matches.",
-        "operationId": "accept_catalog_update_api_catalogs_updates__proposal_id__accept_post",
+        "description": "Commit all staged decisions and active catalog updates atomically.",
+        "operationId": "review_catalog_updates_api_catalogs_updates_review_post",
         "parameters": [
-          {
-            "in": "path",
-            "name": "proposal_id",
-            "required": true,
-            "schema": {
-              "title": "Proposal Id",
-              "type": "string"
-            }
-          },
           {
             "in": "header",
             "name": "X-API-Key",
@@ -2814,18 +2934,22 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CatalogUpdateReviewRequest",
-                "default": {}
+                "$ref": "#/components/schemas/CatalogBatchReviewRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CatalogUpdateProposal"
+                  "items": {
+                    "$ref": "#/components/schemas/CatalogUpdateProposal"
+                  },
+                  "title": "Response Review Catalog Updates Api Catalogs Updates Review Post",
+                  "type": "array"
                 }
               }
             },
@@ -2842,89 +2966,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Accept Catalog Update"
-      }
-    },
-    "/api/catalogs/updates/{proposal_id}/reject": {
-      "post": {
-        "description": "Record rejection while leaving active distributor records untouched.",
-        "operationId": "reject_catalog_update_api_catalogs_updates__proposal_id__reject_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "proposal_id",
-            "required": true,
-            "schema": {
-              "title": "Proposal Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CatalogUpdateReviewRequest",
-                "default": {}
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogUpdateProposal"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Reject Catalog Update"
+        "summary": "Review Catalog Updates"
       }
     },
     "/api/catalogs/updates/{proposal_id}/source": {
@@ -3745,6 +3787,86 @@
           }
         },
         "summary": "Get Rfq Lines"
+      },
+      "post": {
+        "description": "Let an operator recover a source item extraction could not turn into a row.",
+        "operationId": "add_manual_rfq_line_api_rfqs__case_id__lines_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualRFQLineCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RFQLineItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Manual Rfq Line"
       }
     },
     "/api/rfqs/{case_id}/lines/{line_id}": {
@@ -5025,9 +5147,17 @@
             "name": "currency",
             "required": false,
             "schema": {
-              "default": "USD",
-              "title": "Currency",
-              "type": "string"
+              "anyOf": [
+                {
+                  "maxLength": 3,
+                  "minLength": 3,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Currency"
             }
           },
           {

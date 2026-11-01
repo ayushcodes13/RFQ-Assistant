@@ -7,7 +7,7 @@ import { QuoteDraft, QuoteDraftSource, RFQCase } from "@/types";
 
 function money(value?: string | null, currency?: string | null) {
   if (value == null) return "—";
-  return `${currency || ""} ${value}`.trim();
+  return currency ? `${currency} ${value}` : `${value} · currency missing`;
 }
 
 function sourceLocation(source: QuoteDraftSource) {
@@ -34,6 +34,9 @@ export function QuotePreparationPanel({ caseData }: { caseData: RFQCase }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedSource, setSelectedSource] = useState<{ line: number; source: QuoteDraftSource } | null>(null);
+  const waitingForExtraction = caseData.status === "PROCESSING" || caseData.status === "NEW";
+  const hasNoLines = caseData.line_count === 0;
+  const cannotPrepare = waitingForExtraction || hasNoLines;
 
   useEffect(() => {
     let active = true;
@@ -73,11 +76,13 @@ export function QuotePreparationPanel({ caseData }: { caseData: RFQCase }) {
           <h2 id="quote-preparation-heading" className="text-sm font-semibold text-[#1d2b30]">Quote preparation</h2>
           <p className="mt-0.5 text-xs text-[#52656b]">Build a source-linked draft for review. This does not approve or send a quotation.</p>
         </div>
-        <button type="button" className="rfq-secondary" disabled={busy} onClick={() => void prepare()}>
+        <button type="button" className="rfq-secondary" disabled={busy || cannotPrepare} onClick={() => void prepare()}>
           {busy ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" /> : <ReceiptText size={15} aria-hidden="true" />}
           {busy ? "Preparing draft…" : draft ? "Refresh quote draft" : "Prepare quote draft"}
         </button>
       </div>
+
+      {cannotPrepare && <p className="mt-3 text-xs text-[#78500a]" role="status">{waitingForExtraction ? "Wait for extraction to finish before preparing a quote." : "Add or recover a request line before preparing a quote."}</p>}
 
       {error && <p className="mt-3 text-sm text-[#84241f]" role="alert">{error}</p>}
       {!draft && !busy && <p className="mt-3 text-xs text-[#667980]">No quote draft prepared yet. Extract and review the request first, then prepare a draft to see catalog prices and source evidence.</p>}
@@ -93,13 +98,14 @@ export function QuotePreparationPanel({ caseData }: { caseData: RFQCase }) {
           {draft.quote_proposal_warnings.map((item, index) => <p key={`warning-${index}`} className="flex gap-2"><AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden="true" />{item}</p>)}
         </div>}
         <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[680px] border-collapse text-left text-[12px]">
-            <thead><tr className="border-b border-[#dfe7e9] text-[#52656b]"><th className="py-2 pr-3 font-medium">Requested part</th><th className="py-2 pr-3 text-right font-medium">Qty</th><th className="py-2 pr-3 text-right font-medium">Unit price</th><th className="py-2 pr-3 text-right font-medium">Line total</th><th className="py-2 pr-3 font-medium">Review</th><th className="py-2 font-medium">Evidence</th></tr></thead>
+          <table className="w-full min-w-[760px] border-collapse text-left text-[12px]">
+            <thead><tr className="border-b border-[#dfe7e9] text-[#52656b]"><th className="py-2 pr-3 font-medium">Requested part</th><th className="py-2 pr-3 text-right font-medium">Qty requested</th><th className="py-2 pr-3 text-right font-medium">Catalog stock</th><th className="py-2 pr-3 text-right font-medium">Unit price</th><th className="py-2 pr-3 text-right font-medium">Line total</th><th className="py-2 pr-3 font-medium">Review</th><th className="py-2 font-medium">Evidence</th></tr></thead>
             <tbody>{draft.lines.map((line) => {
               const lineErrors = draft.validation_errors.filter((item) => item.startsWith(`Line ${line.line_no}:`));
               return <tr key={line.line_no} className="border-b border-[#edf1f2] align-top">
                 <th scope="row" className="py-2 pr-3 font-medium text-[#1d2b30]">{line.requested_mpn}<span className="mt-0.5 block font-normal text-[#667980]">{line.requested_manufacturer || line.description || "Manufacturer or description not supplied"}</span></th>
                 <td className="py-2 pr-3 text-right tabular-nums">{line.quantity == null ? "—" : `${line.quantity} ${line.unit}`}</td>
+                <td className="py-2 pr-3 text-right tabular-nums">{line.stock_qty == null ? "Not recorded" : line.stock_qty}</td>
                 <td className="py-2 pr-3 text-right tabular-nums">{money(line.unit_price, line.currency)}</td>
                 <td className="py-2 pr-3 text-right tabular-nums">{money(line.line_total, line.currency)}</td>
                 <td className="py-2 pr-3">{lineErrors.length ? <span className="text-[#84241f]">Needs review</span> : line.requires_human_review ? <span className="text-[#78500a]">Operator review</span> : <span className="text-[#52656b]">Ready for review</span>}</td>

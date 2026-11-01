@@ -72,14 +72,15 @@ from rfq_assistant.schemas.models import (
     ApproveRemainingRequest,
     AuditEvent,
     BatchReviewRequest,
+    CatalogBatchReviewRequest,
     CatalogItem,
     CatalogUpdateProposal,
-    CatalogUpdateReviewRequest,
     ExportDocumentSummary,
     ExportManifest,
     ExportRequest,
     ExtractionWarning,
     HealthResponse,
+    ManualRFQLineCreateRequest,
     RematchLineRequest,
     ReviewPlan,
     RFQCase,
@@ -424,31 +425,22 @@ async def stage_catalog_update(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.post("/api/catalogs/updates/{proposal_id}/accept", response_model=CatalogUpdateProposal)
-def accept_catalog_update(
-    proposal_id: str,
-    request: CatalogUpdateReviewRequest = Body(default=CatalogUpdateReviewRequest()),
+@app.post("/api/catalogs/updates/review", response_model=List[CatalogUpdateProposal])
+def review_catalog_updates(
+    request: CatalogBatchReviewRequest,
     current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
-    """Apply one complete, grounded proposal and invalidate stale RFQ matches."""
+    """Commit all staged decisions and active catalog updates atomically."""
     try:
-        proposal = catalog_update_service.review(proposal_id, actor=current_user.name, accept=True, note=request.note)
-        if proposal.current_item and proposal.current_item.catalog_version:
-            case_manager.handle_catalog_replacement(current_user.name, proposal.current_item.catalog_version)
-        return proposal
-    except CatalogUpdateError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-@app.post("/api/catalogs/updates/{proposal_id}/reject", response_model=CatalogUpdateProposal)
-def reject_catalog_update(
-    proposal_id: str,
-    request: CatalogUpdateReviewRequest = Body(default=CatalogUpdateReviewRequest()),
-    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
-):
-    """Record rejection while leaving active distributor records untouched."""
-    try:
-        return catalog_update_service.review(proposal_id, actor=current_user.name, accept=False, note=request.note)
+        proposals = catalog_update_service.review_batch(
+            [decision.model_dump() for decision in request.decisions],
+            actor=current_user.name,
+            note=request.note,
+        )
+        versions = {p.current_item.catalog_version for p in proposals if p.current_item and p.current_item.catalog_version}
+        if versions:
+            case_manager.handle_catalog_replacement(current_user.name, sorted(versions)[-1])
+        return proposals
     except CatalogUpdateError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -889,6 +881,19 @@ def update_rfq_line(
     return updated
 
 
+@app.post("/api/rfqs/{case_id}/lines", response_model=RFQLineItem, status_code=status.HTTP_201_CREATED)
+def add_manual_rfq_line(
+    case_id: str,
+    request: ManualRFQLineCreateRequest,
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
+):
+    """Let an operator recover a source item extraction could not turn into a row."""
+    line = case_manager.add_manual_line(case_id, request, actor=current_user.name)
+    if line is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ case not found.")
+    return line
+
+
 @app.post(
     "/api/rfqs/{case_id}/lines/{line_id}/rematch",
     response_model=RFQLineItem,
@@ -1211,7 +1216,7 @@ def v1_match_rfq(
 @app.post("/v1/rfqs/{case_id}/draft-quote")
 def v1_draft_quote(
     case_id: str,
-    currency: str = "USD",
+    currency: Optional[str] = Query(default=None, min_length=3, max_length=3),
     current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     """V1 Draft Quote: Compiles ProposedQuote with provenance, authoritative pricing, and draft hash."""
@@ -1220,6 +1225,11 @@ def v1_draft_quote(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ case not found.")
 
     lines = case_manager.get_lines(case_id)
+    if not lines:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No request lines are available yet. Finish extraction or add a line before preparing a quote.",
+        )
     quote_lines: List[QuoteLine] = []
     buyer_quote_inputs = []
     distributor_quote_records = []
@@ -1269,6 +1279,7 @@ def v1_draft_quote(
                 catalogue_part_id=catalog_item.internal_sku if catalog_item else None,
                 description=line.description or (catalog_item.description if catalog_item else None),
                 quantity=Decimal(str(line.quantity)) if line.quantity is not None else None,
+                stock_qty=catalog_item.stock_qty if catalog_item else None,
                 unit=line.unit or "EA",
                 unit_price=unit_price,
                 currency=(catalog_item.currency if catalog_item and catalog_item.currency else currency),
@@ -1291,7 +1302,7 @@ def v1_draft_quote(
             evidence_text = (
                 f"Internal SKU {catalog_item.internal_sku}; manufacturer {catalog_item.manufacturer}; "
                 f"MPN {catalog_item.manufacturer_part_number}; description {catalog_item.description}; "
-                f"list price {unit_price} {catalog_item.currency or currency}; stock {catalog_item.stock_qty}"
+                f"list price {unit_price} {catalog_item.currency or currency or '(currency not recorded)'}; stock {catalog_item.stock_qty}"
             )
             source_locator = {}
             for proposal in accepted_updates:
@@ -1364,11 +1375,16 @@ def v1_draft_quote(
             "GPT-6 Luna quote evidence mapping is not configured. Values were copied only from the active catalog; configure Luna before treating this as a model-prepared draft."
         )
 
+    line_currencies = {line.currency for line in quote_lines}
+    resolved_quote_currency = currency
+    if resolved_quote_currency is None and len(line_currencies) == 1 and None not in line_currencies:
+        resolved_quote_currency = next(iter(line_currencies))
+
     draft = ProposedQuote(
         quote_id=quote_id,
         case_id=case_id,
         customer_name=case.customer_label or "Valued Customer",
-        currency=currency,
+        currency=resolved_quote_currency,
         source_state_hash=_rfq_source_snapshot_hash(case_id),
         total_amount=calculate_quote_total(quote_lines),
         lines=quote_lines,

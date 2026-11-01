@@ -73,6 +73,8 @@ def _is_prefixed_numeric_mpn(value: str) -> bool:
 class TextParser(BaseDocumentParser):
     """Parses plain text RFQs and email bodies deterministically."""
 
+    artifact_version = "rfq-text-multi-item-v1"
+
     def parse(self, content: bytes, filename: str = "pasted_email.txt") -> ParsedDocumentResult:
         text = content.decode("utf-8", errors="replace")
         raw_lines = text.splitlines()
@@ -93,9 +95,16 @@ class TextParser(BaseDocumentParser):
                 continue
             locator = SourceLocator(file_name=filename, row_number=row_idx, text_snippet=clean[:120])
 
-            def record(disposition: str, rule_code: str) -> None:
+            def record(
+                disposition: str,
+                rule_code: str,
+                *,
+                text_value: str = rline,
+                region_id: str = f"text-row-{row_idx}",
+                region_locator: SourceLocator = locator,
+            ) -> None:
                 source_coverage.append(make_coverage_entry(
-                    f"text-row-{row_idx}", locator, rline, disposition, rule_code
+                    region_id, region_locator, text_value, disposition, rule_code
                 ))
 
             if len(clean) < 4:
@@ -116,15 +125,33 @@ class TextParser(BaseDocumentParser):
             if stripped:
                 clean = stripped
 
+            has_item_indicator = bool(
+                re.match(r"^(?:\d+[\.\)]|\-|\*|\•)\s*", clean)
+                or re.search(r"\b(?:\d+\s*(?:pcs|units?|ea|x)\b)", clean, re.IGNORECASE)
+                or any(oem.lower() in clean.lower() for oem in KNOWN_OEMS)
+                or re.search(r"\b[A-Z0-9]{3,}[-_][A-Z0-9]+\b", clean)
+                or re.search(VAGUE_ITEM_REFERENCE, clean, re.IGNORECASE)
+            )
+
             if re.match(
                 r"^(?:from:|to:|cc:|subject:|date:|hi\b|hello\b|dear\b|thanks\b|best regards\b|sincerely\b|confidential\b|synthetic notice\b)",
                 clean,
                 re.IGNORECASE,
             ):
-                record("filtered_metadata", "EMAIL_HEADER_OR_GREETING")
-                if re.match(r"^(?:thanks|best regards|sincerely)\b", clean, re.IGNORECASE):
-                    in_signature = True
-                continue
+                # A pasted email can arrive as one wrapped paragraph. Preserve
+                # a greeting-prefixed request when it also contains item clues;
+                # structured headers such as Date: can contain hyphenated
+                # tokens that resemble part numbers and must stay metadata.
+                is_greeting = bool(re.match(r"^(?:hi\b|hello\b|dear\b)", clean, re.IGNORECASE))
+                if is_greeting and has_item_indicator:
+                    # Keep the original greeting and paragraph in raw_text and
+                    # provenance. It is context, not an item boundary.
+                    pass
+                else:
+                    record("filtered_metadata", "EMAIL_HEADER_OR_GREETING")
+                    if re.match(r"^(?:thanks|best regards|sincerely)\b", clean, re.IGNORECASE):
+                        in_signature = True
+                    continue
 
             if in_signature:
                 record("filtered_metadata", "EMAIL_SIGNATURE")
@@ -152,6 +179,39 @@ class TextParser(BaseDocumentParser):
                     text=clean,
                 ))
                 record("review_candidate", "NO_DETERMINISTIC_ITEM_INDICATOR")
+                continue
+
+            # One email paragraph can request several different parts. Split
+            # only at visible separators when both resulting spans contain an
+            # item clue; keep every split span tied to its exact source text.
+            clauses = self._split_multi_item_clauses(clean)
+            if len(clauses) > 1:
+                for clause_number, clause in enumerate(clauses, start=1):
+                    clause_locator = SourceLocator(
+                        file_name=filename,
+                        row_number=row_idx,
+                        text_snippet=clause[:120],
+                    )
+                    region_id = f"text-row-{row_idx}-item-{clause_number}"
+                    parsed = self._parse_item_line(clause, filename, row_idx, line_counter)
+                    if parsed:
+                        parsed.source_segment_id = f"draft-line-{line_counter}"
+                        lines.append(parsed)
+                        record(
+                            "structured_line", "DETERMINISTIC_MULTI_ITEM_SPAN",
+                            text_value=clause, region_id=region_id, region_locator=clause_locator,
+                        )
+                        line_counter += 1
+                    else:
+                        candidate_segments.append(EvidenceSegment(
+                            segment_id=f"candidate-text-{row_idx}-item-{clause_number}",
+                            locator=clause_locator,
+                            text=clause,
+                        ))
+                        record(
+                            "review_candidate", "MULTI_ITEM_SPAN_UNRESOLVED",
+                            text_value=clause, region_id=region_id, region_locator=clause_locator,
+                        )
                 continue
 
             # Do not let a recognizable part on a line hide a second vague
@@ -196,6 +256,7 @@ class TextParser(BaseDocumentParser):
                                 severity="warning",
                             )
                         ],
+                        source_segment_id=f"draft-line-{line_counter}",
                     )
                 )
                 record("structured_line", "VAGUE_ITEM_REFERENCE_PRESERVED")
@@ -205,6 +266,7 @@ class TextParser(BaseDocumentParser):
             # Parse standard item line
             parsed = self._parse_item_line(clean, filename, row_idx, line_counter)
             if parsed:
+                parsed.source_segment_id = f"draft-line-{line_counter}"
                 lines.append(parsed)
                 record("structured_line", "DETERMINISTIC_TEXT_PARSE")
                 line_counter += 1
@@ -257,6 +319,36 @@ class TextParser(BaseDocumentParser):
             candidate_segments=candidate_segments,
             source_coverage=source_coverage.build(),
         )
+
+    @classmethod
+    def _split_multi_item_clauses(cls, text: str) -> list[str]:
+        separators = re.compile(r"(\s*(?:[;,]|\+|\b(?:and|plus|also)\b)\s*|(?<=[.!?])\s+)", re.IGNORECASE)
+        parts = separators.split(text)
+        if len(parts) < 3:
+            return [text]
+
+        def has_item_clue(value: str) -> bool:
+            return bool(
+                any(oem.casefold() in value.casefold() for oem in KNOWN_OEMS)
+                or cls._extract_mpn(value)
+                or re.search(VAGUE_ITEM_REFERENCE, value, re.IGNORECASE)
+            )
+
+        clauses: list[str] = []
+        current = parts[0]
+        index = 1
+        while index + 1 < len(parts):
+            separator, following = parts[index], parts[index + 1]
+            if has_item_clue(current) and has_item_clue(following):
+                if current.strip():
+                    clauses.append(current.strip())
+                current = following
+            else:
+                current += separator + following
+            index += 2
+        if current.strip():
+            clauses.append(current.strip())
+        return clauses if len(clauses) > 1 else [text]
 
     def _parse_item_line(
         self, raw_line: str, filename: str, row_idx: int, line_counter: int
@@ -338,6 +430,20 @@ class TextParser(BaseDocumentParser):
         m2 = re.match(r"^(\d+(?:\.\d+)?)\s+", text)
         if m2:
             return float(m2.group(1)), "EA"
+
+        # Informal notes often put a count before the manufacturer without a
+        # unit word (including phrases such as Hindi "कुल 3 Siemens …"). Only
+        # accept one number before a recognized manufacturer; otherwise a
+        # specification or reference number could be mistaken for quantity.
+        manufacturer_match = next(
+            (match for oem in KNOWN_OEMS if (match := re.search(rf"\b{re.escape(oem)}\b", text, re.IGNORECASE))),
+            None,
+        )
+        if manufacturer_match:
+            prefix = text[:manufacturer_match.start()]
+            number_tokens = re.findall(r"(?<![A-Za-z0-9])\d+(?:\.\d+)?(?![A-Za-z0-9])", prefix)
+            if len(number_tokens) == 1:
+                return float(number_tokens[0]), "EA"
 
         return None, "EA"
 

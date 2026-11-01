@@ -19,8 +19,8 @@ test("nullable catalog values clear through an explicit reviewed proposal", asyn
   expect(staged.ok()).toBe(true);
   const [seedProposal] = await staged.json();
   const acceptedSeed = await page.request.post(
-    `/api/proxy/api/catalogs/updates/${seedProposal.proposal_id}/accept`,
-    { data: {} },
+    `/api/proxy/api/catalogs/updates/review`,
+    { data: { decisions: [{ proposal_id: seedProposal.proposal_id, expected_version: seedProposal.version, decision: "accept" }] } },
   );
   expect(acceptedSeed.ok()).toBe(true);
 
@@ -40,7 +40,15 @@ test("nullable catalog values clear through an explicit reviewed proposal", asyn
   await expect(proposal.getByRole("row", { name: /list price.*Clear stored value/ })).toBeVisible();
   await expect(proposal.getByRole("row", { name: /stock qty.*Clear stored value/ })).toBeVisible();
 
-  await proposal.getByRole("button", { name: /^Accept proposal/ }).click();
+  await proposal.getByRole("button", { name: /^Mark proposal .* accepted/ }).click();
+  const stagedResponse = await page.request.get("/api/proxy/api/catalogs");
+  expect(stagedResponse.ok()).toBe(true);
+  const stagedItems = await stagedResponse.json();
+  const stagedItem = stagedItems.find((row: { internal_sku: string }) => row.internal_sku === sku);
+  expect(stagedItem.list_price).toBe(42.5);
+  expect(stagedItem.stock_qty).toBe(8);
+
+  await page.getByRole("button", { name: "Review done" }).click();
   const response = await page.request.get("/api/proxy/api/catalogs");
   expect(response.ok()).toBe(true);
   const items = await response.json();

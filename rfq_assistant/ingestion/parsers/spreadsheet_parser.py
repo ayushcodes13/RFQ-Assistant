@@ -62,9 +62,14 @@ def identify_columns(headers: List[str]) -> Dict[str, int]:
     """
     mapping: Dict[str, int] = {}
     patterns = {
-        "mpn": [r"^part\s*(?:#|number|no)?$", r"^mpn$", r"^catalog\s*(?:#|no)?$", r"^model$", r"^p/n$", r"^item\s*code$"],
-        "manufacturer": [r"^manufacturer$", r"^mfr$", r"^brand$", r"^oem$", r"^make$", r"^vendor$"],
-        "quantity": [r"^qty$", r"^quantity$", r"^count$", r"^pcs$", r"^amount$"],
+        "mpn": [
+            r"^part\s*(?:#|number|no\.?|num(?:ber)?\.?|id)$",
+            r"^manufacturer[_\s-]*part[_\s-]*(?:#|number|no\.?|num(?:ber)?\.?)$",
+            r"^mfr\.?[_\s-]*part[_\s-]*(?:#|number|no\.?|num(?:ber)?\.?)$",
+            r"^mpn$", r"^catalog\s*(?:#|no)?$", r"^model$", r"^p/n$", r"^item\s*code$",
+        ],
+        "manufacturer": [r"^manufacturer(?:\s+name)?$", r"^mfr(?:\.?\s*name)?$", r"^brand$", r"^oem$", r"^make$", r"^vendor$"],
+        "quantity": [r"^(?:requested|req(?:uested)?|order)?\s*(?:qty|quantity)$", r"^count$", r"^pcs$", r"^amount$"],
         "description": [r"^desc$", r"^description$", r"^item\s*description$", r"^specification$", r"^details$"],
         "unit": [r"^uom$", r"^unit$", r"^unit\s*of\s*measure$"],
         "notes": [r"^notes?$", r"^remarks?$", r"^comments?$"],
@@ -73,7 +78,7 @@ def identify_columns(headers: List[str]) -> Dict[str, int]:
     for col_idx, header in enumerate(headers):
         if not header:
             continue
-        cleaned = header.strip().lower()
+        cleaned = re.sub(r"\s+", " ", header.strip().lower().replace("_", " ").replace("-", " "))
         for attr, regex_list in patterns.items():
             if attr not in mapping:
                 for rgx in regex_list:
