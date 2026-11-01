@@ -22,7 +22,7 @@ flowchart LR
     V --> X[Draft XLSX/CSV and unsent clarification text]
 ```
 
-The main UI uses `/api` routes for intake, review, and worksheet export. The case workbench also exposes quote preparation through `/v1`; saved quote drafts persist in the local SQLite database and show line-level validation plus source evidence. Quote approval records still live in memory and should not be treated as durable audit history. The quote flow does not send a customer message. The RFQ agent is not used by the main intake path. Scanned-PDF OCR is not configured by default. ERPNext and InvenTree files currently map data structures; they do not connect to those products.
+The main UI uses `/api` routes for intake, review, and worksheet export. The case workbench also exposes quote preparation through `/v1`; saved quote drafts persist in the local SQLite database and show line-level validation plus source evidence. Quote approval/rejection/revocation records now persist as append-only SQLite events tied to each quote, and the latest decision is restored on process restart. The main UI still does not expose a complete quote-approval lifecycle. This single-host record is not a production audit system or a substitute for tenant isolation. The quote flow does not send a customer message. The RFQ agent is not used by the main intake path. Scanned-PDF OCR is not configured by default. ERPNext and InvenTree files currently map data structures; they do not connect to those products.
 
 The current API can check API keys and roles when authentication is enabled, but all users still share one case manager, SQLite database, and local file store. That is not customer-to-customer data separation. Local/demo defaults must not be used for live customer RFQs.
 

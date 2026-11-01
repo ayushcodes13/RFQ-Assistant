@@ -72,6 +72,10 @@ class StateStore(Protocol):
     def commit_catalog_update_batch(self, items: List[Any], proposals: List[Dict[str, Any]], expected_versions: Dict[str, int]) -> None: ...
     def load_quote_drafts(self) -> List[Dict[str, Any]]: ...
     def save_quote_draft(self, payload: Dict[str, Any]) -> None: ...
+    def load_quote_decisions(self) -> List[Dict[str, Any]]: ...
+    def save_quote_draft_with_decision(
+        self, draft: Dict[str, Any], decision: Optional[Dict[str, Any]] = None
+    ) -> None: ...
 
 
 class SQLiteStateStore:
@@ -130,6 +134,13 @@ class SQLiteStateStore:
                     payload TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS quote_drafts_case_idx ON quote_drafts(case_id);
+                CREATE TABLE IF NOT EXISTS quote_decisions (
+                    decision_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    quote_id TEXT NOT NULL REFERENCES quote_drafts(quote_id) ON DELETE CASCADE,
+                    payload TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS quote_decisions_quote_idx
+                    ON quote_decisions(quote_id, decision_id);
                 CREATE TABLE IF NOT EXISTS ingestion_jobs (
                     job_id TEXT PRIMARY KEY,
                     case_id TEXT NOT NULL UNIQUE REFERENCES rfq_cases(case_id) ON DELETE CASCADE,
@@ -524,10 +535,29 @@ class SQLiteStateStore:
             ).fetchall()
             return [json.loads(row["payload"]) for row in rows]
 
-    def save_quote_draft(self, payload: Dict[str, Any]) -> None:
+    def load_quote_decisions(self) -> List[Dict[str, Any]]:
+        """Return decisions in append order so the latest event determines current state."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload FROM quote_decisions ORDER BY decision_id"
+            ).fetchall()
+            return [json.loads(row["payload"]) for row in rows]
+
+    def save_quote_draft_with_decision(
+        self, draft: Dict[str, Any], decision: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Atomically persist a quote snapshot and its review/revocation event."""
         with self._connect() as connection:
             connection.execute(
                 "INSERT INTO quote_drafts(quote_id, case_id, payload) VALUES(?, ?, ?) "
                 "ON CONFLICT(quote_id) DO UPDATE SET case_id=excluded.case_id, payload=excluded.payload",
-                (payload["quote_id"], payload["case_id"], json.dumps(payload, ensure_ascii=False, separators=(",", ":"))),
+                (draft["quote_id"], draft["case_id"], json.dumps(draft, ensure_ascii=False, separators=(",", ":"))),
             )
+            if decision is not None:
+                connection.execute(
+                    "INSERT INTO quote_decisions(quote_id, payload) VALUES(?, ?)",
+                    (draft["quote_id"], json.dumps(decision, ensure_ascii=False, separators=(",", ":"))),
+                )
+
+    def save_quote_draft(self, payload: Dict[str, Any]) -> None:
+        self.save_quote_draft_with_decision(payload)
