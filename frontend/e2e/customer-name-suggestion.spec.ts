@@ -33,7 +33,7 @@ test("conflicting customer headers do not propose an automatic identity", async 
   await page.getByRole("button", { name: /New RFQ/i }).first().click();
   const modal = page.getByRole("dialog", { name: "New RFQ" });
   await modal.getByRole("textbox", { name: "Customer email text" }).fill(
-    "Company: Alpha Controls\\nCompany: Beta Controls\\nPlease quote 2 pcs Siemens 6ES7223-1BL32-0XB0.",
+    "Company: Alpha Controls\nCompany: Beta Controls\nPlease quote 2 pcs Siemens 6ES7223-1BL32-0XB0.",
   );
   await expect(modal.getByRole("button", { name: /Email header suggests/ })).toHaveCount(0);
   await expect(modal.getByPlaceholder("Optional customer label")).toHaveValue("");
