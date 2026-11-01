@@ -565,6 +565,15 @@ class GroundedLLMExtractor:
             ))
             result = self._review(result, segments, complete=complete)
             return attach_metrics(result, repair_calls=1)
+        # A malformed proposal must not erase independently grounded neighboring
+        # requests after the single repair attempt. Keep valid lines and create
+        # source-backed, blocking placeholders for the invalid ones.
+        recovered = self._recover_valid_lines(repaired, segments)
+        if recovered is None:
+            recovered = self._recover_valid_lines(raw, segments)
+        if recovered is not None:
+            recovered = self._review(recovered, segments, complete=complete)
+            return attach_metrics(recovered, repair_calls=1)
         return attach_metrics(self._failure(
             "Model extraction failed schema or source-grounding validation: " + "; ".join(repair_error),
         ), repair_calls=1)
@@ -629,6 +638,51 @@ class GroundedLLMExtractor:
         result.llm_review_call_count += 1
         return result
 
+    @staticmethod
+    def _validated_line(
+        line: ProposedExtractionLine, segment: EvidenceSegment
+    ) -> ParsedLineDraft:
+        if _compact_whitespace(line.source_quote) not in _compact_whitespace(segment.text):
+            raise ValueError(f"line {line.line_number} source_quote is not verbatim in its segment")
+        quote = line.source_quote
+        for name in ("requested_manufacturer", "requested_mpn", "description", "unit"):
+            value = getattr(line, name)
+            if value and not _is_verbatim(value, quote):
+                raise ValueError(f"line {line.line_number} {name} is not verbatim in source_quote")
+        if not _quantity_is_grounded(line.quantity, line.unit, quote):
+            raise ValueError(f"line {line.line_number} quantity is not present in source_quote")
+        normalized_quantity = None
+        if line.quantity is not None:
+            try:
+                normalized_quantity = _decimal_quantity_as_float(line.quantity)
+            except ValueError as exc:
+                raise ValueError(
+                    f"line {line.line_number} quantity cannot be represented safely"
+                ) from exc
+        return ParsedLineDraft(
+            line_number=line.line_number,
+            raw_text=quote,
+            source_locator=segment.locator.model_copy(update={"text_snippet": quote[:120]}),
+            requested_manufacturer=line.requested_manufacturer,
+            requested_mpn=line.requested_mpn,
+            description=line.description,
+            quantity=normalized_quantity,
+            unit=line.unit,
+            source_segment_id=line.segment_id,
+            field_origins={
+                name: "LUNA"
+                for name in (
+                    "requested_manufacturer", "requested_mpn", "description", "quantity", "unit"
+                )
+                if getattr(line, name) is not None
+            },
+            extraction_warnings=[*segment.warnings, ExtractionWarning(
+                code="LLM_PROPOSED_EXTRACTION",
+                message="Fields were proposed by an LLM and require human verification against the original source.",
+                severity="warning",
+            )],
+        )
+
     def _validate(self, raw: str, segments: List[EvidenceSegment]):
         try:
             payload = json.loads(raw, parse_float=Decimal)
@@ -651,49 +705,97 @@ class GroundedLLMExtractor:
             segment = by_id.get(line.segment_id)
             if segment is None:
                 return None, [f"unknown source segment {line.segment_id}"]
-            if _compact_whitespace(line.source_quote) not in _compact_whitespace(segment.text):
-                return None, [f"line {line.line_number} source_quote is not verbatim in its segment"]
-            quote = line.source_quote
-            for name in ("requested_manufacturer", "requested_mpn", "description", "unit"):
-                value = getattr(line, name)
-                if value and not _is_verbatim(value, quote):
-                    return None, [f"line {line.line_number} {name} is not verbatim in source_quote"]
-            if not _quantity_is_grounded(line.quantity, line.unit, quote):
-                return None, [f"line {line.line_number} quantity is not present in source_quote"]
-            normalized_quantity = None
-            if line.quantity is not None:
-                # RFQLineItem currently stores quantities as a Python float.
-                # Reject a grounded Decimal if conversion would overflow or
-                # change its decimal value; otherwise a valid JSON number could
-                # silently become infinity or a different commercial quantity.
-                try:
-                    normalized_quantity = _decimal_quantity_as_float(line.quantity)
-                except ValueError:
-                    return None, [f"line {line.line_number} quantity cannot be represented safely"]
-            parsed_lines.append(ParsedLineDraft(
-                line_number=line.line_number,
-                raw_text=quote,
-                source_locator=segment.locator.model_copy(update={"text_snippet": quote[:120]}),
-                requested_manufacturer=line.requested_manufacturer,
-                requested_mpn=line.requested_mpn,
-                description=line.description,
-                quantity=normalized_quantity,
-                unit=line.unit,
-                source_segment_id=line.segment_id,
-                field_origins={
-                    name: "LUNA"
-                    for name in (
-                        "requested_manufacturer", "requested_mpn", "description", "quantity", "unit"
-                    )
-                    if getattr(line, name) is not None
-                },
-                extraction_warnings=[*segment.warnings, ExtractionWarning(
-                    code="LLM_PROPOSED_EXTRACTION",
-                    message="Fields were proposed by an LLM and require human verification against the original source.",
-                    severity="warning",
-                )],
-            ))
+            try:
+                parsed_lines.append(self._validated_line(line, segment))
+            except ValueError as exc:
+                return None, [str(exc)]
         return ParsedDocumentResult(lines=parsed_lines, total_lines_detected=len(parsed_lines)), []
+
+    def _recover_valid_lines(
+        self, raw: str, segments: List[EvidenceSegment]
+    ) -> ParsedDocumentResult | None:
+        """After a failed repair, retain independently grounded valid rows.
+
+        Invalid rows become source-linked human exceptions, never inferred
+        fields or silently omitted items. Invalid/unknown source IDs remain a
+        document-level completeness warning.
+        """
+        try:
+            payload = json.loads(raw, parse_float=Decimal)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        if not isinstance(payload, dict) or not isinstance(payload.get("lines"), list):
+            return None
+        items = payload["lines"]
+        if not 2 <= len(items) <= 500:
+            return None
+        by_id = {segment.segment_id: segment for segment in segments}
+        recovered: List[ParsedLineDraft] = []
+        valid_count = 0
+        invalid_count = 0
+        for index, item in enumerate(items, start=1):
+            segment_id = item.get("segment_id") if isinstance(item, dict) else None
+            segment = by_id.get(segment_id) if isinstance(segment_id, str) else None
+            try:
+                if not isinstance(item, dict):
+                    raise ValueError("proposed line is not a JSON object")
+                quantity = item.get("quantity")
+                if quantity is not None and (
+                    isinstance(quantity, bool) or not isinstance(quantity, (int, Decimal))
+                ):
+                    raise ValueError("quantity must be a JSON number")
+                line = ProposedExtractionLine.model_validate(item)
+                if segment is None:
+                    raise ValueError("unknown source region")
+                parsed = self._validated_line(line, segment)
+                parsed.line_number = index
+                valid_count += 1
+            except (ValidationError, ValueError):
+                invalid_count += 1
+                if segment is None:
+                    continue
+                excerpt = item.get("source_quote") if isinstance(item, dict) else None
+                if not isinstance(excerpt, str) or not excerpt.strip() or (
+                    _compact_whitespace(excerpt) not in _compact_whitespace(segment.text)
+                ):
+                    excerpt = segment.text
+                parsed = ParsedLineDraft(
+                    line_number=index,
+                    raw_text=excerpt,
+                    source_locator=segment.locator.model_copy(
+                        update={"text_snippet": excerpt[:120]}
+                    ),
+                    source_segment_id=segment.segment_id,
+                    unit=None,
+                    extraction_warnings=[
+                        *[warning.model_copy(deep=True) for warning in segment.warnings],
+                        ExtractionWarning(
+                            code="LLM_PARTIAL_LINE_REJECTED",
+                            message="This model-proposed row failed field or source validation. Verify and enter all needed fields from the original before approval.",
+                            severity="error",
+                        ),
+                    ],
+                )
+            recovered.append(parsed)
+        if valid_count == 0 or invalid_count == 0:
+            return None
+        # Display ordinals stay unique when an untrusted row had no usable
+        # source ID. They do not replace the original source-region references.
+        for index, line in enumerate(recovered, start=1):
+            line.line_number = index
+        return ParsedDocumentResult(
+            lines=recovered,
+            warnings=[ExtractionWarning(
+                code="LLM_PARTIAL_RECOVERY",
+                message=(
+                    "The model correction was incomplete. Independently validated lines "
+                    "were retained; rejected or unlocated source rows still need "
+                    "full human comparison before a quote can be approved."
+                ),
+                severity="warning",
+            )],
+            total_lines_detected=len(recovered),
+        )
 
     @staticmethod
     def _failure(
