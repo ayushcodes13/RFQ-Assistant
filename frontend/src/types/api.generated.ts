@@ -185,7 +185,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Rfq
-         * @description Deletes RFQ case (restricted to administrators).
+         * @description Deletes a case, its source data, and generated exports (admin only).
          */
         delete: operations["delete_rfq_api_rfqs__case_id__delete"];
         options?: never;
