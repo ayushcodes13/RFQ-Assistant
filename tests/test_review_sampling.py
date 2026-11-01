@@ -10,7 +10,7 @@ from rfq_assistant.cases.manager import CaseManager
 from rfq_assistant.ingestion.storage import DocumentStorage
 from rfq_assistant.matching.catalog import CatalogRepository
 from rfq_assistant.schemas.enums import ReviewDecision
-from rfq_assistant.schemas.models import CatalogItem, BatchReviewRequest, RFQLineItemUpdate
+from rfq_assistant.schemas.models import CatalogItem, BatchReviewRequest, RFQLineItemUpdate, ExtractionWarning
 
 
 def _case(tmp_path, row_count=12):
@@ -211,3 +211,29 @@ def test_exceptions_stay_outside_the_sample_and_batch_approval(tmp_path):
         if line.line_id in plan.exception_line_ids and line.review_decision == ReviewDecision.PENDING
     ]
     assert len(still_unreviewed) == 2
+
+
+def test_luna_proposed_exact_match_requires_individual_approval(tmp_path):
+    manager, case = _case(tmp_path, row_count=12)
+    line = manager.get_lines(case.case_id)[0]
+    line.extraction_warnings.append(ExtractionWarning(
+        code="LLM_PROPOSED_EXTRACTION",
+        message="AI-proposed source-backed field; reviewer must verify individually.",
+        severity="info",
+    ))
+    plan = manager.get_review_plan(case.case_id)
+    assert line.line_id in plan.exception_line_ids
+    assert line.line_id not in plan.sample_line_ids
+    assert line.line_id not in plan.remaining_line_ids
+    with pytest.raises(ValueError, match="current review sample"):
+        manager.batch_review(case.case_id, BatchReviewRequest(
+            line_ids=[line.line_id],
+            expected_versions=_versions(manager, case.case_id, [line.line_id]),
+            decision=ReviewDecision.APPROVED,
+        ))
+    manager.update_line(case.case_id, line.line_id, RFQLineItemUpdate(
+        expected_version=line.version,
+        review_decision=ReviewDecision.APPROVED,
+        actor="Synthetic reviewer",
+    ))
+    assert line.review_decision == ReviewDecision.APPROVED
