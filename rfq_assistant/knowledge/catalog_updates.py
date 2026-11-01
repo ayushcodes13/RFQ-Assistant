@@ -196,17 +196,32 @@ class CatalogUpdateService:
             raise CatalogUpdateError(
                 "Distributor update source exceeds the 10 MB limit."
             )
-        if revision_of:
-            prior = self.get_proposal(revision_of)
-            if prior is None:
-                raise CatalogUpdateError("The proposal to revise could not be found.")
+        prior = self.get_proposal(revision_of) if revision_of else None
+        if revision_of and prior is None:
+            raise CatalogUpdateError("The proposal to revise could not be found.")
+        if prior and prior.review_status != "rejected":
+            raise CatalogUpdateError("Only a rejected proposal can be revised.")
 
         digest = hashlib.sha256(content).hexdigest()
-        facts, locators = self._facts_from_source(content, filename)
+        facts, locators = self._facts_from_source(content, filename, revision_context=prior)
         if not facts:
             raise CatalogUpdateError(
                 "No distributor item facts were found. The source is preserved for manual review."
             )
+        revision_warnings = list(source_warnings or [])
+        if prior:
+            if len(facts) != 1:
+                raise CatalogUpdateError(
+                    "Revise one rejected item at a time. Supply one grounded correction."
+                )
+            facts, inherited_fields = self._inherit_rejected_identity(facts[0], prior)
+            if inherited_fields:
+                revision_warnings.append(
+                    "Carried forward " + ", ".join(inherited_fields)
+                    + f" from rejected proposal {prior.proposal_id}. "
+                    "These values are supported by the earlier proposal, not the new correction quote. "
+                    "Check both sources before accepting."
+                )
         fields_to_clear = self._validate_clear_fields(
             clear_fields or [], facts=facts, filename=filename
         )
@@ -220,7 +235,7 @@ class CatalogUpdateService:
                 actor=actor,
                 batch_id=batch_id,
                 revision_of=revision_of,
-                source_warnings=source_warnings or [],
+                source_warnings=revision_warnings,
                 clear_fields=fields_to_clear,
             )
             for fact in facts
@@ -281,7 +296,56 @@ class CatalogUpdateService:
             )
         return cast(list[CatalogClearField], fields)
 
-    def _facts_from_source(self, content: bytes, filename: str):
+    @staticmethod
+    def _inherit_rejected_identity(
+        corrected: CatalogFactProposal, prior: CatalogUpdateProposal
+    ) -> tuple[list[CatalogFactProposal], list[str]]:
+        # A correction is grounded in its own new text. Only missing fields
+        # may be inherited, and only from the explicitly linked rejected item.
+        prior_values = (
+            prior.current_item.model_dump(mode="json")
+            if prior.current_item is not None else dict(prior.proposed_values)
+        )
+        identity = ("internal_sku", "manufacturer", "manufacturer_part_number")
+        for name in identity:
+            old = prior_values.get(name)
+            new = getattr(corrected, name)
+            if old is None or new is None:
+                continue
+            if name == "manufacturer":
+                same = normalize_manufacturer(str(old)) == normalize_manufacturer(new)
+            elif name == "manufacturer_part_number":
+                same = normalize_mpn(str(old)) == normalize_mpn(new)
+            else:
+                same = str(old).casefold() == new.casefold()
+            if not same:
+                raise CatalogUpdateError(
+                    "The correction changes the item's identity. Submit a complete new "
+                    "distributor source rather than linking it to a rejected item."
+                )
+        inherited: dict[str, Any] = {}
+        fields = (
+            ("internal_sku", "manufacturer", "manufacturer_part_number", "description")
+            if prior.current_item is not None else (
+                "internal_sku", "manufacturer", "manufacturer_part_number",
+                "description", "list_price", "currency", "stock_qty",
+            )
+        )
+        for name in fields:
+            value = prior_values.get(name)
+            if getattr(corrected, name) is None and value is not None:
+                inherited[name] = value
+        if not inherited:
+            return [corrected], []
+        combined = CatalogFactProposal.model_validate({
+            **corrected.model_dump(mode="python"), **inherited,
+        })
+        return [combined], list(inherited)
+
+    def _facts_from_source(
+        self, content: bytes, filename: str,
+        revision_context: CatalogUpdateProposal | None = None,
+    ):
         # A canonical distributor catalog CSV is already structured. Keep this
         # path deterministic; unstructured sources use the bounded Luna schema.
         if filename.casefold().endswith(".csv"):
@@ -341,7 +405,25 @@ class CatalogUpdateService:
             raw = self.client.complete(
                 system=UPDATE_PROMPT,
                 user=json.dumps(
-                    {"source_excerpts": source_payload},
+                    {
+                        "source_excerpts": source_payload,
+                        **({
+                            "revision_context": {
+                                "proposal_id": revision_context.proposal_id,
+                                "current_item": (
+                                    revision_context.current_item.model_dump(mode="json")
+                                    if revision_context.current_item else None
+                                ),
+                                "rejected_values": revision_context.proposed_values,
+                                "prior_evidence_quote": revision_context.evidence_quote,
+                                "instruction": (
+                                    "Return only fields explicitly supported by this NEW correction "
+                                    "in source_excerpts. The previous values are context, not evidence. "
+                                    "Do not copy an earlier identity into the new evidence quote."
+                                ),
+                            }
+                        } if revision_context else {}),
+                    },
                     ensure_ascii=False,
                     separators=(",", ":"),
                 ),
