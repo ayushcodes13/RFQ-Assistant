@@ -138,6 +138,9 @@ class CatalogItem(BaseModel):
     catalog_version: Optional[str] = "v1"
 
 
+CatalogClearField = Literal["list_price", "currency", "stock_qty"]
+
+
 class CatalogUpdateProposal(BaseModel):
     """Unapplied distributor-data change with source evidence and review history."""
 
@@ -153,7 +156,7 @@ class CatalogUpdateProposal(BaseModel):
     current_item: Optional[CatalogItem] = None
     proposed_values: Dict[str, object] = Field(default_factory=dict)
     changed_fields: Dict[str, Dict[str, object]] = Field(default_factory=dict)
-    clear_fields: List[Literal["list_price", "currency", "stock_qty"]] = Field(default_factory=list)
+    clear_fields: List[CatalogClearField] = Field(default_factory=list)
     blocking_reasons: List[str] = Field(default_factory=list)
     source_warnings: List[str] = Field(default_factory=list)
     created_by: str
