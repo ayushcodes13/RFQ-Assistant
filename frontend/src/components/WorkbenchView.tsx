@@ -22,6 +22,7 @@ import { SourcePreviewDialog } from "@/components/SourcePreviewDialog";
 import { PdfSourcePreviewDialog } from "@/components/PdfSourcePreviewDialog";
 import { ClarificationDraftDialog } from "@/components/ClarificationDraftDialog";
 import { AuditHistoryDialog } from "@/components/AuditHistoryDialog";
+import { QuotePreparationPanel } from "@/components/QuotePreparationPanel";
 import {
   approveRemainingValidatedLines,
   batchReviewLines,
@@ -490,6 +491,8 @@ export function WorkbenchView({
           </div>
         </div>
       </MotionWrapper>
+
+      <QuotePreparationPanel caseData={caseData} />
 
       <section className="mb-4 rounded-lg border border-[#d7e1e3] bg-white px-4 py-3" aria-labelledby="documents-heading">
         <div className="flex flex-wrap items-center justify-between gap-2">

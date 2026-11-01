@@ -30,10 +30,15 @@ class QuoteApprovalRecord(BaseModel):
 class QuotationCommercialService:
     """Manages quotation lifecycle and version-bound approvals."""
 
-    def __init__(self):
+    def __init__(self, state_store=None):
         self._drafts: Dict[str, ProposedQuote] = {}
         self._approvals: Dict[str, QuoteApprovalRecord] = {}
         self._sent_quotes: Dict[str, Dict] = {}
+        self._state_store = state_store
+        if state_store is not None:
+            for payload in state_store.load_quote_drafts():
+                draft = ProposedQuote.model_validate(payload)
+                self._drafts[draft.quote_id] = draft
 
     def register_draft(self, draft: ProposedQuote) -> ProposedQuote:
         """Registers a draft and computes its version hash."""
@@ -47,6 +52,8 @@ class QuotationCommercialService:
         self._approvals.pop(draft.quote_id, None)
         self._sent_quotes.pop(draft.quote_id, None)
         self._drafts[draft.quote_id] = draft
+        if self._state_store is not None:
+            self._state_store.save_quote_draft(draft.model_dump(mode="json"))
         return draft
 
     def get_draft(self, quote_id: str) -> Optional[ProposedQuote]:

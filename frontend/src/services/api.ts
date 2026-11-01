@@ -11,6 +11,7 @@ import {
   RFQLineItem,
   RFQLineItemUpdate,
   ReviewPlan,
+  QuoteDraft,
   SpreadsheetSourcePreview,
 } from "@/types";
 
@@ -67,6 +68,14 @@ export async function getCase(caseId: string): Promise<RFQCase> {
 
 export async function listCaseExports(caseId: string): Promise<ExportDocumentSummary[]> {
   return getJson<ExportDocumentSummary[]>(`/api/rfqs/${encodeURIComponent(caseId)}/exports`, "Failed to load case documents");
+}
+
+export async function getCaseQuoteDraft(caseId: string): Promise<QuoteDraft> {
+  return getJson<QuoteDraft>(`/v1/rfqs/${encodeURIComponent(caseId)}/quote-draft`, "Failed to load quote draft");
+}
+
+export async function createCaseQuoteDraft(caseId: string): Promise<QuoteDraft> {
+  return sendJson<QuoteDraft>(`/v1/rfqs/${encodeURIComponent(caseId)}/draft-quote`, "POST", {}, "Quote draft could not be prepared");
 }
 
 export async function getCaseLines(caseId: string): Promise<RFQLineItem[]> {

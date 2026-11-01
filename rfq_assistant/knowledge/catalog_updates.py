@@ -266,7 +266,7 @@ class CatalogUpdateService:
             )
         if self.client is None:
             raise CatalogUpdateError(
-                "Unstructured updates need the configured GPT-6 Luna provider. Nothing was changed; use a canonical catalog CSV or enable Luna."
+                "This source needs interpretation. Nothing was changed. Upload a catalog CSV with internal SKU, manufacturer, manufacturer part number, and description (price and stock are optional), or paste a note and configure GPT-6 Luna."
             )
         source_payload = [
             {

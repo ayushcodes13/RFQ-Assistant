@@ -18,7 +18,7 @@ function displayValue(value: unknown): string {
 function proposalLabel(proposal: CatalogUpdateProposal): string {
   if (proposal.change_type === "new") return "New item";
   if (proposal.change_type === "changed") return "Changed information";
-  if (proposal.change_type === "unchanged") return "Already in catalog";
+  if (proposal.change_type === "unchanged") return "No data change";
   return "Needs clarification";
 }
 
@@ -38,10 +38,12 @@ function CatalogChange({
   const proposedValues = proposal.proposed_values ?? {};
   const blockingReasons = proposal.blocking_reasons ?? [];
   const sourceWarnings = proposal.source_warnings ?? [];
+  const currentValues = (proposal.current_item ?? {}) as unknown as Record<string, unknown>;
   const rows = Object.entries(changedFields).length
     ? Object.entries(changedFields)
-    : Object.entries(proposedValues).map(([field, proposed]) => [field, { current: null, proposed }] as const);
-  const canAccept = proposal.review_status === "pending" && blockingReasons.length === 0;
+    : Object.entries(proposedValues).map(([field, proposed]) => [field, { current: currentValues[field] ?? null, proposed }] as const);
+  const unchanged = proposal.change_type === "unchanged";
+  const canAccept = proposal.review_status === "pending" && blockingReasons.length === 0 && !unchanged;
 
   return (
     <article className="border-b border-[#e8edef] py-5 last:border-0" aria-labelledby={`proposal-${proposal.proposal_id}`}>
@@ -52,11 +54,11 @@ function CatalogChange({
               {displayValue(proposedValues.internal_sku || proposal.current_item?.internal_sku || proposedValues.manufacturer_part_number || proposal.current_item?.manufacturer_part_number)}
             </h3>
             <span className="text-[12px] text-[#52656b]">{proposalLabel(proposal)}</span>
-            <span className="text-[12px] text-[#667980]">· {proposal.review_status}</span>
+            <span className="text-[12px] text-[#667980]">· {unchanged ? "no review needed" : proposal.review_status}</span>
           </div>
           <p className="mt-1 text-[12px] text-[#52656b]">{proposal.source_name} · {proposal.source_locator.sheet_name ? `${proposal.source_locator.sheet_name}, ` : ""}{proposal.source_locator.row_number ? `row ${proposal.source_locator.row_number}` : proposal.source_locator.page_number ? `page ${proposal.source_locator.page_number}` : "source text"} · <a className="font-medium underline underline-offset-2" href={`/api/proxy/api/catalogs/updates/${encodeURIComponent(proposal.proposal_id)}/source`} target="_blank" rel="noreferrer">Open original source</a></p>
         </div>
-        {proposal.review_status === "pending" && (
+        {proposal.review_status === "pending" && !unchanged && (
           <div className="flex shrink-0 items-center gap-2">
             <button type="button" className="rfq-secondary" disabled={busy} onClick={() => onReview(proposal.proposal_id, "reject")} aria-label={`Reject proposal ${proposal.proposal_id}`}><X size={15} aria-hidden="true" />Reject</button>
             <button type="button" className="rfq-primary" disabled={!canAccept || busy} onClick={() => onReview(proposal.proposal_id, "accept")} aria-label={`Accept proposal ${proposal.proposal_id}`}><Check size={15} aria-hidden="true" />Accept change</button>
@@ -64,6 +66,7 @@ function CatalogChange({
         )}
       </div>
 
+      {unchanged && <p className="mt-3 text-[13px] text-[#52656b]">This source matches the active catalog. No update is needed.</p>}
       {rows.length > 0 && <div className="mt-4 overflow-x-auto">
         <table className="w-full min-w-[430px] border-collapse text-left text-[13px]">
           <thead><tr className="text-[12px] font-medium text-[#52656b]"><th className="pb-2 pr-4">Field</th><th className="pb-2 pr-4">Current data</th><th className="pb-2">From this source</th></tr></thead>
@@ -155,7 +158,11 @@ export function CatalogUpdatesView({ initialItem, onInitialItemHandled }: { init
       setText("");
       setFile(null);
       if (fileInput.current) fileInput.current.value = "";
-      setNotice(`${created.length} ${created.length === 1 ? "proposal is" : "proposals are"} ready for review. Your active catalog has not changed.`);
+      const actionableCount = created.filter((proposal) => proposal.change_type !== "unchanged").length;
+      const unchangedCount = created.length - actionableCount;
+      setNotice(actionableCount === 0
+        ? `${unchangedCount} ${unchangedCount === 1 ? "source row matches" : "source rows match"} the active catalog. No update is needed.`
+        : `${actionableCount} ${actionableCount === 1 ? "proposed change is" : "proposed changes are"} ready for review. Your active catalog has not changed.${unchangedCount ? ` ${unchangedCount} unchanged rows need no action.` : ""}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The source could not be processed.");
     } finally {
@@ -177,7 +184,8 @@ export function CatalogUpdatesView({ initialItem, onInitialItemHandled }: { init
     }
   };
 
-  const pending = proposals.filter((proposal) => proposal.review_status === "pending");
+  const pending = proposals.filter((proposal) => proposal.review_status === "pending" && proposal.change_type !== "unchanged");
+  const unchanged = proposals.filter((proposal) => proposal.change_type === "unchanged");
   const history = proposals.filter((proposal) => proposal.review_status !== "pending");
 
   return (
@@ -208,6 +216,11 @@ export function CatalogUpdatesView({ initialItem, onInitialItemHandled }: { init
         <div className="flex items-baseline justify-between gap-3 border-b border-[#dfe7e9] pb-2"><h2 id="pending-heading" className="rfq-section-title">Changes to review</h2><span className="rfq-mono text-[12px] text-[#52656b]">{pending.length} pending</span></div>
         {pending.length === 0 ? <p className="py-5 text-[13px] text-[#52656b]">No distributor changes are waiting for a decision.</p> : pending.map((proposal) => <CatalogChange key={proposal.proposal_id} proposal={proposal} busy={busyId === proposal.proposal_id} onReview={review} onRevise={(id, revisionText) => void stage(id, revisionText)} />)}
       </section>
+
+      {unchanged.length > 0 && <details className="mt-6 max-w-[1000px]" aria-label="Rows that already match the catalog">
+        <summary className="cursor-pointer border-b border-[#dfe7e9] pb-2 text-[13px] font-medium text-[#52656b]">{unchanged.length} {unchanged.length === 1 ? "row already matches" : "rows already match"} · no decision needed</summary>
+        {unchanged.map((proposal) => <CatalogChange key={proposal.proposal_id} proposal={proposal} busy={false} onReview={review} onRevise={(id, revisionText) => void stage(id, revisionText)} />)}
+      </details>}
 
       {history.length > 0 && <section className="mt-8 max-w-[1000px]" aria-labelledby="history-heading"><h2 id="history-heading" className="rfq-section-title border-b border-[#dfe7e9] pb-2">Decision history</h2>{history.map((proposal) => <CatalogChange key={proposal.proposal_id} proposal={proposal} busy={busyId === proposal.proposal_id} onReview={review} onRevise={(id, revisionText) => void stage(id, revisionText)} />)}</section>}
     </div>

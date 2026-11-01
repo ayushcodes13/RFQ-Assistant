@@ -161,7 +161,8 @@ def test_unstructured_note_without_luna_is_explicit_and_does_not_change_data(tmp
             pasted_text="Stock for SKU-EXISTING is now 18",
         )
     except CatalogUpdateError as exc:
-        assert "configured GPT-6 Luna" in str(exc)
+        assert "GPT-6 Luna" in str(exc)
+        assert "Nothing was changed" in str(exc)
     else:
         raise AssertionError(
             "Unstructured update should require Luna or a structured CSV"

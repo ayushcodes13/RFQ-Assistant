@@ -11,6 +11,7 @@ from rfq_assistant.cases.manager import CaseManager
 from rfq_assistant.ingestion.ai_extraction import GroundedLLMExtractor
 from rfq_assistant.ingestion.storage import DocumentStorage
 from rfq_assistant.matching.catalog import CatalogRepository
+from rfq_assistant.persistence import SQLiteStateStore
 from rfq_assistant.quotation.proposal import (
     GroundedQuoteProposalService,
     QuoteProposalError,
@@ -124,3 +125,72 @@ def test_quote_validation_blocks_failed_second_model_stage():
         )],
     )
     assert any("quote proposal stage failed" in error for error in validate_proposed_quote(quote))
+
+
+def test_quote_draft_preserves_missing_quantity_as_review_blocker():
+    quote = ProposedQuote(
+        quote_id="QUOTE-MISSING-QTY",
+        case_id="RFQ-MISSING-QTY",
+        lines=[QuoteLine(
+            line_no=1,
+            requested_mpn="LC1D09BD",
+            quantity=None,
+            unit_price="42.50",
+            source_price_id="CAT-v1-SKU1",
+            match_status="exact",
+        )],
+    )
+    assert quote.lines[0].line_total is None
+    assert quote.total_amount is None
+    assert any("Quantity is missing" in error for error in validate_proposed_quote(quote))
+
+
+def test_draft_quote_api_returns_missing_quantity_instead_of_failing(tmp_path, monkeypatch):
+    api = importlib.import_module("rfq_assistant.api.app")
+    catalog = CatalogRepository()
+    catalog.add_item(CatalogItem(
+        internal_sku="SKU-SYN-MISSING-QTY",
+        manufacturer="Schneider Electric",
+        manufacturer_part_number="LC1D09BD",
+        description="Synthetic contactor",
+        list_price=42.5,
+        currency="USD",
+        stock_qty=20,
+        catalog_version="synthetic-v1",
+    ))
+    manager = CaseManager(catalog=catalog, storage=DocumentStorage(tmp_path / "files"))
+    case = manager.create_case_from_text("Schneider Electric LC1D09BD", title="Missing quantity")
+    assert manager.get_lines(case.case_id)
+    assert manager.get_lines(case.case_id)[0].quantity is None
+
+    monkeypatch.setattr(api, "catalog_repo", catalog)
+    monkeypatch.setattr(api, "case_manager", manager)
+    monkeypatch.setattr(api, "commercial_service", QuotationCommercialService())
+    monkeypatch.setattr(api, "catalog_update_service", type("NoUpdates", (), {"list_proposals": lambda self: []})())
+    monkeypatch.delenv("REQUIRE_AUTH", raising=False)
+    monkeypatch.delenv("PILOT_API_KEYS", raising=False)
+
+    response = TestClient(api.app).post(f"/v1/rfqs/{case.case_id}/draft-quote")
+    assert response.status_code == 200, response.text
+    draft = response.json()
+    assert draft["lines"][0]["quantity"] is None
+    assert draft["lines"][0]["line_total"] is None
+    assert any("Quantity is missing" in error for error in draft["validation_errors"])
+
+
+def test_quote_draft_survives_commercial_service_restart(tmp_path):
+    store = SQLiteStateStore(tmp_path / "quote-state.sqlite3")
+    manager = CaseManager(catalog=CatalogRepository(), storage=DocumentStorage(tmp_path / "files"), state_store=store)
+    case = manager.create_case_from_text("2 pcs Schneider Electric LC1D09BD", title="Persist draft")
+    first = QuotationCommercialService(state_store=store)
+    first.register_draft(ProposedQuote(
+        quote_id="QUOTE-PERSISTED",
+        case_id=case.case_id,
+        lines=[QuoteLine(line_no=1, requested_mpn="LC1D09BD", quantity="2", unit_price="1.25", source_price_id="CAT-v1-SKU1", match_status="exact")],
+    ))
+
+    restored = QuotationCommercialService(state_store=SQLiteStateStore(tmp_path / "quote-state.sqlite3"))
+    saved = restored.get_draft("QUOTE-PERSISTED")
+    assert saved is not None
+    assert saved.lines[0].quantity == Decimal("2")
+    assert saved.draft_hash

@@ -69,6 +69,8 @@ class StateStore(Protocol):
     def load_catalog_update_proposals(self) -> List[Dict[str, Any]]: ...
     def load_catalog_update_proposal(self, proposal_id: str) -> Optional[Dict[str, Any]]: ...
     def save_catalog_update_proposal(self, payload: Dict[str, Any]) -> None: ...
+    def load_quote_drafts(self) -> List[Dict[str, Any]]: ...
+    def save_quote_draft(self, payload: Dict[str, Any]) -> None: ...
 
 
 class SQLiteStateStore:
@@ -121,6 +123,12 @@ class SQLiteStateStore:
                 );
                 CREATE INDEX IF NOT EXISTS catalog_update_proposals_batch_idx
                     ON catalog_update_proposals(batch_id, created_at);
+                CREATE TABLE IF NOT EXISTS quote_drafts (
+                    quote_id TEXT PRIMARY KEY,
+                    case_id TEXT NOT NULL REFERENCES rfq_cases(case_id) ON DELETE CASCADE,
+                    payload TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS quote_drafts_case_idx ON quote_drafts(case_id);
                 CREATE TABLE IF NOT EXISTS ingestion_jobs (
                     job_id TEXT PRIMARY KEY,
                     case_id TEXT NOT NULL UNIQUE REFERENCES rfq_cases(case_id) ON DELETE CASCADE,
@@ -476,4 +484,19 @@ class SQLiteStateStore:
                     payload["proposal_id"], payload["batch_id"], payload["review_status"],
                     payload["created_at"], json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
                 ),
+            )
+
+    def load_quote_drafts(self) -> List[Dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload FROM quote_drafts ORDER BY rowid"
+            ).fetchall()
+            return [json.loads(row["payload"]) for row in rows]
+
+    def save_quote_draft(self, payload: Dict[str, Any]) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO quote_drafts(quote_id, case_id, payload) VALUES(?, ?, ?) "
+                "ON CONFLICT(quote_id) DO UPDATE SET case_id=excluded.case_id, payload=excluded.payload",
+                (payload["quote_id"], payload["case_id"], json.dumps(payload, ensure_ascii=False, separators=(",", ":"))),
             )

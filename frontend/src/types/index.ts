@@ -36,6 +36,43 @@ export type ReviewPlan = Schemas["ReviewPlan"];
 export type SpreadsheetSourcePreview = Schemas["SpreadsheetSourcePreview"];
 export type ExportRequest = Schemas["ExportRequest"];
 
+export interface QuoteDraftSource {
+  file_id: string;
+  page?: number | null;
+  sheet?: string | null;
+  cell_range?: string | null;
+  text_excerpt?: string | null;
+  bbox?: number[] | null;
+}
+
+export interface QuoteDraftLine {
+  line_no: number;
+  requested_mpn: string;
+  requested_manufacturer?: string | null;
+  catalogue_part_id?: string | null;
+  description?: string | null;
+  quantity?: string | null;
+  unit: string;
+  unit_price?: string | null;
+  currency?: string | null;
+  line_total?: string | null;
+  match_status: string;
+  requires_human_review: boolean;
+  sources: QuoteDraftSource[];
+}
+
+export interface QuoteDraft {
+  quote_id: string;
+  case_id: string;
+  currency: string;
+  lines: QuoteDraftLine[];
+  total_amount?: string | null;
+  validation_errors: string[];
+  quote_proposal_status: "grounded" | "not_configured" | "failed" | "no_retrieved_prices";
+  quote_proposal_warnings: string[];
+  is_approved: boolean;
+}
+
 export interface CatalogImportSummary {
   imported: number;
   duplicates: number;

@@ -22,6 +22,7 @@ class SourceRef(BaseModel):
     sheet: Optional[str] = None
     cell_range: Optional[str] = None
     text_excerpt: Optional[str] = None
+    bbox: Optional[List[float]] = None
 
 
 class QuoteLine(BaseModel):
@@ -31,7 +32,9 @@ class QuoteLine(BaseModel):
     requested_manufacturer: Optional[str] = None
     catalogue_part_id: Optional[str] = None
     description: Optional[str] = None
-    quantity: Decimal = Field(..., gt=0)
+    # Keep unresolved quantities visible in a draft instead of fabricating a
+    # value or raising a schema error while building the review artifact.
+    quantity: Optional[Decimal] = Field(default=None, gt=0)
     unit: str = "EA"
     unit_price: Optional[Decimal] = None
     currency: Optional[str] = "USD"
@@ -45,7 +48,7 @@ class QuoteLine(BaseModel):
     @property
     def line_total(self) -> Optional[Decimal]:
         """Deterministic unrounded extension; never trust a model-supplied total."""
-        if self.unit_price is None:
+        if self.unit_price is None or self.quantity is None:
             return None
         return self.quantity * self.unit_price
 
@@ -72,7 +75,9 @@ class ProposedQuote(BaseModel):
     @model_validator(mode="after")
     def calculate_total_when_all_prices_are_present(self):
         """Fill a missing grand total from Decimal line extensions; retain supplied totals for checking."""
-        if self.total_amount is None and self.lines and all(line.unit_price is not None for line in self.lines):
+        if self.total_amount is None and self.lines and all(
+            line.unit_price is not None and line.quantity is not None for line in self.lines
+        ):
             self.total_amount = sum(
                 (line.quantity * line.unit_price for line in self.lines),
                 start=Decimal("0"),
@@ -142,6 +147,9 @@ def validate_quote_line(line: QuoteLine) -> List[str]:
         errors.append(f"Line {line.line_no}: Price has no authoritative source ID.")
 
     try:
+        if line.quantity is None:
+            errors.append(f"Line {line.line_no}: Quantity is missing and needs reviewer confirmation.")
+            return errors
         q_val = float(line.quantity)
         if math.isnan(q_val) or math.isinf(q_val):
             errors.append(f"Line {line.line_no}: Quantity cannot be NaN or Infinite.")
@@ -190,7 +198,7 @@ def validate_proposed_quote(quote: ProposedQuote) -> List[str]:
 
 def calculate_quote_total(lines: List[QuoteLine]) -> Optional[Decimal]:
     """Return a Decimal total only when every line has quantity and authoritative price."""
-    if not lines or any(line.unit_price is None for line in lines):
+    if not lines or any(line.unit_price is None or line.quantity is None for line in lines):
         return None
     return sum((line.quantity * line.unit_price for line in lines), start=Decimal("0"))
 

@@ -116,7 +116,7 @@ catalog_update_service = CatalogUpdateService(
 catalog_update_source_storage = DocumentStorage(base_dir=_storage_root / "distributor_sources")
 clamav_scanner = ClamAVScanner()
 rapidfuzz_engine = RapidFuzzCandidateEngine()
-commercial_service = QuotationCommercialService()
+commercial_service = QuotationCommercialService(state_store=state_store)
 ASYNC_INGEST_ENABLED = env_flag("RFQ_ASYNC_INGEST_ENABLED", default=True)
 try:
     INGEST_WORKER_CONCURRENCY = max(1, min(4, int(os.getenv("RFQ_INGEST_WORKER_CONCURRENCY", "2"))))
@@ -1123,6 +1123,7 @@ def v1_draft_quote(
                     page=line.source_locator.page_number,
                     sheet=line.source_locator.sheet_name,
                     text_excerpt=line.source_locator.text_snippet,
+                    bbox=line.source_locator.page_bbox,
                 )
             )
 
@@ -1134,7 +1135,7 @@ def v1_draft_quote(
                 requested_manufacturer=line.requested_manufacturer,
                 catalogue_part_id=catalog_item.internal_sku if catalog_item else None,
                 description=line.description or (catalog_item.description if catalog_item else None),
-                quantity=Decimal(str(line.quantity)) if line.quantity is not None else Decimal("0"),
+                quantity=Decimal(str(line.quantity)) if line.quantity is not None else None,
                 unit=line.unit or "EA",
                 unit_price=unit_price,
                 currency=(catalog_item.currency if catalog_item and catalog_item.currency else currency),
@@ -1177,7 +1178,7 @@ def v1_draft_quote(
                     break
 
             buyer_source_id = case.source_file.file_id if case.source_file else f"RFQ-{case_id}"
-            buyer_text = line.raw_text or line.source_locator.text_snippet or ""
+            buyer_text = line.raw_text or (line.source_locator.text_snippet if line.source_locator else "") or ""
             if buyer_text:
                 buyer_quote_inputs.append({
                     "line_no": idx,
@@ -1185,7 +1186,7 @@ def v1_draft_quote(
                     "text": buyer_text,
                     "requested_mpn": line.requested_mpn or "UNKNOWN",
                     "quantity": str(line.quantity),
-                    "locator": line.source_locator.model_dump(mode="json"),
+                    "locator": line.source_locator.model_dump(mode="json") if line.source_locator else {},
                 })
                 distributor_quote_records.append({
                     "line_no": idx,
@@ -1201,6 +1202,7 @@ def v1_draft_quote(
                     sheet=source_locator.get("sheet_name"),
                     cell_range=", ".join((line.source_locator.field_source_cells or {}).values()) or None,
                     text_excerpt=evidence_text[:500],
+                    bbox=source_locator.get("page_bbox"),
                 ))
 
     quote_id = f"QUOTE-{case_id.replace('RFQ-', '')}"
@@ -1243,6 +1245,18 @@ def v1_draft_quote(
 @app.get("/v1/quote-drafts/{quote_id}")
 def v1_get_quote_draft(quote_id: str, current_user: PilotUser = Depends(get_current_user)):
     """Retrieves a quotation draft with current hash and validation errors."""
+    draft = commercial_service.get_draft(quote_id)
+    if not draft:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote draft not found.")
+    return draft
+
+
+@app.get("/v1/rfqs/{case_id}/quote-draft")
+def v1_get_case_quote_draft(case_id: str, current_user: PilotUser = Depends(get_current_user)):
+    """Returns the saved quote draft for a case, if one has been prepared."""
+    if not case_manager.get_case(case_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ case not found.")
+    quote_id = f"QUOTE-{case_id.replace('RFQ-', '')}"
     draft = commercial_service.get_draft(quote_id)
     if not draft:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote draft not found.")

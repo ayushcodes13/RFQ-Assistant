@@ -82,6 +82,7 @@ Before upload, provide a clear notice about local storage and how third-party pr
 **Review behavior:** Clicking a grid row scrolls source to its exact page/sheet/line; clicking source locators focuses the row. Edits are staged and audited. Bulk approve may be offered only for deterministic exact matches after the reviewer explicitly checks the visible set. Missing quantity/manufacturer and all substitution candidates must not be silently bulk approved.
 
 - Keep a Documents area visible in the workbench. List the original request and every generated draft worksheet, with a way to open/download each. Show extraction warnings and missing generated files beside the list. Refresh after a draft export completes.
+- Make quote preparation an explicit operator action in the case workbench. Show each requested line, catalog price if present, exact-match/review state, blockers, deterministic totals, and buyer/catalog source references. Open document evidence in a right-side drawer with excerpt and source location; link to the original document when available. For pasted text, show its origin without a citation drawer. Never label a prepared quote approved or sent.
 - If a requested quantity exceeds the matched catalog row's recorded stock quantity, state both quantities beside the line and require the operator to resolve availability before a validated export. Treat catalog stock as a recorded figure, not live availability.
 
 ### Screen 4 — Export preview
@@ -98,6 +99,7 @@ Before upload, provide a clear notice about local storage and how third-party pr
 - Never automatically treat descriptions as equivalent when parts differ.
 - The catalog is one distributor's product data. Keep the manufacturer field per catalog item because a distributor may carry multiple manufacturers; do not add manufacturer administration/configuration screens.
 - Each item offers Edit and Ask AI. Manual edits and AI suggestions both create a source-backed proposal. The active catalog changes only after the user accepts the proposal in Update data.
+- If an uploaded catalog row is identical to active data, show it as informational “no change needed” evidence, not as a decision in the pending queue.
 
 ### Screen 6 — Update distributor data
 

@@ -40,7 +40,9 @@ flowchart TD
     WRITE --> Q
 ```
 
-The RFQ intake, staged catalog updates, and first bounded quote-evidence call are implemented in the local prototype. `POST /v1/rfqs/{case_id}/draft-quote` performs deterministic lookup by exact catalog identity, then makes a second GPT-6 Luna call when the configured provider is available. That call receives only the buyer lines and already-retrieved distributor records; it returns evidence references, not prices or totals. Pydantic validates its shape, source IDs and verbatim excerpts are checked in code, and Python `Decimal` calculates totals. If Luna is unavailable, the draft is explicitly labeled as catalog-only; if the quote-evidence call fails or returns unsupported evidence, quote approval is blocked. Distributor retrieval currently reaches active catalog rows and accepted catalog-update evidence for those rows. A general searchable library for arbitrary distributor manuals and commercial-terms PDFs, durable quote-draft lifecycle storage, and a UI for inspecting the second quote call's validation trace remain incomplete.
+The RFQ intake, staged catalog updates, and bounded quote-evidence call are implemented in the local prototype. `POST /v1/rfqs/{case_id}/draft-quote` performs deterministic lookup by exact catalog identity, then makes a second GPT-6 Luna call when the configured provider is available. That call receives only the buyer lines and already-retrieved distributor records; it returns evidence references, not prices or totals. Pydantic validates its shape, source IDs and verbatim excerpts are checked in code, and Python `Decimal` calculates totals. If Luna is unavailable, the draft is explicitly labeled as catalog-only; if the quote-evidence call fails or returns unsupported evidence, quote approval is blocked. Drafts persist in SQLite and the case workbench shows line values, validation blockers, source references, and an evidence drawer. A missing quantity stays null and blocks line readiness; it is never replaced with zero or a guessed amount. Distributor retrieval currently reaches active catalog rows and accepted catalog-update evidence for those rows. A general searchable library for arbitrary distributor manuals and commercial-terms PDFs, and durable persistence for approval records, remain incomplete.
+
+For operator-facing observations and prioritized remaining workflow gaps, see [the workflow walkthrough audit](WORKFLOW_WALKTHROUGH_AUDIT.md).
 
 ### Trust boundaries and ordered checks
 
@@ -224,6 +226,7 @@ The review plan classifies every non-clean row as an exception, selects up to fi
 - GET /api/distributor-sources — **planned** searchable inventory for authorized distributor reference documents; arbitrary reference documents are not yet independently indexed.
 - POST /api/distributor-sources — **planned** upload and stage for a searchable source library. Today, accepted item facts from catalog updates retain their source evidence and can be retrieved for the matching item.
 - GET /v1/quote-drafts/{quote_id} — retrieve a quote draft, source citations, second-stage status/warnings, deterministic totals, and validation errors from the local commercial service.
+- GET /v1/rfqs/{case_id}/quote-draft — retrieve the saved quote draft attached to a case, when one exists.
 - GET /api/rfqs/{id}/quote-proposal — **planned** case-scoped durable proposal view with review actions and a persisted stage trace.
 - POST /api/rfqs/{id}/lines/{line_id}/rematch — explicitly refresh a stale match against the active catalog snapshot and revoke the previous approval.
 - POST /api/rfqs/{id}/exports — request draft export after validation.
