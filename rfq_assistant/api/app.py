@@ -7,9 +7,9 @@ import os
 from pathlib import Path
 import time
 from typing import List, Optional
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from decimal import Decimal
 from rfq_assistant.agents.tools import ApprovalGateError, QuotationCommercialService
 from rfq_assistant.auth import (
@@ -20,6 +20,7 @@ from rfq_assistant.auth import (
     require_role,
 )
 from rfq_assistant.api.cors import configured_cors_origins
+from rfq_assistant.api.intake_limit import IntakeRateLimiter
 from rfq_assistant.cases.manager import CaseManager
 from rfq_assistant.exports import ExportGenerator, ExportValidationError
 from rfq_assistant.ingestion.excel import ExcelBOMInspector
@@ -143,6 +144,29 @@ app = FastAPI(
     description="Human-reviewed RFQ intake and quotation preparation assistant with OSS stack",
 )
 app.add_event_handler("startup", initialize_authentication)
+
+# This caps expensive admission in a single local API process. A real multi-host
+# distributor deployment also requires shared rate limits at the trusted edge.
+try:
+    _intake_rate = int(os.getenv("RFQ_MAX_INTAKES_PER_MINUTE", "240"))
+    app.state.intake_rate_limiter = IntakeRateLimiter(_intake_rate)
+except ValueError as exc:
+    raise RuntimeError("Invalid RFQ_MAX_INTAKES_PER_MINUTE; configure 1..1000.") from exc
+
+
+@app.middleware("http")
+async def cap_expensive_intake(request: Request, call_next):
+    if request.method == "POST" and request.url.path in {
+        "/api/rfqs", "/api/catalogs/import", "/v1/rfqs/extract",
+    }:
+        allowed, retry_after = request.app.state.intake_rate_limiter.allow()
+        if not allowed:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many RFQ intake requests. Retry shortly."},
+                headers={"Retry-After": str(retry_after), "Cache-Control": "no-store"},
+            )
+    return await call_next(request)
 
 if case_manager.llm_extractor:
     app.add_event_handler("shutdown", case_manager.llm_extractor.close)
