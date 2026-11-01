@@ -155,6 +155,7 @@ Small independent US/UK industrial electrical, automation, or electronic compone
 | --- | --- |
 | [AGENTS.md](AGENTS.md) | Instructions for coding agents and mandatory PR workflow |
 | [docs/PRODUCT.md](docs/PRODUCT.md) | Mission, user needs, functional boundaries, success criteria |
+| [docs/CUSTOMER_EVALUATION_START_HERE.md](docs/CUSTOMER_EVALUATION_START_HERE.md) | Operator-led synthetic evaluation script, scorecard, success and safety gates |
 | [docs/SCENARIOS.md](docs/SCENARIOS.md) | Realistic illustrative workflows and expected human reactions |
 | [docs/UX.md](docs/UX.md) | Screens, states, wireframes, interaction and visual design |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Lean architecture, contracts, data and security constraints |
