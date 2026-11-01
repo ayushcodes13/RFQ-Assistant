@@ -715,10 +715,15 @@ class TestTextAndEmailParser:
     def test_electrical_spec_token_parser_handles_long_digit_runs(self):
         from rfq_assistant.ingestion.parsers.text_parser import (
             _is_electrical_specification_token,
+            _is_prefixed_numeric_mpn,
         )
 
         assert _is_electrical_specification_token("0" * 20_000 + "A" + "0" * 20_000)
         assert not _is_electrical_specification_token("24VAC-not-a-part")
+        assert _is_prefixed_numeric_mpn("AB-1234")
+        assert _is_prefixed_numeric_mpn("AB-1234X")
+        assert not _is_prefixed_numeric_mpn("A-1234")
+        assert not _is_prefixed_numeric_mpn("AB-X123")
 
     def test_parse_messy_email_quote_request(self):
         file_path = SAMPLES_DIR / "messy_email_quote_request.txt"

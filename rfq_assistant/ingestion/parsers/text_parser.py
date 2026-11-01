@@ -57,6 +57,19 @@ def _is_electrical_specification_token(value: str) -> bool:
     return index == len(token)
 
 
+def _is_prefixed_numeric_mpn(value: str) -> bool:
+    """Recognize PREFIX-123 style identifiers without regex on untrusted text."""
+    prefix, separator, suffix = value.partition("-")
+    if not separator or len(prefix) < 2 or not prefix.isalpha() or not prefix.isupper():
+        return False
+    index = 0
+    while index < len(suffix) and "0" <= suffix[index] <= "9":
+        index += 1
+    if index == 0:
+        return False
+    return all(char.isascii() and char.isalnum() or char == "-" for char in suffix[index:])
+
+
 class TextParser(BaseDocumentParser):
     """Parses plain text RFQs and email bodies deterministically."""
 
@@ -359,6 +372,6 @@ class TextParser(BaseDocumentParser):
                     continue
                 return cleaned
             # Allow numeric-only MPNs (e.g., Phoenix Contact 2900364) when long enough
-            elif cleaned.isdigit() and len(cleaned) >= 5 or re.search(r"^[A-Z]{2,}\-[0-9]+[A-Z0-9\-]*$", cleaned):
+            elif (cleaned.isdigit() and len(cleaned) >= 5) or _is_prefixed_numeric_mpn(cleaned):
                 return cleaned
         return None
