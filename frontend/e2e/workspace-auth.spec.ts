@@ -38,7 +38,20 @@ test("protected proxy preserves each user's identity and role", async ({ page })
   expect((await page.request.get(api)).status()).toBe(401);
   await page.context().addCookies([originalCookie]);
 
+  const sameOrigin = new URL(page.url()).origin;
+  const crossOriginWrite = await page.request.post("/api/proxy/api/rfqs", {
+    headers: { Origin: "https://attacker.example" },
+    multipart: { pasted_text: "10 pcs LC1D09BD Schneider" },
+  });
+  expect(crossOriginWrite.status()).toBe(403);
+  expect((await crossOriginWrite.json()).detail).toContain("Cross-origin");
+  const missingOriginWrite = await page.request.post("/api/proxy/api/rfqs", {
+    multipart: { pasted_text: "10 pcs LC1D09BD Schneider" },
+  });
+  expect(missingOriginWrite.status()).toBe(403);
+
   const viewerWrite = await page.request.post("/api/proxy/api/rfqs", {
+    headers: { Origin: sameOrigin },
     multipart: { pasted_text: "10 pcs LC1D09BD Schneider" },
   });
   expect(viewerWrite.status()).toBe(403);
@@ -51,6 +64,7 @@ test("protected proxy preserves each user's identity and role", async ({ page })
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page).toHaveURL(/\/workspace/);
   const adminWrite = await page.request.post("/api/proxy/api/rfqs", {
+    headers: { Origin: sameOrigin },
     multipart: { pasted_text: "10 pcs LC1D09BD Schneider" },
   });
   expect(adminWrite.status()).toBe(200);

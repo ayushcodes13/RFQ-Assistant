@@ -16,6 +16,12 @@ async function proxy(request: NextRequest, context: RouteContext) {
   if (access === "authenticated" && !session) {
     return Response.json({ detail: "Sign in to access the RFQ workspace." }, { status: 401 });
   }
+  if (session && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+    const origin = request.headers.get("origin");
+    if (!origin || origin !== request.nextUrl.origin) {
+      return Response.json({ detail: "Cross-origin workspace changes are not allowed." }, { status: 403 });
+    }
+  }
   const { path } = await context.params;
   const upstream = (process.env.RFQ_ASSISTANT_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
   const target = `${upstream}/${path.map(encodeURIComponent).join("/")}${request.nextUrl.search}`;
