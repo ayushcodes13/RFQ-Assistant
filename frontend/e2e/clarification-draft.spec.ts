@@ -18,7 +18,7 @@ test("An operator can view, edit and copy an unsent clarification without sendin
   await expect(dialog.getByText(/Nothing is sent automatically/i)).toBeVisible();
 
   const editor = dialog.getByRole("textbox", { name: "Editable clarification draft" });
-  await expect(editor).toContainText("UNSENT DRAFT");
+  await expect(editor).toHaveValue(/UNSENT DRAFT/);
   const first = await editor.inputValue();
   await editor.fill(first + "\nPlease confirm the panel voltage.");
   await expect(editor).toHaveValue(/Please confirm the panel voltage\./);
