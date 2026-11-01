@@ -368,8 +368,12 @@ class CaseManager:
                     if (cached_llm is None and llm_profile_digest and self.state_store
                             and llm_result.lines
                             and not any(w.severity.lower() == "error" for w in llm_result.warnings)
-                            and not any(w.code == "LLM_VALIDATION_UNAVAILABLE"
-                                        for line in llm_result.lines for w in line.extraction_warnings)):
+                            and not any(
+                                w.code == "LLM_VALIDATION_UNAVAILABLE"
+                                or w.severity.lower() == "error"
+                                for line in llm_result.lines
+                                for w in line.extraction_warnings
+                            )):
                         require_lease()
                         self.state_store.save_processing_artifact(
                             case_id, "llm_result", digest, llm_profile_digest,
@@ -1549,6 +1553,18 @@ class CaseManager:
             if repair_warning:
                 proposal.extraction_warnings.append(repair_warning.model_copy(deep=True))
             target = drafts_by_segment.get(proposal.source_segment_id or "")
+            if target is not None and (
+                target.source_segment_id or f"draft-line-{target.line_number}"
+            ) in represented_draft_segments:
+                # A single email paragraph or PDF region can contain several
+                # distinct requested items. Do not merge the second proposal
+                # onto the first row and overwrite or drop its item identity.
+                proposal.line_number = max(
+                    [draft.line_number for draft in parse_result.lines] +
+                    [draft.line_number for draft in output] + [0]
+                ) + 1
+                output.append(proposal)
+                continue
             if target is not None:
                 represented_draft_segments.add(
                     target.source_segment_id or f"draft-line-{target.line_number}"
