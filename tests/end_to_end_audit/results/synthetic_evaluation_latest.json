@@ -1,0 +1,113 @@
+{
+  "synthetic_fixture": "industrial_control_bom_20lines.xlsx",
+  "evidence_type": "synthetic_ground_truth_not_customer_metrics",
+  "expected_lines": 20,
+  "detected_lines": 20,
+  "line_recall": 1.0,
+  "line_precision": 1.0,
+  "field_accuracy": {
+    "mpn": {
+      "correct": 20,
+      "total": 20,
+      "accuracy": 1.0
+    },
+    "manufacturer": {
+      "correct": 20,
+      "total": 20,
+      "accuracy": 1.0
+    },
+    "quantity": {
+      "correct": 20,
+      "total": 20,
+      "accuracy": 1.0
+    },
+    "unit": {
+      "correct": 20,
+      "total": 20,
+      "accuracy": 1.0
+    }
+  },
+  "missing_expected_line_numbers": [],
+  "extra_detected_line_numbers": [],
+  "critical_field_checks_correct": 80,
+  "critical_field_checks_total": 80,
+  "catalog_match_checks_correct": 20,
+  "catalog_match_checks_total": 20,
+  "false_exact_match_count": 0,
+  "false_exact_match_line_numbers": [],
+  "exact_match_count": 19,
+  "exact_match_precision": 1.0,
+  "rows_with_source_locator": 20,
+  "unflagged_critical_mismatch_lines": 0,
+  "expected_warnings_missing": [],
+  "comparison_errors": [],
+  "adversarial_fixtures": {
+    "evidence_type": "synthetic_adversarial_fixtures_not_customer_metrics",
+    "messy_email": {
+      "synthetic_fixture": "messy_email_quote_request.txt",
+      "evidence_type": "synthetic_ground_truth_not_customer_metrics",
+      "expected_lines": 6,
+      "detected_lines": 6,
+      "line_recall": 1.0,
+      "line_precision": 1.0,
+      "field_accuracy": {
+        "mpn": {
+          "correct": 5,
+          "total": 5,
+          "accuracy": 1.0
+        },
+        "manufacturer": {
+          "correct": 5,
+          "total": 5,
+          "accuracy": 1.0
+        },
+        "quantity": {
+          "correct": 5,
+          "total": 5,
+          "accuracy": 1.0
+        }
+      },
+      "catalog_match_checks_correct": 6,
+      "catalog_match_checks_total": 6,
+      "false_exact_match_count": 0,
+      "false_exact_match_line_numbers": [],
+      "unflagged_critical_mismatch_lines": [],
+      "expected_warnings_missing": [],
+      "missing_expected_line_numbers": [],
+      "extra_detected_line_numbers": [],
+      "comparison_errors": [],
+      "rows_with_source_locator": 6
+    },
+    "cross_brand_collision": {
+      "expected_collision_mpns": [
+        "XG-42"
+      ],
+      "observed_collision_mpns": [
+        "XG-42"
+      ],
+      "false_exact_collision_mpns": [],
+      "passed": true
+    },
+    "duplicate_source_detection": {
+      "expected": "identical second attachment is marked duplicate and does not duplicate line rows",
+      "passed": true
+    },
+    "quantity_conflict_detection": {
+      "expected_warning": "SOURCE_QUANTITY_CONFLICT",
+      "passed": true
+    },
+    "manufacturer_conflict_detection": {
+      "expected_warning": "SOURCE_MANUFACTURER_CONFLICT",
+      "passed": true
+    },
+    "revision_conflict_detection": {
+      "expected_warning": "SOURCE_REVISION_CONFLICT",
+      "passed": true
+    },
+    "part_number_conflict_detection": {
+      "expected_warning": "SOURCE_PART_NUMBER_CONFLICT",
+      "passed": true
+    }
+  },
+  "scorecard_passed": true
+}

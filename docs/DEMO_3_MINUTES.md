@@ -74,6 +74,8 @@ synthetic evidence markers and a `scorecard_passed` result for these labeled
 fixtures; these fixtures do not measure arbitrary customer inputs.
 Do **not** present these measurements as buyer performance or time saved.
 
+The captured synthetic run for the current readiness snapshot is published in [`synthetic_evaluation_latest.md`](../tests/end_to_end_audit/results/synthetic_evaluation_latest.md), with the exact machine-readable output alongside it. Re-run the command above before presenting a newer build.
+
 For an actual buyer evaluation, first obtain written authorization and
 redacted example RFQs, run blind independent annotation, and separately
 record operator correction time and manual-versus-assisted process time.
