@@ -45,12 +45,17 @@ def blocking_line_issues(line: RFQLineItem, catalog: CatalogRepository) -> List[
     if not line.unit or not line.unit.strip():
         issues.append("missing unit of measure")
 
+    selected_item = (
+        catalog.get_by_sku(line.selected_catalog_sku)
+        if line.selected_catalog_sku
+        else None
+    )
+
     if line.match_status not in (MatchStatus.EXACT_MATCH, MatchStatus.MANUAL_OVERRIDE):
         issues.append(f"part match is {line.match_status.value}")
-    elif not line.selected_catalog_sku or catalog.get_by_sku(line.selected_catalog_sku) is None:
+    elif selected_item is None:
         issues.append("selected catalog SKU is missing or unknown")
     else:
-        selected_item = catalog.get_by_sku(line.selected_catalog_sku)
         if (
             line.catalog_rematch_required
             or line.matched_catalog_version != selected_item.catalog_version
