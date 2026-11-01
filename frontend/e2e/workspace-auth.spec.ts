@@ -7,7 +7,7 @@ test("Protected single-operator proxy requires signed cookie session", async ({ 
   await page.goto("/login");
   await page.getByLabel("Workspace password").fill("incorrect-password");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("alert")).toContainText("Invalid workspace password");
+  await expect(page.getByText("Invalid workspace password.", { exact: true })).toBeVisible();
 
   const testPassword = process.env.RFQ_WORKSPACE_PASSWORD;
   if (!testPassword) throw new Error("Protected browser test requires runtime-generated credentials.");
