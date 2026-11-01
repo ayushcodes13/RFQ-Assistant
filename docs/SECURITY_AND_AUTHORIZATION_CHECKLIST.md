@@ -1,0 +1,34 @@
+# Security and authorization readiness checklist
+
+**Snapshot:** 2026-11-01, `main` through PR #98 (`b14fa52`). This checklist describes repository controls and deployment gates; it is not a penetration-test report, security certification, or approval to process customer files.
+
+## Current boundary
+
+RFQ Assistant remains a **single-workspace prototype**. Each protected customer environment must have its own deployment, database, catalog, file storage, and worker until tenant-scoped persistence and authorization are implemented and adversarially verified. The configured credentials reject multiple workspace IDs, but that guard is not tenant isolation. The local unauthenticated demo is for synthetic data on loopback only.
+
+## Application controls and required evidence
+
+| Area | Current repository evidence | Required before a customer pilot |
+| --- | --- | --- |
+| Identity and roles | Protected API keys map to an identity, role, and one configured workspace. The browser proxy stores the user's key in an encrypted, short-lived HTTP-only cookie; role checks and logout/tamper behavior have synthetic tests. | Use a customer-approved identity and credential lifecycle, remove demo defaults, define account recovery and revocation, test all roles in the customer's isolated environment. |
+| Tenant boundary | **Not implemented.** Cases, catalog, exports, jobs, and related data use global tables and process-wide service objects. Mixed-workspace key configuration is rejected. | Keep separate customer deployments and storage. Do not share one deployment or database. Shared mode requires the migration, ownership scoping, object authorization, worker fencing, and two-workspace tests in [TENANT_ISOLATION_DESIGN.md](TENANT_ISOLATION_DESIGN.md). |
+| Object-level authorization | Single-workspace routes use role checks and validate resource identifiers; existing adversarial tests cover authentication, role escalation, guessed IDs, and path traversal in the single workspace. They do not prove cross-tenant denial. | Before shared hosting, test cross-workspace list/read/create/update/retry/delete/preview/export/download paths and prove denied requests have no side effects. |
+| Upload and request limits | Each RFQ source is capped at 10 MiB; one intake is bounded to six sources and a 25 MiB content budget; ASGI rejects multipart wire bodies above 26 MiB before Starlette form parsing. | Configure the reverse proxy/load balancer and ASGI server with matching or stricter wire-byte, connection, timeout, and concurrency limits. Verify actual ingress behavior. |
+| File scanning | Protected mode fails closed when ClamAV is unavailable. Local demo mode can continue with an explicit unscanned warning. | Run a monitored scanner in the customer environment; verify its version/signature update process, fail-closed behavior, and incident response. |
+| Parser isolation | Macros are not executed. Legacy XLS conversion has a reduced subprocess environment, private profile, timeout, and output checks. | Run conversion/OCR in a restricted OS/container sandbox with CPU, memory, filesystem, and network limits. The current subprocess boundary alone is not a sandbox. |
+| Request origin and browser headers | The authenticated Next.js proxy requires same-origin `Origin` on mutations. Baseline `nosniff`, frame denial, referrer, DNS-prefetch, and Permissions Policy headers are set. | Terminate TLS at a trusted HTTPS edge; configure HSTS, an appropriate nonce-based CSP, trusted host/origin policy, and edge rate limits. Verify response headers on the real domain. |
+| Rate limiting | Intake throttling is process-local. Provider pacing can use Redis where configured, but application/provider controls do not provide a universal multi-process edge limit. | Apply shared edge rate limits to public endpoints and size limits/concurrency caps to expensive processing. Verify limits across every app instance. |
+| Storage, deletion, and retention | Source paths are opaque and path-checked. Administrator case deletion removes case-owned database/source state and manifest-owned generated exports. | Agree a retention schedule. Configure and prove deletion for primary storage, backups, logs, and any processor copies. Verify restore and deletion behavior in the chosen storage environment. No automated retention schedule is supplied by the prototype. |
+| Secrets and logging | No built-in pilot keys; protected mode requires externally configured credentials. Gitleaks runs in CI. Application telemetry is designed to omit document content, credentials, and prices. | Put credentials in a secret manager, restrict access, rotate them, inspect deployment logs/telemetry, and verify no secrets or RFQ details reach frontend bundles, traces, or CI artifacts. |
+| AI and other processors | Luna extraction is optional and bounded; model output is validated and cannot approve, match, or send a quote. No customer files are used by the synthetic tests. | Get written customer approval and document processor, purpose, region, retention, deletion, and human-review responsibilities before external processing. |
+| Generated files and outbound actions | Spreadsheet formula-leading values are escaped; output is labeled draft; quotes and clarification messages are not sent automatically. | Test generated files with the customer's intended spreadsheet software and confirm no integration can transmit or purchase without a separately designed human approval. |
+| Dependencies and source integrity | CI runs blocking pip audit, npm audit, Bandit, CodeQL, and Gitleaks. PR #98 makes the permissive repository mypy check blocking. | Keep checks green on the release head, review advisories and upgrades, protect repository secrets, and retain a tested rollback/release record. |
+| Operations and recovery | SQLite job leases, retries, startup reconciliation, and local process-kill/restart behavior have synthetic tests. | Use a supported deployment database/queue/storage design, worker supervision, monitoring/alerts, tested backups/restores, incident ownership, and load tests. The current SQLite worker is single-host only. |
+
+## Release decision
+
+- **Local synthetic demo:** supported using [`scripts/demo.sh`](../scripts/demo.sh) and the runbook in [`DEMO_3_MINUTES.md`](DEMO_3_MINUTES.md).
+- **Controlled customer pilot with real RFQs:** **not ready** until separate customer environments, real identity and edge controls, retention/deletion/backup procedures, processor approval, and customer-authorized evaluation are complete.
+- **Shared multi-customer production:** **not ready**; tenant data isolation is not implemented.
+
+For a pilot, complete [PRODUCTION_CUSTOMER_ONBOARDING.md](PRODUCTION_CUSTOMER_ONBOARDING.md) and retain customer-specific evidence outside this repository. No checklist completion should be inferred from a CI pass.
