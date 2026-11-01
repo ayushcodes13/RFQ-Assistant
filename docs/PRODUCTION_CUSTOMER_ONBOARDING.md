@@ -66,6 +66,8 @@ The current API can check API keys and roles when authentication is enabled, but
 
 ## 4. Prove the whole RFQ workflow with customer-approved samples
 
+For each authorized sample, use the [operator feedback record](OPERATOR_FEEDBACK_FORM.md) to log ground-truth comparisons, corrections, and timing under the agreed private evidence process. Never check in a completed form containing customer information.
+
 For each file format the customer will use, run the same flow from original input to reviewed draft. Keep the original file and expected answer together in the approved test environment.
 
 - [ ] Upload or paste the RFQ and confirm the original is retained under the agreed policy.
