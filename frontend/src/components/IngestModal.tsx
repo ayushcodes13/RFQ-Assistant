@@ -5,11 +5,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
   Upload,
-  FileText,
-  CheckCircle,
   AlertCircle,
 } from "lucide-react";
-import { createCaseFromText, createCaseFromUpload } from "@/services/api";
+import { createCaseFromSources } from "@/services/api";
 import { RFQCase } from "@/types";
 
 interface IngestModalProps {
@@ -23,8 +21,7 @@ export function IngestModal({
   onClose,
   onCaseCreated,
 }: IngestModalProps) {
-  const [mode, setMode] = useState<"file" | "paste">("file");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [pasteText, setPasteText] = useState("");
   const [title, setTitle] = useState("");
   const [customer, setCustomer] = useState("");
@@ -32,40 +29,27 @@ export function IngestModal({
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const sourceCount = files.length + (pasteText.trim() ? 1 : 0);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const f = e.dataTransfer.files?.[0];
-    if (f) {
-      setFile(f);
-      setMode("file");
-    }
+    setFiles((previous) => [...previous, ...Array.from(e.dataTransfer.files ?? [])].slice(0, 6));
   }, []);
 
   const handleSubmit = async () => {
     setError(null);
     setSubmitting(true);
     try {
-      let newCase: RFQCase;
-      if (mode === "file" && file) {
-        newCase = await createCaseFromUpload(
-          file,
-          title || undefined,
-          customer || undefined
-        );
-      } else if (mode === "paste" && pasteText.trim()) {
-        newCase = await createCaseFromText(
-          pasteText,
-          title || undefined,
-          customer || undefined
-        );
-      } else {
-        throw new Error("Please provide a file or paste text.");
-      }
+      if (!files.length && !pasteText.trim()) throw new Error("Add an email or at least one attachment.");
+      if (sourceCount > 6) throw new Error("An RFQ can contain at most six sources, including pasted email text.");
+      if (files.some((file) => file.size > 10 * 1024 * 1024)) throw new Error("Each attachment must be 10 MB or smaller.");
+      const totalBytes = files.reduce((total, file) => total + file.size, new TextEncoder().encode(pasteText).byteLength);
+      if (totalBytes > 25 * 1024 * 1024) throw new Error("Combined email and attachment size must be 25 MB or smaller.");
+      const newCase = await createCaseFromSources(files, pasteText, title || undefined, customer || undefined);
       onCaseCreated(newCase);
       onClose();
-      setFile(null);
+      setFiles([]);
       setPasteText("");
       setTitle("");
       setCustomer("");
@@ -139,174 +123,35 @@ export function IngestModal({
 
             {/* Body */}
             <div className="px-5 py-5">
-              {/* Mode toggle */}
+              <label className="mb-2 block text-sm font-semibold" style={{ color: "var(--color-brown-700)" }} htmlFor="rfq-source-files">Customer email and attachments</label>
+              <p className="mb-3 text-xs" style={{ color: "var(--color-brown-400)" }}>Add the email text and up to six files to one RFQ. Each source keeps its own processing status and citation.</p>
               <div
-                className="flex rounded-lg p-1 mb-5"
-                style={{ backgroundColor: "var(--color-sand-100)" }}
+                className={`rounded-xl border-2 border-dashed p-5 text-center cursor-pointer transition-all duration-300 mb-3 ${dragOver ? "scale-[1.01]" : ""}`}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); fileInputRef.current?.click(); } }}
+                aria-label="Choose RFQ attachment files"
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                style={{ borderColor: dragOver ? "var(--color-amber-400)" : "var(--color-sand-300)", backgroundColor: dragOver ? "var(--color-amber-50)" : "var(--color-cream-100)" }}
               >
-                <button
-                  onClick={() => setMode("file")}
-                  className="flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-all duration-200"
-                  style={{
-                    backgroundColor:
-                      mode === "file"
-                        ? "var(--color-cream-50)"
-                        : "transparent",
-                    color:
-                      mode === "file"
-                        ? "var(--color-brown-800)"
-                        : "var(--color-brown-400)",
-                    boxShadow:
-                      mode === "file"
-                        ? "0 1px 3px rgba(139,115,85,0.08)"
-                        : "none",
-                  }}
-                >
-                  <Upload size={15} />
-                  Upload file
-                </button>
-                <button
-                  onClick={() => setMode("paste")}
-                  className="flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-all duration-200"
-                  style={{
-                    backgroundColor:
-                      mode === "paste"
-                        ? "var(--color-cream-50)"
-                        : "transparent",
-                    color:
-                      mode === "paste"
-                        ? "var(--color-brown-800)"
-                        : "var(--color-brown-400)",
-                    boxShadow:
-                      mode === "paste"
-                        ? "0 1px 3px rgba(139,115,85,0.08)"
-                        : "none",
-                  }}
-                >
-                  <FileText size={15} />
-                  Paste text
-                </button>
+                <input id="rfq-source-files" ref={fileInputRef} type="file" multiple accept=".pdf,.xlsx,.xls,.csv,.txt" onChange={(event) => { const selectedFiles = Array.from(event.currentTarget.files ?? []); setFiles((previous) => [...previous, ...selectedFiles].slice(0, 6)); }} className="hidden" />
+                <Upload size={24} className="mx-auto mb-2" style={{ color: "var(--color-sand-400)" }} />
+                <p className="text-sm font-medium" style={{ color: "var(--color-brown-500)" }}>Drop files here or click to browse</p>
+                <p className="mt-1 text-xs" style={{ color: "var(--color-brown-300)" }}>PDF, XLSX, XLS, CSV or TXT · maximum 6 sources</p>
               </div>
-
-              {/* File Upload */}
-              {mode === "file" && (
-                <div
-                  className={`rounded-xl border-2 border-dashed p-6 text-center cursor-pointer transition-all duration-300 mb-4 ${
-                    dragOver ? "scale-[1.01]" : ""
-                  }`}
-                  style={{
-                    borderColor: dragOver
-                      ? "var(--color-amber-400)"
-                      : file
-                        ? "var(--color-success-500)"
-                        : "var(--color-sand-300)",
-                    backgroundColor: dragOver
-                      ? "var(--color-amber-50)"
-                      : file
-                        ? "var(--color-success-50)"
-                        : "var(--color-cream-100)",
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragOver(true);
-                  }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".pdf,.xlsx,.xls,.csv,.txt"
-                    onChange={(e) =>
-                      setFile(e.target.files?.[0] || null)
-                    }
-                    className="hidden"
-                  />
-                  <AnimatePresence mode="wait">
-                    {file ? (
-                      <motion.div
-                        key="has-file"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                      >
-                        <CheckCircle
-                          size={28}
-                          className="mx-auto mb-2"
-                          style={{
-                            color: "var(--color-success-500)",
-                          }}
-                        />
-                        <p
-                          className="text-sm font-semibold"
-                          style={{
-                            color: "var(--color-success-700)",
-                          }}
-                        >
-                          {file.name}
-                        </p>
-                      </motion.div>
-                    ) : (
-                      <motion.div
-                        key="no-file"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                      >
-                        <Upload
-                          size={28}
-                          className="mx-auto mb-2"
-                          style={{
-                            color: "var(--color-sand-400)",
-                          }}
-                        />
-                        <p
-                          className="text-sm font-medium"
-                          style={{
-                            color: "var(--color-brown-500)",
-                          }}
-                        >
-                          Drop PDF, XLSX or CSV here
-                        </p>
-                        <p
-                          className="text-xs mt-1"
-                          style={{
-                            color: "var(--color-brown-300)",
-                          }}
-                        >
-                          or click to browse
-                        </p>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              )}
-
-              {/* Text Paste */}
-              {mode === "paste" && (
-                <textarea
-                  placeholder="Paste email or RFQ text here…"
-                  value={pasteText}
-                  onChange={(e) => setPasteText(e.target.value)}
-                  rows={7}
-                  className="w-full rounded-xl border p-3 text-sm resize-y outline-none transition-colors duration-200 mb-4 font-mono"
-                  style={{
-                    borderColor: "var(--color-sand-200)",
-                    backgroundColor: "var(--color-cream-100)",
-                    color: "var(--color-brown-800)",
-                  }}
-                  onFocus={(e) => {
-                    e.currentTarget.style.borderColor =
-                      "var(--color-amber-300)";
-                  }}
-                  onBlur={(e) => {
-                    e.currentTarget.style.borderColor =
-                      "var(--color-sand-200)";
-                  }}
-                />
-              )}
-
+              {files.length > 0 && <ul className="mb-3 space-y-1" aria-label="Selected attachments">{files.map((file, index) => <li key={`${file.name}-${file.size}-${index}`} className="flex items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-xs"><span className="truncate">{file.name} · {(file.size / 1024 / 1024).toFixed(2)} MB</span><button type="button" className="underline" onClick={() => setFiles((previous) => previous.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Remove ${file.name}`}>Remove</button></li>)}</ul>}
+              <textarea
+                placeholder="Optional: paste the customer's email or request text…"
+                aria-label="Customer email text"
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                rows={5}
+                className="w-full rounded-xl border p-3 text-sm resize-y outline-none transition-colors duration-200 mb-4 font-mono"
+                style={{ borderColor: "var(--color-sand-200)", backgroundColor: "var(--color-cream-100)", color: "var(--color-brown-800)" }}
+              />
               {/* Optional title */}
               <input
                 type="text"
@@ -403,8 +248,7 @@ export function IngestModal({
                 onClick={handleSubmit}
                 disabled={
                   submitting ||
-                  (mode === "file" && !file) ||
-                  (mode === "paste" && !pasteText.trim())
+                  (!files.length && !pasteText.trim()) || sourceCount > 6
                 }
                 className="px-5 py-2 rounded-lg text-sm font-semibold transition-all duration-200 hover:shadow-md active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{

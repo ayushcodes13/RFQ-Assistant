@@ -156,6 +156,14 @@ Deterministic parsing is used where columns and values are already explicit beca
 
 Each line retains a source locator from ingestion. The workbench opens a right-side evidence drawer for PDF, XLSX, and CSV file sources. PDF pages are rendered on demand by the authenticated API; a normalized page rectangle is overlaid only when the parser recorded one. XLSX and CSV previews return a bounded row neighborhood from the original upload and mark the target row and recorded cells. Preview endpoints are read-only and apply page, row, column, and radius limits. The UI never derives coordinates from the extracted text or asks the LLM to guess a visual location. If a PDF rectangle or spreadsheet cell reference is absent, the drawer shows the known page/row and source snippet without claiming a highlight. Pasted email and plain text keep line/snippet provenance in line details, but have no document citation drawer because there is no page or cell object to cite. This view supports verification; it does not itself validate an extracted value or approve a line.
 
+### Multi-source RFQ intake
+
+One parent case can contain pasted customer email text plus up to five attachments (six total sources). Each attachment is validated, malware-scanned, retained under a generated storage key, and recorded with its own source ID and processing status. Each parser runs independently; a failed attachment stays visible with an error receipt while successful attachments remain available for review. One failed attachment can be retried without replacing successful rows. Duplicate byte-identical files are retained in the manifest and skipped for extraction.
+
+Every line and coverage unit carries the source-document ID as well as its original filename and page, sheet, row, or text locator. The workbench exposes each original source and passes that ID to download and preview routes. Exact manufacturer/MPN repeats across sources are flagged as duplicate demand; quantity, manufacturer, and explicit revision disagreements become blocking review warnings. Distinct MPNs are never merged. If the manufacturer and remaining description text match across source files while MPNs differ, the app raises a possible part-number conflict for a human to resolve. This heuristic is deliberately advisory and may flag generic descriptions; it cannot establish interchangeability.
+
+The source manifest remains backward-compatible with existing single-source cases: a legacy `source_file` is exposed as one `source_documents` entry when older stored snapshots do not contain the list. Intake is bounded to six total sources, 10 MiB per file or pasted email, and 25 MiB aggregate. Starlette may spool multipart bodies before endpoint-level checks, so the HTTP ingress/reverse proxy must still enforce a request-body limit before customer deployment.
+
 ```mermaid
 flowchart LR
     Parse[Parser records source locator] --> Line[Line detail in review workspace]

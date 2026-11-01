@@ -9,9 +9,8 @@ test("resolve a missing unit of measure from the workbench", async ({ page }) =>
   await page.getByRole("button", { name: /New RFQ/i }).first().click();
 
   const intake = page.getByRole("dialog", { name: "New RFQ" });
-  await intake.getByRole("button", { name: /Paste text/i }).click();
   await intake
-    .getByPlaceholder(/Paste email or RFQ text here/i)
+    .getByRole("textbox", { name: "Customer email text" })
     .fill("1. 2 EA Omron E2E-X7D1-N proximity sensor");
   await intake.getByPlaceholder("Optional case title").fill(caseTitle);
 

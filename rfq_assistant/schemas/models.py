@@ -1,9 +1,10 @@
 """Pydantic schemas and models for RFQ cases, line items, catalogs, matches, and audit."""
 
-from datetime import datetime
 import math
+from datetime import datetime
 from typing import Dict, List, Literal, Optional, Tuple
-from pydantic import BaseModel, Field, computed_field, field_validator
+
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 from rfq_assistant.schemas.enums import (
     AuditAction,
@@ -20,6 +21,7 @@ from rfq_assistant.schemas.enums import (
 class SourceLocator(BaseModel):
     """Pinpoints where a line was extracted from within original source document."""
     file_name: str
+    source_file_id: Optional[str] = None
     page_number: Optional[int] = None
     sheet_name: Optional[str] = None
     row_number: Optional[int] = None
@@ -262,11 +264,21 @@ class SourceFileMetadata(BaseModel):
     """Metadata describing the uploaded RFQ document."""
     file_id: str
     file_name: str
+    storage_key: Optional[str] = None
     source_type: SourceType
     mime_type: str
     size_bytes: int
     sha256_digest: str
     uploaded_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RFQSourceDocument(BaseModel):
+    """One original email or attachment and its independent processing result."""
+
+    source_file: SourceFileMetadata
+    processing_status: Literal["queued", "processing", "processed", "failed", "duplicate"] = "queued"
+    line_count: int = 0
+    error_code: Optional[str] = None
 
 
 class RFQCaseSummary(BaseModel):
@@ -278,6 +290,7 @@ class RFQCaseSummary(BaseModel):
     processing_stage: Optional[ProcessingStage] = None
     source_type: SourceType
     source_file: Optional[SourceFileMetadata] = None
+    source_documents: List[RFQSourceDocument] = Field(default_factory=list)
     source_coverage: List[SourceCoverageUnit] = Field(default_factory=list)
     document_warnings: List[ExtractionWarning] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -306,6 +319,21 @@ class RFQCaseSummary(BaseModel):
 class RFQCase(RFQCaseSummary):
     """An RFQ quotation case, including source text on the case-detail route."""
     raw_text: Optional[str] = None
+
+    @model_validator(mode="after")
+    def preserve_legacy_single_source(self):
+        if not self.source_documents and self.source_file:
+            status = "processed"
+            if self.status == CaseStatus.PROCESSING:
+                status = "queued"
+            elif self.status == CaseStatus.FAILED:
+                status = "failed"
+            self.source_documents = [RFQSourceDocument(
+                source_file=self.source_file,
+                processing_status=status,
+                line_count=self.line_count,
+            )]
+        return self
 
 
 class HealthResponse(BaseModel):

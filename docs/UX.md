@@ -49,8 +49,9 @@
     +-------------------------------------------------------+
     | New RFQ                                               |
     |                                                       |
-    | [ Drop PDF / XLSX / CSV here ]  or [ Paste email ]      |
-    | Max size / file-type rules and processing notice      |
+    | [ Paste customer email / request ]                    |
+    | [ Add PDF / XLSX / XLS / CSV / TXT attachments ]       |
+    | Up to 6 sources · 10 MB each · 25 MB total             |
     |                                                       |
     | [Optional case title]  [Select sample catalog]        |
     |                                                       |
@@ -58,6 +59,8 @@
     +-------------------------------------------------------+
 
 Before upload, provide a clear notice about local storage and how third-party processors would handle data if they are introduced.
+
+Pasted email and attachments can be submitted together as one parent RFQ. List each chosen attachment before submission, show per-source status and line count in the Documents area, and provide an individual original-source link. A failed source gets its own retry action and error code; successful attachment results remain in the consolidated review. Duplicate, quantity, manufacturer, revision, and possible part-number conflicts remain visible review tasks. Never imply that distinct part numbers are interchangeable.
 
 ### Screen 3 — Review workbench (core product)
 

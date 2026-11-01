@@ -79,9 +79,8 @@ test("Rehearsal A — happy path: create, extract, approve, export, download", a
 
   const ingestDialog = page.getByRole("dialog", { name: "New RFQ" });
   await expect(ingestDialog).toBeVisible();
-  await ingestDialog.getByRole("button", { name: /Paste text/i }).click();
   await ingestDialog
-    .getByPlaceholder(/Paste email or RFQ text here/i)
+    .getByRole("textbox", { name: "Customer email text" })
     .fill(KNOWN_GOOD_RFQ_TEXT);
   await ingestDialog
     .getByPlaceholder("Optional case title")
@@ -149,9 +148,8 @@ test("Rehearsal F — export dialog does not carry a prior case download into a 
 
   await page.getByRole("button", { name: /New RFQ/i }).first().click();
   const firstIngest = page.getByRole("dialog", { name: "New RFQ" });
-  await firstIngest.getByRole("button", { name: /Paste text/i }).click();
   await firstIngest
-    .getByPlaceholder(/Paste email or RFQ text here/i)
+    .getByRole("textbox", { name: "Customer email text" })
     .fill(KNOWN_GOOD_RFQ_TEXT);
   await firstIngest
     .getByPlaceholder("Optional case title")
@@ -181,9 +179,8 @@ test("Rehearsal F — export dialog does not carry a prior case download into a 
   await page.getByRole("button", { name: "Overview" }).click();
   await page.getByRole("button", { name: /New RFQ/i }).first().click();
   const secondIngest = page.getByRole("dialog", { name: "New RFQ" });
-  await secondIngest.getByRole("button", { name: /Paste text/i }).click();
   await secondIngest
-    .getByPlaceholder(/Paste email or RFQ text here/i)
+    .getByRole("textbox", { name: "Customer email text" })
     .fill(RFQ_WITH_MISSING_QUANTITY);
   await secondIngest
     .getByPlaceholder("Optional case title")
@@ -224,9 +221,8 @@ test("Rehearsal B — blocked export on unresolved line, then resolve", async ({
   await page.getByRole("button", { name: /New RFQ/i }).first().click();
   const ingestDialog = page.getByRole("dialog", { name: "New RFQ" });
   await expect(ingestDialog).toBeVisible();
-  await ingestDialog.getByRole("button", { name: /Paste text/i }).click();
   await ingestDialog
-    .getByPlaceholder(/Paste email or RFQ text here/i)
+    .getByRole("textbox", { name: "Customer email text" })
     .fill(RFQ_WITH_MISSING_QUANTITY);
   await ingestDialog
     .getByPlaceholder("Optional case title")
@@ -346,9 +342,8 @@ test("Rehearsal C — persistence across browser refresh", async ({
   // Create a case and approve one line.
   await page.getByRole("button", { name: /New RFQ/i }).first().click();
   const ingestDialog = page.getByRole("dialog", { name: "New RFQ" });
-  await ingestDialog.getByRole("button", { name: /Paste text/i }).click();
   await ingestDialog
-    .getByPlaceholder(/Paste email or RFQ text here/i)
+    .getByRole("textbox", { name: "Customer email text" })
     .fill(KNOWN_GOOD_RFQ_TEXT);
   await ingestDialog
     .getByPlaceholder("Optional case title")
@@ -600,6 +595,7 @@ test("Rehearsal E — failure recovery on unsupported file type", async ({
   await expect(ingestDialog.getByText(/unsupported|security|error/i)).toBeVisible({
     timeout: 10_000,
   });
+  await ingestDialog.getByRole("button", { name: "Remove malicious_script.py" }).click();
 
   // Confirm no case was created and the modal remains usable after the error.
   await expect(ingestDialog).toBeVisible();
@@ -608,9 +604,8 @@ test("Rehearsal E — failure recovery on unsupported file type", async ({
   const cases = (await casesAfter.json()) as ApiCase[];
   expect(cases.some((item) => item.title === recoveryTitle)).toBe(false);
 
-  await ingestDialog.getByRole("button", { name: /Paste text/i }).click();
   await ingestDialog
-    .getByPlaceholder(/Paste email or RFQ text here/i)
+    .getByRole("textbox", { name: "Customer email text" })
     .fill(KNOWN_GOOD_RFQ_TEXT);
   await ingestDialog
     .getByPlaceholder("Optional case title")
@@ -627,8 +622,7 @@ test("Rehearsal G — export modal refreshes stale review status from backend", 
   await page.goto("/workspace");
   await page.getByRole("button", { name: /New RFQ/i }).first().click();
   const ingest = page.getByRole("dialog", { name: "New RFQ" });
-  await ingest.getByRole("button", { name: /Paste text/i }).click();
-  await ingest.getByPlaceholder(/Paste email or RFQ text here/i).fill(KNOWN_GOOD_RFQ_TEXT);
+  await ingest.getByRole("textbox", { name: "Customer email text" }).fill(KNOWN_GOOD_RFQ_TEXT);
   await ingest.getByPlaceholder("Optional case title").fill("Rehearsal G stale state");
   await ingest.getByRole("button", { name: /Extract line items/i }).click();
   await expect(ingest).toBeHidden({ timeout: 30_000 });

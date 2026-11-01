@@ -443,6 +443,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/rfqs/{case_id}/sources/{source_file_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Rfq Source Document
+         * @description Retry one failed attachment while preserving other source results.
+         */
+        post: operations["retry_rfq_source_document_api_rfqs__case_id__sources__source_file_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session": {
         parameters: {
             query?: never;
@@ -696,6 +716,8 @@ export interface components {
             customer_label?: string | null;
             /** File */
             file?: string | null;
+            /** Files */
+            files?: string[] | null;
             /** Pasted Text */
             pasted_text?: string | null;
             /** Title */
@@ -1138,6 +1160,8 @@ export interface components {
             raw_text?: string | null;
             /** Source Coverage */
             source_coverage?: components["schemas"]["SourceCoverageUnit"][];
+            /** Source Documents */
+            source_documents?: components["schemas"]["RFQSourceDocument"][];
             source_file?: components["schemas"]["SourceFileMetadata"] | null;
             source_type: components["schemas"]["SourceType"];
             /** Stage Timings Ms */
@@ -1236,6 +1260,8 @@ export interface components {
             processing_stage?: components["schemas"]["ProcessingStage"] | null;
             /** Source Coverage */
             source_coverage?: components["schemas"]["SourceCoverageUnit"][];
+            /** Source Documents */
+            source_documents?: components["schemas"]["RFQSourceDocument"][];
             source_file?: components["schemas"]["SourceFileMetadata"] | null;
             source_type: components["schemas"]["SourceType"];
             /** Stage Timings Ms */
@@ -1352,6 +1378,26 @@ export interface components {
             selected_catalog_sku?: string | null;
             /** Unit */
             unit?: string | null;
+        };
+        /**
+         * RFQSourceDocument
+         * @description One original email or attachment and its independent processing result.
+         */
+        RFQSourceDocument: {
+            /** Error Code */
+            error_code?: string | null;
+            /**
+             * Line Count
+             * @default 0
+             */
+            line_count: number;
+            /**
+             * Processing Status
+             * @default queued
+             * @enum {string}
+             */
+            processing_status: "queued" | "processing" | "processed" | "failed" | "duplicate";
+            source_file: components["schemas"]["SourceFileMetadata"];
         };
         /**
          * RematchLineRequest
@@ -1501,6 +1547,8 @@ export interface components {
             /** Size Bytes */
             size_bytes: number;
             source_type: components["schemas"]["SourceType"];
+            /** Storage Key */
+            storage_key?: string | null;
             /**
              * Uploaded At
              * Format: date-time
@@ -1533,6 +1581,8 @@ export interface components {
             row_number?: number | null;
             /** Sheet Name */
             sheet_name?: string | null;
+            /** Source File Id */
+            source_file_id?: string | null;
             /** Text Snippet */
             text_snippet?: string | null;
         };
@@ -2406,7 +2456,9 @@ export interface operations {
     };
     get_original_source_api_rfqs__case_id__source_get: {
         parameters: {
-            query?: never;
+            query?: {
+                source_file_id?: string | null;
+            };
             header?: {
                 "X-API-Key"?: string | null;
                 authorization?: string | null;
@@ -2440,7 +2492,9 @@ export interface operations {
     };
     get_pdf_source_page_api_rfqs__case_id__source_pages__page_number__get: {
         parameters: {
-            query?: never;
+            query?: {
+                source_file_id?: string | null;
+            };
             header?: {
                 "X-API-Key"?: string | null;
                 authorization?: string | null;
@@ -2480,6 +2534,7 @@ export interface operations {
                 row_number: number;
                 target_cells?: string[] | null;
                 radius?: number;
+                source_file_id?: string | null;
             };
             header?: {
                 "X-API-Key"?: string | null;
@@ -2499,6 +2554,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SpreadsheetSourcePreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_rfq_source_document_api_rfqs__case_id__sources__source_file_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-API-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                case_id: string;
+                source_file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RFQCase"];
                 };
             };
             /** @description Validation Error */

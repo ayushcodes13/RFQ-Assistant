@@ -93,6 +93,8 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 log = logging.getLogger(__name__)
 DEFAULT_CATALOG_PATH = ROOT / "fixtures" / "catalogs" / "industrial_components_sample_catalog.csv"
 MAX_CATALOG_UPLOAD_BYTES = 10 * 1024 * 1024
+MAX_RFQ_SOURCES_PER_CASE = 6
+MAX_RFQ_SOURCE_BYTES_PER_CASE = 25 * 1024 * 1024
 
 
 class PNGResponse(Response):
@@ -273,6 +275,15 @@ async def _read_bounded_upload(file: UploadFile) -> bytes:
     return content
 
 
+def _case_source_metadata(case: RFQCase, source_file_id: Optional[str]):
+    if source_file_id is None:
+        return case.source_file
+    for document in case.source_documents:
+        if document.source_file.file_id == source_file_id:
+            return document.source_file
+    return None
+
+
 @app.get("/api/health", response_model=HealthResponse)
 def health_check():
     """Public liveness probe; expose no catalog or customer activity counts."""
@@ -434,13 +445,17 @@ def reject_catalog_update(
 @app.post("/api/rfqs", response_model=RFQCase)
 async def create_rfq(
     file: Optional[UploadFile] = File(None),
+    files: Optional[List[UploadFile]] = File(None),
     pasted_text: Optional[str] = Form(None),
     title: Optional[str] = Form(None),
     customer_label: Optional[str] = Form(None),
     current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     """Creates draft case from an uploaded file or pasted email text with malware defense."""
-    if not file and not pasted_text:
+    if file and files:
+        raise HTTPException(status_code=400, detail="Use either the single-file field or the multiple-files field, not both.")
+    attached_files = files or ([file] if file else [])
+    if not attached_files and not pasted_text:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Must provide either an uploaded file or pasted text.",
@@ -451,11 +466,26 @@ async def create_rfq(
     effective_actor = current_user.name
 
     try:
-        if file:
+        if len(attached_files) + int(bool(pasted_text)) > MAX_RFQ_SOURCES_PER_CASE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"An RFQ can contain at most {MAX_RFQ_SOURCES_PER_CASE} source documents.",
+            )
+        if pasted_text and len(pasted_text.encode("utf-8")) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="Pasted RFQ text exceeds the 10 MB source limit.")
+
+        prepared_uploads: List[tuple[str, bytes]] = []
+        all_intake_warnings: List[ExtractionWarning] = []
+        for attached_file in attached_files:
             read_started = time.perf_counter()
-            content = await _read_bounded_upload(file)
+            content = await _read_bounded_upload(attached_file)
             upload_read_ms = (time.perf_counter() - read_started) * 1000
-            filename = file.filename or "upload.xlsx"
+            filename = attached_file.filename or "upload.xlsx"
+            if sum(len(existing_content) for _, existing_content in prepared_uploads) + len(content) > MAX_RFQ_SOURCE_BYTES_PER_CASE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Combined RFQ source size exceeds the {MAX_RFQ_SOURCE_BYTES_PER_CASE}-byte limit.",
+                )
             # 1. Attachment security scan
             scan_started = time.perf_counter()
             scan = clamav_scanner.scan_bytes(content, filename=filename)
@@ -473,24 +503,11 @@ async def create_rfq(
                     ),
                 )
 
-            if ASYNC_INGEST_ENABLED:
-                case = case_manager.enqueue_case_from_upload(
-                    filename=filename, content=content, title=title,
-                    customer_label=customer_label, actor=effective_actor,
-                    intake_warnings=_unscanned_warning(scan),
-                )
-            else:
-                case = case_manager.create_case_from_upload(
-                    filename=filename,
-                    content=content,
-                    title=title,
-                    customer_label=customer_label,
-                    actor=effective_actor,
-                    intake_warnings=_unscanned_warning(scan),
-                )
-            return case
-        else:
-            raw_text = pasted_text or ""
+            prepared_uploads.append((filename, content))
+            all_intake_warnings.extend(_unscanned_warning(scan))
+
+        raw_text = pasted_text or ""
+        if raw_text:
             scan_started = time.perf_counter()
             scan = clamav_scanner.scan_bytes(raw_text.encode("utf-8"), filename="pasted_text.txt")
             log.info(
@@ -507,21 +524,40 @@ async def create_rfq(
                     ),
                 )
 
+            prepared_uploads.insert(0, ("customer_email.txt", raw_text.encode("utf-8")))
+            all_intake_warnings.extend(_unscanned_warning(scan))
+
+        if len(prepared_uploads) == 1 and not raw_text:
+            filename, content = prepared_uploads[0]
             if ASYNC_INGEST_ENABLED:
-                case = case_manager.enqueue_case_from_text(
-                    raw_text=raw_text, title=title,
+                return case_manager.enqueue_case_from_upload(
+                    filename=filename, content=content, title=title,
                     customer_label=customer_label, actor=effective_actor,
-                    intake_warnings=_unscanned_warning(scan),
+                    intake_warnings=all_intake_warnings,
                 )
-            else:
-                case = case_manager.create_case_from_text(
-                    raw_text=raw_text,
-                    title=title,
-                    customer_label=customer_label,
-                    actor=effective_actor,
-                    intake_warnings=_unscanned_warning(scan),
+            return case_manager.create_case_from_upload(
+                filename=filename, content=content, title=title,
+                customer_label=customer_label, actor=effective_actor,
+                intake_warnings=all_intake_warnings,
+            )
+        if len(prepared_uploads) == 1 and raw_text:
+            if ASYNC_INGEST_ENABLED:
+                return case_manager.enqueue_case_from_text(
+                    raw_text=raw_text, title=title, customer_label=customer_label,
+                    actor=effective_actor, intake_warnings=all_intake_warnings,
                 )
-            return case
+            return case_manager.create_case_from_text(
+                raw_text=raw_text, title=title, customer_label=customer_label,
+                actor=effective_actor, intake_warnings=all_intake_warnings,
+            )
+        return case_manager.create_case_from_uploads(
+            prepared_uploads,
+            title=title,
+            customer_label=customer_label,
+            actor=effective_actor,
+            intake_warnings=all_intake_warnings,
+            defer_processing=ASYNC_INGEST_ENABLED,
+        )
     except (UploadValidationError, DocumentParserError) as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except HTTPException:
@@ -559,6 +595,7 @@ def get_rfq_lines(case_id: str, current_user: PilotUser = Depends(get_current_us
 @app.get("/api/rfqs/{case_id}/source")
 def get_original_source(
     case_id: str,
+    source_file_id: Optional[str] = Query(default=None),
     current_user: PilotUser = Depends(get_current_user),
 ):
     """Open the original uploaded RFQ for human source verification.
@@ -570,10 +607,13 @@ def get_original_source(
     from fastapi.responses import FileResponse
 
     case = case_manager.get_case(case_id)
-    if not case or not case.source_file:
+    source_metadata = _case_source_metadata(case, source_file_id) if case else None
+    if not case or not source_metadata:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ source not found.")
 
-    source = case_manager.storage.uploads_dir / case.case_id / case.source_file.file_name
+    source = case_manager.storage.uploads_dir / case.case_id / (
+        source_metadata.storage_key or source_metadata.file_name
+    )
     if not source.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original source file is missing.")
 
@@ -588,11 +628,25 @@ def get_original_source(
 
     return FileResponse(
         path=source,
-        filename=case.source_file.file_name,
+        filename=source_metadata.file_name,
         media_type=mime,
         content_disposition_type="inline" if ext in {".pdf", ".txt", ".csv"} else "attachment",
         headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
     )
+
+
+@app.post("/api/rfqs/{case_id}/sources/{source_file_id}/retry", response_model=RFQCase)
+def retry_rfq_source_document(
+    case_id: str,
+    source_file_id: str,
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
+):
+    """Retry one failed attachment while preserving other source results."""
+    try:
+        return case_manager.retry_source_document(case_id, source_file_id, current_user.name)
+    except ValueError as exc:
+        status_code = 404 if "not found" in str(exc).lower() else 409
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @app.get(
@@ -603,6 +657,7 @@ def get_original_source(
 def get_pdf_source_page(
     case_id: str,
     page_number: int,
+    source_file_id: Optional[str] = Query(default=None),
     current_user: PilotUser = Depends(get_current_user),
 ):
     """Render one bounded PDF page as a safe image for source verification."""
@@ -612,9 +667,12 @@ def get_pdf_source_page(
     if page_number < 1:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Page number must be positive.")
     case = case_manager.get_case(case_id)
-    if not case or not case.source_file:
+    source_metadata = _case_source_metadata(case, source_file_id) if case else None
+    if not case or not source_metadata:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ source not found.")
-    source = case_manager.storage.uploads_dir / case.case_id / case.source_file.file_name
+    source = case_manager.storage.uploads_dir / case.case_id / (
+        source_metadata.storage_key or source_metadata.file_name
+    )
     if not source.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original source file is missing.")
     if source.suffix.lower() != ".pdf":
@@ -656,6 +714,7 @@ def get_spreadsheet_source_preview(
     row_number: int,
     target_cells: Optional[List[str]] = Query(default=None),
     radius: int = Query(default=4, ge=0, le=10),
+    source_file_id: Optional[str] = Query(default=None),
     current_user: PilotUser = Depends(get_current_user),
 ):
     """Return a small read-only worksheet window centered on source evidence."""
@@ -671,10 +730,13 @@ def get_spreadsheet_source_preview(
     if not 1 <= row_number <= 5000:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Source row is outside workbook limits.")
     case = case_manager.get_case(case_id)
-    if not case or not case.source_file:
+    source_metadata = _case_source_metadata(case, source_file_id) if case else None
+    if not case or not source_metadata:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ source not found.")
 
-    source = case_manager.storage.uploads_dir / case.case_id / case.source_file.file_name
+    source = case_manager.storage.uploads_dir / case.case_id / (
+        source_metadata.storage_key or source_metadata.file_name
+    )
     if not source.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original source file is missing.")
     if source.suffix.lower() not in {".xlsx", ".csv"}:
@@ -1161,7 +1223,10 @@ def v1_draft_quote(
         if line.source_locator:
             sources.append(
                 SourceRef(
-                    file_id=case.source_file.file_id if case.source_file else "unknown",
+                    file_id=(
+                        line.source_locator.source_file_id
+                        or (case.source_file.file_id if case.source_file else "unknown")
+                    ),
                     page=line.source_locator.page_number,
                     sheet=line.source_locator.sheet_name,
                     text_excerpt=line.source_locator.text_snippet,
@@ -1219,7 +1284,10 @@ def v1_draft_quote(
                     source_locator = proposal.source_locator.model_dump(mode="json")
                     break
 
-            buyer_source_id = case.source_file.file_id if case.source_file else f"RFQ-{case_id}"
+            buyer_source_id = (
+                line.source_locator.source_file_id
+                or (case.source_file.file_id if case.source_file else f"RFQ-{case_id}")
+            )
             buyer_text = line.raw_text or (line.source_locator.text_snippet if line.source_locator else "") or ""
             if buyer_text:
                 buyer_quote_inputs.append({

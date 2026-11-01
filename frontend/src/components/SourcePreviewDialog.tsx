@@ -11,6 +11,7 @@ interface SourcePreviewDialogProps {
   sheetName: string;
   rowNumber: number;
   targetCells: string[];
+  sourceFileId?: string;
   onClose: () => void;
 }
 
@@ -19,6 +20,7 @@ export function SourcePreviewDialog({
   sheetName,
   rowNumber,
   targetCells,
+  sourceFileId,
   onClose,
 }: SourcePreviewDialogProps) {
   const { dialogRef, closeButtonRef } = useSourceDrawer(onClose);
@@ -28,7 +30,7 @@ export function SourcePreviewDialog({
 
   useEffect(() => {
     let current = true;
-    getSpreadsheetSourcePreview(caseId, sheetName, rowNumber, targetCellKey.split(",").filter(Boolean))
+    getSpreadsheetSourcePreview(caseId, sheetName, rowNumber, targetCellKey.split(",").filter(Boolean), sourceFileId)
       .then((result) => {
         if (current) setPreview(result);
       })
@@ -38,7 +40,7 @@ export function SourcePreviewDialog({
     return () => {
       current = false;
     };
-  }, [caseId, sheetName, rowNumber, targetCellKey, onClose]);
+  }, [caseId, sheetName, rowNumber, targetCellKey, sourceFileId, onClose]);
 
   return (
     <div className="fixed inset-0 z-[80] bg-[#142126]/30" role="presentation" onMouseDown={(event) => {

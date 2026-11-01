@@ -4,8 +4,7 @@ test("Operator can inspect persisted approval history in the RFQ workspace", asy
   await page.goto("/workspace");
   await page.getByRole("button", { name: /New RFQ/i }).first().click();
   const intake = page.getByRole("dialog", { name: "New RFQ" });
-  await intake.getByRole("button", { name: /Paste text/i }).click();
-  await intake.getByPlaceholder(/Paste email or RFQ text here/i).fill(
+  await intake.getByRole("textbox", { name: "Customer email text" }).fill(
     "Please quote 10 units Schneider Electric LC1D09BD contactor."
   );
   await intake.getByPlaceholder("Optional case title").fill("Synthetic audit history demo");
