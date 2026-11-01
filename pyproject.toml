@@ -37,7 +37,6 @@ test = [
     "mypy>=1.14",
     "bandit>=1.8",
     "pip-audit>=2.7",
-    "filelock>=4.2.1",
     "redis>=5.0",
     "pillow>=13.0.0; python_version >= '3.11'",
 ]
