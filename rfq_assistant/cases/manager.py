@@ -1455,9 +1455,14 @@ class CaseManager:
             return False
         if line.extraction_status != ExtractionStatus.EXTRACTED:
             return False
-        # A schema- and source-grounded model proposal is eligible for sampling;
-        # OCR, guessed layouts, formulas, and unresolved warnings remain exceptions.
-        return all(w.code == "LLM_PROPOSED_EXTRACTION" for w in line.extraction_warnings)
+        # Model source-quote and schema checks are not semantic correctness proof.
+        # Never batch-approve a Luna-derived item in an unvalidated pilot:
+        # every AI-proposed row must be verified individually against its source.
+        # OCR, guessed layouts, formulas and other warnings also remain exceptions.
+        return not line.extraction_warnings and not any(
+            provenance.origin.value == "LUNA"
+            for provenance in line.field_provenance.values()
+        )
 
     @staticmethod
     def _sample_group(line: RFQLineItem) -> str:
