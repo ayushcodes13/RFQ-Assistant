@@ -163,8 +163,8 @@ def test_ten_human_input_shapes_complete_case_intake_without_silent_loss(tmp_pat
         assert case.case_id
         assert case.source_coverage or case.status.value == "FAILED", case_id
         lines = manager.get_lines(case.case_id)
-        original = manager.storage.uploads_dir / case.case_id / case.source_file.file_name
-        assert original.is_file(), case_id
+        original = manager.storage.get_path(case.case_id, case.source_file.file_name)
+        assert original is not None, case_id
         assert lines or case.document_warnings or case.status.value == "FAILED", case_id
 
         if case_id == "H10-scanned-pdf-no-ocr":

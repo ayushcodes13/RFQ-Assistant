@@ -1,5 +1,7 @@
 """Adversarial path-containment checks for document storage."""
 
+import hashlib
+
 import pytest
 
 from rfq_assistant.ingestion.storage import DocumentStorage
@@ -21,9 +23,10 @@ def test_storage_rejects_symlink_escape_on_read_and_write(tmp_path):
     storage = DocumentStorage(tmp_path / "storage")
     outside = tmp_path / "outside.txt"
     outside.write_bytes(b"private")
-    case_dir = storage.uploads_dir / "RFQ-SAFE"
+    case_dir = storage._case_directory("RFQ-SAFE")
     case_dir.mkdir()
-    (case_dir / "linked.txt").symlink_to(outside)
+    disk_name = hashlib.sha256(b"linked.txt").hexdigest()
+    (case_dir / disk_name).symlink_to(outside)
 
     assert storage.get_file("RFQ-SAFE", "linked.txt") is None
     with pytest.raises(ValueError, match="Path traversal blocked"):
@@ -37,7 +40,7 @@ def test_delete_case_does_not_follow_a_case_directory_symlink(tmp_path):
     outside.mkdir()
     marker = outside / "keep.txt"
     marker.write_text("preserve", encoding="utf-8")
-    (storage.uploads_dir / "RFQ-SYMLINK").symlink_to(outside, target_is_directory=True)
+    storage._case_directory("RFQ-SYMLINK").symlink_to(outside, target_is_directory=True)
 
     assert storage.delete_case("RFQ-SYMLINK") is False
     assert marker.read_text(encoding="utf-8") == "preserve"

@@ -1,5 +1,6 @@
 """Local file persistence for original RFQ documents and digests."""
 
+import hashlib
 import re
 from pathlib import Path
 from typing import Optional
@@ -19,11 +20,12 @@ class DocumentStorage:
         self.uploads_dir.mkdir(parents=True, exist_ok=True)
 
     def _case_directory(self, case_id: str) -> Path:
-        # Validate path components before composing a filesystem path. The
-        # resolve/containment check below also protects against symlink escapes.
         if not _SAFE_CASE_ID.fullmatch(case_id):
             raise ValueError("Case ID contains unsafe path characters for uploads storage.")
-        candidate = (self.uploads_dir / case_id).resolve()
+        # Hash logical identifiers so user-controlled text never becomes a path
+        # component. Keep the mapping deterministic for restart compatibility.
+        disk_case_id = hashlib.sha256(case_id.encode("utf-8")).hexdigest()
+        candidate = (self.uploads_dir / disk_case_id).resolve()
         root = self.uploads_dir.resolve()
         try:
             relative = candidate.relative_to(root)
@@ -37,7 +39,8 @@ class DocumentStorage:
     def _file_in_case(case_dir: Path, filename: str) -> Path:
         if not _SAFE_STORED_NAME.fullmatch(filename) or filename in {".", ".."}:
             raise ValueError(f"Path traversal blocked for filename: {filename}")
-        candidate = (case_dir / filename).resolve()
+        disk_filename = hashlib.sha256(filename.encode("utf-8")).hexdigest()
+        candidate = (case_dir / disk_filename).resolve()
         try:
             relative = candidate.relative_to(case_dir.resolve())
         except ValueError as exc:
@@ -64,6 +67,15 @@ class DocumentStorage:
         if file_path.exists():
             return file_path.read_bytes()
         return None
+
+    def get_path(self, case_id: str, filename: str) -> Optional[Path]:
+        """Returns an existing opaque storage path for a logical filename."""
+        try:
+            case_dir = self._case_directory(case_id)
+            file_path = self._file_in_case(case_dir, filename)
+        except ValueError:
+            return None
+        return file_path if file_path.is_file() else None
 
     def delete_case(self, case_id: str) -> bool:
         """Deletes all stored documents for a case."""

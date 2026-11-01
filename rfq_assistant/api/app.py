@@ -9,6 +9,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from decimal import Decimal
+from io import BytesIO
 from pathlib import Path
 from typing import List, Optional
 
@@ -611,13 +612,13 @@ def get_original_source(
     if not case or not source_metadata:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ source not found.")
 
-    source = case_manager.storage.uploads_dir / case.case_id / (
-        source_metadata.storage_key or source_metadata.file_name
+    source = case_manager.storage.get_path(
+        case.case_id, source_metadata.storage_key or source_metadata.file_name
     )
-    if not source.is_file():
+    if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original source file is missing.")
 
-    ext = source.suffix.lower()
+    ext = Path(source_metadata.file_name).suffix.lower()
     mime = {
         ".pdf": "application/pdf",
         ".csv": "text/csv",
@@ -670,12 +671,12 @@ def get_pdf_source_page(
     source_metadata = _case_source_metadata(case, source_file_id) if case else None
     if not case or not source_metadata:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ source not found.")
-    source = case_manager.storage.uploads_dir / case.case_id / (
-        source_metadata.storage_key or source_metadata.file_name
+    source = case_manager.storage.get_path(
+        case.case_id, source_metadata.storage_key or source_metadata.file_name
     )
-    if not source.is_file():
+    if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original source file is missing.")
-    if source.suffix.lower() != ".pdf":
+    if Path(source_metadata.file_name).suffix.lower() != ".pdf":
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Source page previews are available for PDF documents.")
 
     document = None
@@ -734,12 +735,13 @@ def get_spreadsheet_source_preview(
     if not case or not source_metadata:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ source not found.")
 
-    source = case_manager.storage.uploads_dir / case.case_id / (
-        source_metadata.storage_key or source_metadata.file_name
+    source = case_manager.storage.get_path(
+        case.case_id, source_metadata.storage_key or source_metadata.file_name
     )
-    if not source.is_file():
+    if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original source file is missing.")
-    if source.suffix.lower() not in {".xlsx", ".csv"}:
+    source_ext = Path(source_metadata.file_name).suffix.lower()
+    if source_ext not in {".xlsx", ".csv"}:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail="Inline source preview is available for CSV and XLSX files. Open the original file to inspect this source.",
@@ -754,7 +756,7 @@ def get_spreadsheet_source_preview(
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Source cell is outside workbook limits.")
         selected_cells.append(coordinate.upper())
 
-    if source.suffix.lower() == ".csv":
+    if source_ext == ".csv":
         import csv
 
         try:
@@ -798,8 +800,9 @@ def get_spreadsheet_source_preview(
 
     workbook = cached_workbook = None
     try:
-        workbook = openpyxl.load_workbook(source, read_only=True, data_only=False)
-        cached_workbook = openpyxl.load_workbook(source, read_only=True, data_only=True)
+        source_bytes = source.read_bytes()
+        workbook = openpyxl.load_workbook(BytesIO(source_bytes), read_only=True, data_only=False)
+        cached_workbook = openpyxl.load_workbook(BytesIO(source_bytes), read_only=True, data_only=True)
         if sheet_name not in workbook.sheetnames:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Worksheet not found in source workbook.")
         worksheet = workbook[sheet_name]
