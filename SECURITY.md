@@ -25,11 +25,16 @@ pilot keys**. Authentication is disabled only for an explicitly local, synthetic
 do not expose that mode to other machines or the internet.
 
 For a protected deployment, set `REQUIRE_AUTH=true` and configure `PILOT_API_KEYS`
-outside the repository. The format is a comma-separated list of
-`<random-secret-key>:<admin|reviewer|viewer>:<display-name>`; each secret must
+outside the repository. The current format is a comma-separated list of
+`<random-secret-key>:<admin|reviewer|viewer>:<user-id>:<workspace-id>:<display-name>`; each secret must
 be at least 16 characters and should be generated with a cryptographically
 secure random generator (prefer substantially longer random secrets).
 Never store real credentials in screenshots, issues, CI logs, or committed files.
+
+All configured credentials must use the same workspace ID. The backend rejects
+multiple workspace IDs because persistence and resource authorization are still
+single-workspace. Older three- and four-part credential formats remain accepted
+and map to `ws-default`; compatibility does not provide tenant isolation.
 
 With `REQUIRE_AUTH=true`, missing keys reject API access (503) rather than
 falling back to test credentials. Malformed, duplicate, weak or invalid-role

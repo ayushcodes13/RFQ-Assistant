@@ -103,6 +103,7 @@ def test_session_endpoint_returns_identity_without_credential(client, monkeypatc
         "user_id": "usr-viewer",
         "name": "Read-Only Auditor",
         "role": "viewer",
+        "workspace_id": "ws-default",
     }
     assert "api_key" not in response.json()
     assert "secret" not in response.text.lower()
