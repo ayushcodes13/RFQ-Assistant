@@ -73,7 +73,7 @@ class RedisSharedPacer:
         self._outage_cooldown_seconds = outage_cooldown_seconds
         self._late_turn_seconds = late_turn_seconds
         self._down_until = 0.0
-        self._warned_at = 0.0
+        self._warned_at: float | None = None
         self._lock = threading.Lock()
 
     @classmethod
@@ -148,7 +148,7 @@ class RedisSharedPacer:
         now = self._clock()
         with self._lock:
             self._down_until = now + self._outage_cooldown_seconds
-            if now - self._warned_at >= 60.0:
+            if self._warned_at is None or now - self._warned_at >= 60.0:
                 log.warning(
                     "[rfq_provider_pacing] shared_limiter=unavailable fallback=process_local error=%s",
                     type(exc).__name__,
