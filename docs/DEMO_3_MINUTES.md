@@ -1,112 +1,85 @@
-# Three-minute RFQ Assistant buyer demo
+# RFQ Assistant: two-workflow distributor demo
 
-**Status:** reproducible presenter runbook for the existing local prototype. This is **not** a screen recording, a hosted deployment, a measured customer success story, or evidence of extraction accuracy. All input data is synthetic. Run the preflight before presenting.
+**Status:** synthetic, locally reproducible demo guide. This is not a production deployment, measured customer accuracy, or a customer acceptance test. The application prepares **drafts only** and never automatically emails buyers, reserves stock, or deducts inventory.
 
-## Outcome we want the buyer to judge
+This replaces the older runbook that referred to the removed Overview navigation and incorrectly described the current quote/audit/clarification panels. The live application now has **RFQ inbox**, **Catalog**, and **Update data**. Do not show a screen or feature that you have not verified in this exact demo run.
 
-Show the proposed **pre-ERP quotation preparation step**: incoming RFQ file or email -> extracted lines with source evidence -> exact-catalog matching and visible exceptions -> human review -> **draft** worksheet. Ask whether that step is genuinely painful in the buyer's existing process. Do not position this as an autonomous quoting engine.
+## The one-sentence pitch
 
-### Preflight, 10-15 minutes before the meeting
+"Keep manufacturer item records current with human-approved, source-backed updates, then turn a buyer's BOM into an auditable, matched quotation **draft** instead of manually copying every part number."
 
-1. Open this repository on the demo machine. **No real customer, employer or personal production data**.
-2. From the repository root, start the isolated demo launcher (it uses separate ports 8010/3010, a fresh `.demo-runtime/` database, and synchronous ingestion; it refuses occupied ports and does not kill unrelated processes):
+## Preconditions: rehearsal on the demo computer
+
+1. Use only synthetic materials in `demo-data/` and the built-in industrial sample catalog. Never connect employer, real customer, CRM or Gmail data without explicit authorization.
+2. From the repository root, install the documented Python and `frontend/` dependencies, then run:
+
    ```bash
    ./scripts/demo.sh
    ```
-   Keep the process running while presenting. Stop it with `./scripts/demo.sh stop`. If either isolated port is occupied, choose free ones with `RFQ_DEMO_BACKEND_PORT` and `RFQ_DEMO_FRONTEND_PORT`; do not kill an unidentified listener.
-3. Open `http://localhost:3010/workspace`. Confirm the **Overview** landing screen, **RFQ inbox**, **New RFQ** dialog, review workbench and **Export Draft** modal work. The current UI does not render an audit-log panel or an unsent-email draft panel; do not plan to point to either during the demo.
-4. Confirm the sample catalog is available at `fixtures/catalogs/industrial_components_sample_catalog.csv` (the README says the backend loads it locally).
-5. Stage **two or three separate synthetic cases** before recording:
-   - Upload `fixtures/rfq_samples/industrial_control_bom_20lines.xlsx` to demonstrate **file upload and parsing**.
-   - Paste the contents of `fixtures/rfq_samples/messy_email_quote_request.txt` into **Paste Email / Parts List** to demonstrate **an unspecified sensor** and review warnings.
-   - Optionally paste `fixtures/rfq_samples/cross_brand_collision.txt` to demonstrate **XG-42 manufacturer ambiguity**. Confirm actual behavior before claiming it appears. Use `fixtures/ground_truth/annotations.json` for fixture expectations.
-6. Leave **unresolved rows unapproved**. Preview the export modal and make sure draft versus final behavior matches the current build. Do not make up per-row extraction counts, hit rates or warnings: speak only about what the local app actually shows.
-7. Check that the screen share has no Gmail, CRM, Apollo, Hunter, customer identities, secrets, or employer material visible. Turn off notifications.
 
-### Live demo: 3:00 total
+   Open `http://localhost:3010/workspace`. The launcher starts an isolated SQLite store, the backend on `127.0.0.1:8010`, and the Next.js frontend on `127.0.0.1:3010`. It does **not** touch the normal `storage/` directory, but **starting it again clears its own `.demo-runtime/storage/` data**. Keep it running throughout the presentation. Use `./scripts/demo.sh stop` after the meeting. Set `RFQ_DEMO_BACKEND_PORT` and `RFQ_DEMO_FRONTEND_PORT` for occupied ports; never kill unrelated processes.
+3. Confirm the sidebar includes **RFQ inbox**, **Catalog**, and **Update data**. Confirm the seeded catalog contains `SKU-SCH-001` with recorded stock 150. If it does not, stop and diagnose startup; do not invent seed values.
+4. **Luna is optional, not automatically enabled by the launcher.** To demonstrate model extraction, configure the authorized provider through server-only `RFQ_LLM_ENABLED=true`, `RFQ_LLM_MODEL=gpt-6-luna`, `RFQ_LLM_BASE_URL`, and `RFQ_LLM_API_KEY` outside Git before starting the launcher. Verify a synthetic intake records a model call and that quote preparation reports its actual evidence-mapping status. If credentials or provider access are unavailable, describe the deterministic parser instead of claiming a live Luna result.
+5. Before screen sharing, run both flows completely once. Inspect the actual saved/catalog/export values; check source links, the quote draft, and the downloaded XLSX. Close email/CRM tabs and suppress notifications. Keep a screenshot or screen recording of a **genuine successful rehearsal**, not an edited simulation.
 
-| Time | Presenter action in the actual app | Narration / buyer value |
-| --- | --- | --- |
-| **0:00-0:25** | The app opens on **Overview**. Click **RFQ inbox** in the sidebar, then **New RFQ**, choose **Upload file**, select `industrial_control_bom_20lines.xlsx`, add a synthetic case title, and submit. | "This starts where your quote requests arrive: a spreadsheet or PDF, or an email body. Instead of auto-quoting, we first make a working sheet that a salesperson can check." |
-| **0:25-0:55** | Review the newly created case in its workbench. Select an extracted row. Show its source locator and text snippet next to the line grid. Open the original RFQ from the source panel (XLSX downloads, native PDF opens in a new tab) and confirm the values against the actual row. | "The rep can see exactly which source line the part number and quantity came from. We want to catch errors before they reach pricing." |
-| **0:55-1:25** | Switch to the pre-staged messy-email case from **RFQ inbox**. In the workbench, select the **No match** or **Needs review** filter that corresponds to the captured line, then open the unresolved item from "the sensor from last time" (or whatever the current parser shows). If the ambiguous item was not captured, state this as a limitation rather than simulate a warning. | "This is the important failure mode. A mention without an exact manufacturer or part number is not permission to guess a product." |
-| **1:25-1:50** | If verified in preflight, open pre-staged `cross_brand_collision.txt` and highlight XG-42. Otherwise stay on the messy-email case and show whatever missing fields and review decisions are actually present. | "Even an identical part number can belong to multiple brands. We keep that for human resolution instead of choosing a plausible substitute." |
-| **1:50-2:20** | In the workbench, select a known row. Show editable quantity and its **source snippet**, then review the row action controls. Do **not** change a real/ambiguous quantity to a guess. The current UI has no audit-log panel to show. | "A salesperson can correct and approve data. The backend records reviewer edits; this screen keeps the focus on source evidence and review status. The software does not approve technical equivalence or customer pricing." |
-| **2:20-2:45** | Click **Export draft**. Show that unresolved lines block a clean validated export; if appropriate, select **Allow partial draft export** and demonstrate the XLSX or CSV download. | "The result is a clearly labeled preparation draft, not an issued quote. Prices and lead times remain your team's responsibility." |
-| **2:45-3:00** | Close the **Export Draft** modal and ask the buyer the closing question. Use the **Unsent clarification** toolbar action to inspect and edit an unsent customer clarification. Nothing is sent automatically. | "Does your team already have a better way to handle this pre-ERP cleanup, or would a 5-10 RFQ pilot be worth testing?" |
+## Full buyer demonstration: approximately 5–7 minutes
 
-### Operator notes and safety
+### Part A: Distributor adds and corrects manufacturer data (2–3 minutes)
 
-- The **Upload File** UI supports native PDF, XLSX, CSV and text. Do not claim scanned PDFs/OCR are fully supported unless independently tested; the repo describes deterministic extraction first.
-- `ExportModal` now refetches case readiness when opened and checks again before export. The backend export validation remains authoritative; if the status cannot be checked, export is disabled. Do not claim this has been manually browser-tested until the preflight is completed.
-- Quantity edits are committed on blur/Enter (Escape cancels). If another reviewer changed the line, a version conflict forces refresh rather than overwriting their edit.
-- Do **not** press "Approve Exact Matches" until a human has actually checked those lines, even for fictional fixtures. Batch approval is available, but not mandatory for this three-minute demo.
-- The sample is a **quotation preparation draft**. The app has no outbound quote-sending action. Never claim live ERP integration, customer rollout, automatic supplier pricing, measured efficiency, or exact extraction accuracy.
-- If a step fails during the demo, show the failure and explain the limitation. Do not use edited screenshots, staged values masquerading as live output, or invented source pinpoints.
-- Never put prospective customers' real BOMs into the public repository. Any pilot using their files needs an explicit data-use/retention agreement and redaction or authorized environment.
+Synthetic file: `demo-data/distributor-update-demo.csv`
 
-### Buyer conversation immediately after the demo
+1. Open **Update data**, attach the file and click **Review file changes**.
+2. The source proposes three records: one Schneider item already in the seeded catalog with a stock change **150 → 149**, and two new items, Omron `G2R-1-S` and WAGO `2002-1201`. Check those exact facts against the visible CSV rows; if the screen differs, stop and debug instead of reciting them.
+3. Show the current-versus-proposed table and row/filename citations. Mark **Accept** for the Omron and WAGO additions, **Reject** for the Schneider stock change.
+4. Before the final action, open Catalog or inspect its API if convenient: neither new SKU should exist yet. Return and click **Review done**.
+5. Confirm the two accepted SKUs are now searchable in **Catalog**, but `SKU-SCH-001` remains at stock **150**. Show the accepted/rejected **Decision history**.
+6. Open the rejected Schneider proposal. The UI asks what should change. If live Luna is configured and the correction path was rehearsed, enter a grounded short correction, inspect both old and new evidence, then make a **new** review decision. Do not claim that a free-form correction already changed stock or that every generated correction is valid.
 
-Ask these, in order:
+**Meaning to the distributor:** "An AI suggestion is never an automatic item-master write. You see the source, approve each proposed change, and apply only after Review done."
 
-1. "How does an RFQ arrive today: XLSX, PDF, email, supplier portal, or your ERP?"
-2. "Which part actually takes effort: cleaning line items, confirming part numbers, checking availability, negotiating price, or something else?"
-3. "Would a 5-10 **redacted or synthetic** request comparison against your current process give us a meaningful answer?"
-4. "Who owns quotation intake and could judge the output with us?"
+### Part B: Buyer BOM to reviewed draft worksheet (2–3 minutes)
 
-**Offer:** a **scoped, evaluation-only pilot**, not a free production integration. Start with 5-10 redacted/synthetic RFQs, one component family and the buyer's own empty quote worksheet template. Produce a readout of missing fields, wrong/unflagged MPNs, reviewer edits and the team's qualitative feedback. Agree scope, price, privacy and measurement plan before touching live documents. Do not promise fixed time savings.
+Synthetic file: `demo-data/buyer-two-line-bom-demo.csv`
 
-### Reproducible synthetic baseline (not a customer result)
+1. Go to **RFQ inbox → New RFQ**, upload the BOM and explicitly enter customer label **Northstar Demo Buyer**. The app may offer a buyer name from an explicit email header, but it must be confirmed by the operator; a sender name alone is not validated customer identity.
+2. Submit. Verify that **Omron G2R-1-S (4 units)** and **WAGO 2002-1201 (6 units)** are shown as distinct extracted lines, both matched by exact manufacturer plus full part number against the newly approved catalog. If a field is missing, use the visible manual correction/recovery path; never fill it with a guess.
+3. Open each line and its original source evidence. Check row and cell/filename provenance. Approve the rows **only after source comparison**, including the required sample or any exceptions. This is not an automatic match approval.
+4. Click **Prepare quote draft**. Show catalog stock (Omron 35, WAGO 42), catalog-backed USD list prices (8.25 and 1.80), human-review warnings, evidence, and any calculated totals that actually appear. Price is a catalog list price, **not** a distributor-approved selling price. Lack of source or currency remains a blocker, not a reason to invent commercial facts.
+5. Open the evidence drawer. Confirm that a document-specific source link points to the correct attachment, not just the first email in a mixed-source RFQ. Text evidence is readable without requiring a separate original document.
+6. Open **Export draft**, follow the backend's readiness checks and download the clearly labeled draft worksheet. If not all rows are review-approved, explain the blocker or explicitly choose a partial draft; **never call a partial export a validated final quotation**.
+7. Optionally show **Unsent clarification** and **Activity history**. Neither sends a message to the customer.
 
-From repository root, run:
+**Meaning to the distributor:** "Instead of a final quote appearing from a black box, every requested item, stock warning and price source is reviewable before a salesperson prepares a commercial response."
 
-```bash
-python -m scripts.evaluate_synthetic_demo
-```
+### Optional exception (30–45 seconds)
 
-This prints a JSON comparison of the 20-line synthetic XLSX fixture and the
-annotated synthetic email/collision cases. It reports line precision/recall, per-field
-MPN/manufacturer/quantity/unit accuracy, catalog-match agreement, false exact
-matches, source-locator coverage, expected warning flags, and unflagged critical
-discrepancies. It also runs synthetic duplicate-attachment and quantity,
-manufacturer, revision, and part-number conflict checks. Reports have explicit
-synthetic evidence markers and a `scorecard_passed` result for these labeled
-fixtures; these fixtures do not measure arbitrary customer inputs.
-Do **not** present these measurements as buyer performance or time saved.
+Use `fixtures/rfq_samples/cross_brand_collision.txt` to show a repeated manufacturer part number with different brands, or ask for an item without an MPN. Show the visible warning and human correction path; do not imply the system has chosen a substitute.
 
-The captured synthetic run for the current readiness snapshot is published in [`synthetic_evaluation_latest.md`](../tests/end_to_end_audit/results/synthetic_evaluation_latest.md), with the exact machine-readable output alongside it. Re-run the command above before presenting a newer build.
+## Compact three-minute version
 
-For an actual buyer evaluation, first obtain written authorization and
-redacted example RFQs, run blind independent annotation, and separately
-record operator correction time and manual-versus-assisted process time.
-Keep private customer data out of the public repo and CI artifacts.
+- **0:00–1:00**: Update data → source-backed Omron and WAGO additions → mark accept/reject → Review done.
+- **1:00–2:20**: New RFQ → upload two-line buyer BOM → compare source and exact matches → Prepare quote draft.
+- **2:20–3:00**: Evidence drawer → Export draft → close with: "Is this source-checking and RFQ cleanup costing your sales team time today?"
 
-### Pilot scorecard, to fill with actual evidence later
+If live processing would make the demo exceed three minutes, preload a synthetic case **with a truthful explanation** and demonstrate the real user interactions. Do not pretend a saved case was created live.
 
-| Metric | How measured | Baseline | Assisted | Status |
-| --- | --- | --- | --- | --- |
-| Input format / line count | Count true RFQ line items in agreed fixtures | Not measured | Not measured | Pending |
-| Exact MPN/manufacturer/quantity agreement | Human-ground-truth comparisons per field | Not measured | Not measured | Pending |
-| Unflagged critical mistakes | Wrong critical fields without a warning | Not measured | Not measured | Pending |
-| Source locator coverage | Exported line items with valid origin | Not measured | Not measured | Pending |
-| Human corrections | Count and time of reviewer edits | Not measured | Not measured | Pending |
-| Pre-quote preparation time | Matched manual vs assisted runs, excluding supplier waiting | Not measured | Not measured | Pending |
+## Live failure / recovery matrix
 
-Stop or narrow scope if unflagged critical mistakes occur. No invented ROI percentage or unsupported claim of "faster quotes."
+| What happens | Correct response in the demo |
+| --- | --- |
+| Luna unavailable, times out, or creates an ungrounded field | Show the warning and existing source. Use deterministic extraction or manual review. Do not claim the AI extracted it correctly. |
+| A forwarded email has superseded quantities, or multiple items are omitted | Compare with the source, enter/correct each missing row, and keep approvals pending until verified. These source shapes still require independent live testing. |
+| Headerless CSV columns are ambiguously inferred | Do not approve. Re-upload with explicit manufacturer / MPN / quantity headers, or manually correct each field. |
+| Scanned or password-protected PDF fails | Show the retained original and the extraction failure. Manual entry exists; OCR is not promised in the default demo. |
+| Stock is less than requested quantity | Show requested versus recorded catalog stock. Leave the quote blocked until a human confirms an authorized resolution; no reservation happens automatically. |
+| A price, unit, customer, or currency is unknown | Keep it blank/flagged, request clarification, or use verified distributor records. Do not calculate a final commercial quote from invented facts. |
+| Model-corrected distributor proposal loses item identity | Refuse approval, follow the prior-evidence link, and correct with a complete grounded source. The active catalog must remain unchanged. |
+| Browser refresh or export problem | Open the saved case again; inspect backend state and logs in `.demo-runtime/logs/`. A demo-only restart clears its isolated store, so never restart after staging cases unless prepared to re-enter them. |
 
-### Record feedback after the demo
+## Evidence gates and honesty
 
-Use the [operator feedback record](OPERATOR_FEEDBACK_FORM.md) to capture the buyer's workflow observations and any authorized evaluation measurements. The form is a blank template; keep completed records and approved customer evidence outside this repository. A demo conversation alone is not a pilot result.
+Run the repository's existing backend, frontend and Playwright suites; in particular, `tests/test_demo_fixture_contract.py` verifies the two demo files match after accepted catalog updates. The synthetic scorecard and 108-trial performance benchmark are **not** measures of live Luna extraction, human effort, customer acceptance, or hosted throughput.
 
-### Recording checklist
+For a real buyer meeting, obtain feedback on the actual manual RFQ workflow: formats they receive, time spent cleaning BOMs, catalog trust, stock source, pricing rules and how a pilot could use **consented/redacted** sample documents.
 
-- Start with title card: **RFQ Assistant | Synthetic quotation preparation example**.
-- Record at 1080p with legible row text; include the warning/clarification moment.
-- Trim to around three minutes only after confirming the unedited live app walkthrough works.
-- Use a representative fixture, not a customer file.
-- Add final caption: **Early-stage prototype. Human-reviewed draft only. No live prices or suppliers.**
-- Review the recording for real names, customer data and unsupported product claims before sharing.
-
-### Run verification
-
-The isolated local demo rehearsal recorded in `tests/end_to_end_audit/results/DEMO_REHEARSAL.md` passed the backend suite, synthetic fixture evaluation, six browser checks on three clean database runs, and a final seven-test browser run that includes a regression for stale export state across cases. A separate clean-start browser walkthrough created and reviewed a synthetic case, opened source provenance, generated and downloaded the draft XLSX, and uploaded the 20-line XLSX fixture to inspect its unresolved rows. The downloaded OOXML package and contents were inspected. It did not verify a hosted deployment, customer data, a process restart through the browser, or opening the downloaded workbook in a desktop spreadsheet application. Repeat the preflight on the machine and browser used for the meeting.
+**Do not claim:** automatic quotation sending, customer-approved sell price, live warehouse availability, inventory reservation/deduction, cross-tenant isolation, validated OCR, commercial time savings, broad arbitrary-email extraction accuracy, or production readiness. A single-distributor demo is the current scope.
