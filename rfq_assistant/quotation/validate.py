@@ -75,13 +75,13 @@ class ProposedQuote(BaseModel):
     @model_validator(mode="after")
     def calculate_total_when_all_prices_are_present(self):
         """Fill a missing grand total from Decimal line extensions; retain supplied totals for checking."""
-        if self.total_amount is None and self.lines and all(
-            line.unit_price is not None and line.quantity is not None for line in self.lines
-        ):
-            self.total_amount = sum(
-                (line.quantity * line.unit_price for line in self.lines),
-                start=Decimal("0"),
-            )
+        if self.total_amount is None and self.lines:
+            total = Decimal("0")
+            for line in self.lines:
+                if line.unit_price is None or line.quantity is None:
+                    return self
+                total += line.quantity * line.unit_price
+            self.total_amount = total
         return self
 
     def compute_draft_hash(self) -> str:
@@ -198,7 +198,12 @@ def validate_proposed_quote(quote: ProposedQuote) -> List[str]:
 
 def calculate_quote_total(lines: List[QuoteLine]) -> Optional[Decimal]:
     """Return a Decimal total only when every line has quantity and authoritative price."""
-    if not lines or any(line.unit_price is None or line.quantity is None for line in lines):
+    if not lines:
         return None
-    return sum((line.quantity * line.unit_price for line in lines), start=Decimal("0"))
+    total = Decimal("0")
+    for line in lines:
+        if line.unit_price is None or line.quantity is None:
+            return None
+        total += line.quantity * line.unit_price
+    return total
 
