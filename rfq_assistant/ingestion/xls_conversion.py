@@ -34,6 +34,17 @@ def convert_legacy_xls(content: bytes, *, converter: str | None = None) -> bytes
     credentials), uses an isolated user profile, has a hard timeout, and its
     output is checked as a bounded macro-free XLSX archive before parsing.
     """
+    # A reduced environment and private LibreOffice profile are not an OS
+    # security sandbox. Reject this risky format when pilot auth or protected
+    # antivirus mode is enabled, until conversion runs in an isolated worker.
+    # Local synthetic demos may continue using the bounded converter.
+    from rfq_assistant.auth import env_flag
+
+    if env_flag("REQUIRE_AUTH", False) or env_flag("REQUIRE_ANTIVIRUS", False):
+        raise LegacyXLSConversionError(
+            "Legacy .xls conversion is disabled in protected deployments. "
+            "Convert to .xlsx outside RFQ Assistant in an isolated environment."
+        )
     if len(content) > MAX_CONVERTED_XLSX_BYTES:
         raise LegacyXLSConversionError("Legacy workbook exceeds the upload size limit.")
     executable = converter or shutil.which("libreoffice") or shutil.which("soffice")

@@ -18,6 +18,7 @@ import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { MotionWrapper } from "@/components/ui/MotionWrapper";
 import { SourcePreviewDialog } from "@/components/SourcePreviewDialog";
 import { PdfSourcePreviewDialog } from "@/components/PdfSourcePreviewDialog";
+import { ClarificationDraftDialog } from "@/components/ClarificationDraftDialog";
 import {
   approveRemainingValidatedLines,
   batchReviewLines,
@@ -142,6 +143,7 @@ export function WorkbenchView({
   const [rematchingLineId, setRematchingLineId] = useState<string | null>(null);
   const [showSourcePreview, setShowSourcePreview] = useState(false);
   const [showPdfSourcePreview, setShowPdfSourcePreview] = useState(false);
+  const [showClarificationDraft, setShowClarificationDraft] = useState(false);
   const closeSourcePreview = useCallback(() => setShowSourcePreview(false), []);
   const closePdfSourcePreview = useCallback(() => setShowPdfSourcePreview(false), []);
 
@@ -412,6 +414,15 @@ export function WorkbenchView({
               {lines.length} lines · {unresolvedCount} need review
             </span>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="rfq-secondary self-start"
+              disabled={lines.length === 0}
+              onClick={() => setShowClarificationDraft(true)}
+            >
+              Unsent clarification
+            </button>
           <button
             onClick={onOpenExport}
             disabled={lines.length === 0}
@@ -424,6 +435,7 @@ export function WorkbenchView({
             <Download size={16} />
             Export draft
           </button>
+          </div>
         </div>
       </MotionWrapper>
 
@@ -1186,6 +1198,12 @@ export function WorkbenchView({
           rowNumber={selectedLine.source_locator.row_number}
           targetCells={Object.values(selectedLine.source_locator.field_source_cells ?? {})}
           onClose={closeSourcePreview}
+        />
+      )}
+      {showClarificationDraft && (
+        <ClarificationDraftDialog
+          caseId={caseData.case_id}
+          onClose={() => setShowClarificationDraft(false)}
         />
       )}
       {showPdfSourcePreview && selectedLine?.source_locator.page_number && (
