@@ -1105,6 +1105,12 @@ class CaseManager:
                             first_content_row = False
                             if any(term in " ".join(values).lower() for term in header_terms):
                                 header_rows += 1
+                        # This preflight only rejects entirely empty/header-only
+                        # workbooks. Once any non-header row is found, defer full
+                        # bounded parsing to the worker instead of scanning the
+                        # entire workbook a second time on the upload path.
+                        if nonempty_rows > header_rows:
+                            return
             finally:
                 workbook.close()
             if not nonempty_rows:
