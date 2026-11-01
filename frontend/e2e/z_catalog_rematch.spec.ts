@@ -36,7 +36,10 @@ test("catalog replacement flags old matches and supports reviewed rematching", a
   // and invalidates approval against the previous snapshot.
   await page.locator("#main-content").getByRole("button", { name: "Update data" }).click();
   await expect(page.getByRole("heading", { name: "Update distributor data" })).toBeVisible();
-  const proposal = page.getByRole("article").filter({ hasText: "SKU-SCH-001" });
+  // The full update view includes historical decisions from other synthetic
+  // cases; this action must target only the current pending review card.
+  const proposal = page.locator('section[aria-labelledby="pending-heading"]')
+    .getByRole("article").filter({ hasText: "SKU-SCH-001" });
   await expect(proposal).toBeVisible();
   const priorVersion = beforeLine.matched_catalog_version;
   await proposal.getByRole("button", { name: /^Mark proposal .* accepted/ }).click();

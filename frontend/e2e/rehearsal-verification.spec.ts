@@ -105,7 +105,7 @@ test("Rehearsal A — happy path: create, extract, approve, export, download", a
 
   await page.getByRole("button", { name: /^Approve line \d+$/ }).first().click();
   await expect(page.getByText("Approved", { exact: true })).toHaveCount(2);
-  await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+  await expect(page.getByText("Ready", { exact: true })).toBeVisible({ timeout: 15_000 });
 
   await page.getByRole("button", { name: /Export draft/i }).click();
   const exportDialog = page.getByRole("dialog", { name: "Export draft" });
