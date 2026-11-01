@@ -12,6 +12,18 @@ The protected workspace browser flow also asserts that state-changing proxy requ
 
 The browser suite checks baseline headers on the landing response: MIME sniffing is disabled, framing is denied, referrer data is restricted, DNS prefetch is off, and camera/microphone/geolocation are disabled. HSTS remains a TLS-edge responsibility.
 
+## Synthetic full-workflow performance matrix
+
+Run the offline generated workload with:
+
+```bash
+.venv/bin/python scripts/benchmark_synthetic_workflow.py --repetitions 3
+```
+
+The harness creates a fresh temporary SQLite database, catalog, source store, and export folder for each trial. It covers 10, 50, 100, and 500 requested rows; one, two, or five attachments; CSV, XLSX, and native-text PDF; queued intake, parsing/matching, the configured review plan, and draft export. JSON and Markdown reports go to `tests/end_to_end_audit/results/`. The review simulation approves the clean sample and remaining clean rows, leaves exceptions pending, and opts into the existing partial-draft export path; it never auto-approves model, OCR, or other exception rows.
+
+The benchmark makes no network or model calls. It does not measure scanned-PDF OCR, Luna latency/token usage, live human review time, host RSS/native allocations, or concurrent complete workflows. Its Python allocation peak also excludes the pre-generated request buffers and initial service/database/catalog allocations. Three repetitions make p95 a descriptive nearest-rank value (the maximum), not a stable service-level objective. Do not treat local synthetic throughput as hosted capacity or customer performance.
+
 Storage path hardening includes adversarial traversal/symlink checks and an upgrade check that migrates pre-hash local case/file paths into the opaque hashed layout while preserving existing source bytes and logical metadata. This is a local storage compatibility test; it does not test a production migration across multiple application hosts.
 
 ## Golden fixture pack
