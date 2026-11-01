@@ -29,9 +29,9 @@ def configure_synthetic_test_credentials(monkeypatch):
     """Tests must explicitly supply credentials; production has no built-in keys."""
     monkeypatch.setenv(
         "PILOT_API_KEYS",
-        "test-admin-secret-000000001:admin:Authorized Administrator,"
-        "test-reviewer-secret-00000001:reviewer:Authorized Reviewer,"
-        "test-viewer-secret-000000001:viewer:Read-Only Auditor",
+        "test-admin-secret-000000001:admin:usr-admin:Authorized Administrator,"
+        "test-reviewer-secret-00000001:reviewer:usr-reviewer:Authorized Reviewer,"
+        "test-viewer-secret-000000001:viewer:usr-viewer:Read-Only Auditor",
     )
 
 
@@ -58,6 +58,8 @@ def test_authenticated_mode_without_credentials_fails_closed(client, monkeypatch
     "long-test-secret-00001:admin:",
     "broken-entry",
     "long-test-secret-00001:admin:Admin,long-test-secret-00001:viewer:Viewer",
+    "long-test-secret-00001:admin:Admin User,long-test-secret-00002:viewer:admin user",
+    "long-test-secret-00001:admin:usr-duplicate:Admin,long-test-secret-00002:viewer:usr-duplicate:Viewer",
 ])
 def test_invalid_credential_configuration_is_rejected(client, monkeypatch, bad_config):
     """Malformed or weak credentials never cause a known-key fallback or partial acceptance."""
@@ -88,6 +90,22 @@ def test_auth_enforced_blocks_unauthenticated_requests(client, monkeypatch):
     resp = client.get("/api/rfqs", headers={"X-API-Key": "invalid-bogus-key"})
     assert resp.status_code == 401
     assert "Invalid pilot API key" in resp.json()["detail"]
+
+
+def test_session_endpoint_returns_identity_without_credential(client, monkeypatch):
+    monkeypatch.setenv("REQUIRE_AUTH", "true")
+    response = client.get(
+        "/api/session", headers={"X-API-Key": "test-viewer-secret-000000001"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "user_id": "usr-viewer",
+        "name": "Read-Only Auditor",
+        "role": "viewer",
+    }
+    assert "api_key" not in response.json()
+    assert "secret" not in response.text.lower()
 
 
 def test_role_based_access_control(client, monkeypatch):

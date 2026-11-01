@@ -230,11 +230,10 @@ cd frontend && npm run gen:types
 ```
 
 The browser talks to the same-origin Next.js API proxy. Configure
-`RFQ_ASSISTANT_API_URL` and, when the backend requires it,
-`RFQ_ASSISTANT_API_KEY` in the **server environment only**; never use a
-`NEXT_PUBLIC_` variable for credentials. This proxy does not provide user or
-tenant authentication: the local demo is single-user, and a shared API key is
-not sufficient authorization for a distributor pilot.
+`RFQ_ASSISTANT_API_URL` in the Next.js server environment. The protected
+workspace forwards each signed-in operator's own API key to the backend; it
+does not use a shared privileged `RFQ_ASSISTANT_API_KEY`. Never use a
+`NEXT_PUBLIC_` variable for credentials.
 
 <details>
 <summary>Advanced Luna provider settings</summary>
@@ -300,26 +299,36 @@ Supporting protected legacy conversion requires a separately isolated worker.
 ### Workspace authentication boundary
 
 Anonymous browser access is allowed only in the **local development demo**
-when no privileged server API key or workspace credentials are configured.
-In a production Next.js server, or whenever `RFQ_ASSISTANT_API_KEY` is set,
-the Next.js proxy is fail-closed until both of these server-only variables exist:
+when no protected-workspace configuration is present. In a production Next.js
+server, or whenever protected authentication is configured, sign-in fails
+closed unless the Next.js server has an independent session-encryption secret
+and the backend has authentication enabled with individual operator keys:
 
 ```bash
-RFQ_WORKSPACE_PASSWORD=<a-unique-high-entropy-password-at-least-16-characters>
+# Backend only
+REQUIRE_AUTH=true
+PILOT_API_KEYS='<random-key>:admin:usr-admin:Workspace Admin,<random-key>:reviewer:usr-reviewer:Sales Reviewer,<random-key>:viewer:usr-reader:Read Only'
+
+# Next.js server only
+RFQ_ASSISTANT_API_URL=https://private-api.example
 RFQ_WORKSPACE_SESSION_SECRET=<an-independent-random-secret-at-least-32-characters>
 ```
 
-Operators visit `/login`. The proxy checks a signed, eight-hour,
-HTTP-only, same-site cookie on every request. In production, the cookie
-requires HTTPS. The login endpoint has a local ten-attempts-per-minute guard.
+Each operator enters their own API key at `/login`. The Next.js server validates
+the key against the backend, then stores it only inside an encrypted, eight-hour,
+HTTP-only, same-site cookie. Every proxied API request uses that operator's key,
+so backend role checks and audit attribution remain per user. In production,
+the cookie requires HTTPS. The login endpoint has a local ten-attempts-per-minute
+guard. Remove a key from backend configuration to revoke it; subsequent API
+requests fail authentication.
 
-**This is a single-operator/single-workspace protection layer, not a
-multi-user or multi-tenant identity and authorization system.** All authenticated
-visitors still share the backend API-key identity. For an external customer
-pilot, also require protected backend authentication, loopback/private API
-network access, a shared trusted-edge login limiter, actual per-user identities,
-tenant ownership checks and a reviewed retention policy. Do not expose the
-backend or this one-password workspace to unrelated distributors.
+**This supports distinct users and roles inside one isolated workspace. It does
+not provide organization ownership or tenant isolation.** Do not serve multiple
+distributor organizations from one deployment or shared database. A controlled
+pilot still needs a separate customer environment, private API network access,
+a shared trusted-edge login limiter, tenant ownership checks, private object
+storage, and an agreed retention policy. Do not place production customer files
+in the local demo.
 
 ### Local intake protection
 

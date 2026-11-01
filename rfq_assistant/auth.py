@@ -11,6 +11,7 @@ Enforces:
 import hmac
 import logging
 import os
+import re
 from functools import lru_cache
 from dataclasses import dataclass
 from typing import Dict, List, Optional
@@ -57,20 +58,29 @@ def _parse_configured_keys(env_keys: str) -> Dict[str, PilotUser]:
         return {}
 
     users: Dict[str, PilotUser] = {}
+    user_ids = set()
     for entry in env_keys.split(","):
-        parts = [p.strip() for p in entry.strip().split(":", 2)]
-        if len(parts) != 3:
+        parts = [p.strip() for p in entry.strip().split(":", 3)]
+        if len(parts) not in {3, 4}:
             raise ValueError("Malformed PILOT_API_KEYS entry.")
-        key, role, name = parts
+        if len(parts) == 3:
+            key, role, name = parts
+            slug = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-")
+            user_id = f"usr-{slug}"
+        else:
+            key, role, user_id, name = parts
         if (
             len(key) < 16
             or not key.isascii()
             or role not in {"admin", "reviewer", "viewer"}
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,127}", user_id)
             or not name
             or key in users
         ):
-            raise ValueError("Invalid PILOT_API_KEYS entry: use unique keys of at least 16 characters, a valid role, and a name.")
-        user_id = f"usr-{name.lower().replace(' ', '-')}"
+            raise ValueError("Invalid PILOT_API_KEYS entry: use unique keys of at least 16 characters, a valid role, user ID, and name.")
+        if user_id in user_ids:
+            raise ValueError("Invalid PILOT_API_KEYS entry: user IDs must be unique.")
+        user_ids.add(user_id)
         users[key] = PilotUser(user_id=user_id, name=name, role=role)
     return users
 
@@ -78,7 +88,9 @@ def _parse_configured_keys(env_keys: str) -> Dict[str, PilotUser]:
 def load_configured_keys() -> Dict[str, PilotUser]:
     """Load configured pilot credentials from the cached startup environment.
 
-    PILOT_API_KEYS consists of comma-separated key:role:display_name entries.
+    PILOT_API_KEYS consists of comma-separated key:role:user_id:display_name entries.
+    The older key:role:display_name format remains accepted and derives a stable
+    user ID from the configured display name for single-workspace compatibility.
     An invalid configuration is rejected in full rather than being partially applied.
     """
     env_keys = os.environ.get("PILOT_API_KEYS", "").strip()

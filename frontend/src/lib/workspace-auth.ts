@@ -1,69 +1,108 @@
-/** Server-only signed single-operator workspace gate.
- * This deliberately does NOT implement multi-user identity or tenant isolation.
+/** Encrypted, per-user API-key session for the existing single workspace.
+ * This deliberately does NOT implement organization ownership or tenant isolation.
  */
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
 export const WORKSPACE_COOKIE = "rfq_workspace_session";
 const SESSION_SECONDS = 8 * 60 * 60;
-const COOKIE_VERSION = "v1";
+const COOKIE_VERSION = "v2";
+const VALID_ROLES = new Set(["admin", "reviewer", "viewer"]);
+
+export type WorkspaceUser = { user_id: string; name: string; role: string };
+export type WorkspaceSession = WorkspaceUser & { apiKey: string; expiresAt: number };
 
 function enabled(): boolean {
   return process.env.NODE_ENV === "production"
     || !!process.env.RFQ_ASSISTANT_API_KEY
     || !!process.env.RFQ_WORKSPACE_PASSWORD
+    || !!process.env.PILOT_API_KEYS
     || !!process.env.RFQ_WORKSPACE_SESSION_SECRET;
 }
 
-function config(): { password: string; secret: string } | null {
-  const password = process.env.RFQ_WORKSPACE_PASSWORD || "";
+function sessionSecret(): string | null {
   const secret = process.env.RFQ_WORKSPACE_SESSION_SECRET || "";
-  if (password.length < 16 || secret.length < 32) return null;
-  return { password, secret };
+  return secret.length >= 32 ? secret : null;
+}
+
+function encryptionKey(secret: string): Buffer {
+  return createHash("sha256")
+    .update("rfq-assistant-workspace-session-v2\0", "utf8")
+    .update(secret, "utf8")
+    .digest();
 }
 
 export function workspaceAuthStatus(cookie?: string): "open" | "misconfigured" | "authenticated" | "unauthenticated" {
   if (!enabled()) return "open";
-  const pair = config();
-  if (!pair) return "misconfigured";
-  return cookie && verifySession(cookie, pair.secret) ? "authenticated" : "unauthenticated";
+  if (!sessionSecret()) return "misconfigured";
+  return cookie && readWorkspaceSession(cookie) ? "authenticated" : "unauthenticated";
 }
 
-function signature(secret: string, payload: string): Buffer {
-  return createHmac("sha256", secret).update(payload).digest();
+export function createWorkspaceSession(apiKey: string, user: WorkspaceUser): string | null {
+  const secret = sessionSecret();
+  if (!secret || apiKey.length < 16 || apiKey.length > 1024) return null;
+  if (!user.user_id || user.user_id.length > 128 || !user.name || user.name.length > 128 || !VALID_ROLES.has(user.role)) return null;
+
+  const expiresAt = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
+  const session: WorkspaceSession = { ...user, apiKey, expiresAt };
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", encryptionKey(secret), iv);
+  cipher.setAAD(Buffer.from(COOKIE_VERSION, "utf8"));
+  const ciphertext = Buffer.concat([
+    cipher.update(JSON.stringify(session), "utf8"),
+    cipher.final(),
+  ]);
+  const tag = cipher.getAuthTag();
+  return [COOKIE_VERSION, iv.toString("base64url"), tag.toString("base64url"), ciphertext.toString("base64url")].join(".");
 }
 
-export function issueSession(): string | null {
-  const pair = config();
-  if (!pair || !enabled()) return null;
-  const expiry = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
-  const payload = `${COOKIE_VERSION}.${expiry}.${randomBytes(16).toString("hex")}`;
-  return `${payload}.${signature(pair.secret, payload).toString("base64url")}`;
+export function readWorkspaceSession(token: string): WorkspaceSession | null {
+  const secret = sessionSecret();
+  if (!secret || token.length > 4096) return null;
+  const parts = token.split(".");
+  if (parts.length !== 4 || parts[0] !== COOKIE_VERSION) return null;
+
+  try {
+    const iv = Buffer.from(parts[1], "base64url");
+    const tag = Buffer.from(parts[2], "base64url");
+    const ciphertext = Buffer.from(parts[3], "base64url");
+    if (iv.length !== 12 || tag.length !== 16 || ciphertext.length > 2048) return null;
+    const decipher = createDecipheriv("aes-256-gcm", encryptionKey(secret), iv);
+    decipher.setAAD(Buffer.from(COOKIE_VERSION, "utf8"));
+    decipher.setAuthTag(tag);
+    const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+    const value: unknown = JSON.parse(plaintext);
+    if (!isWorkspaceSession(value)) return null;
+    const now = Math.floor(Date.now() / 1000);
+    if (value.expiresAt <= now || value.expiresAt > now + SESSION_SECONDS) return null;
+    return value;
+  } catch {
+    return null;
+  }
 }
 
-function verifySession(token: string, secret: string): boolean {
-  const match = /^(v1)\.(\d{10})\.([0-9a-f]{32})\.([a-zA-Z0-9_-]{43})$/.exec(token);
-  if (!match) return false;
-  const expiry = Number(match[2]);
-  const now = Math.floor(Date.now() / 1000);
-  if (!Number.isSafeInteger(expiry) || expiry <= now || expiry > now + SESSION_SECONDS) return false;
-  const payload = `${match[1]}.${match[2]}.${match[3]}`;
-  const expected = signature(secret, payload);
-  const actual = Buffer.from(match[4], "base64url");
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-}
-
-export function verifyWorkspacePassword(candidate: string): boolean {
-  const pair = config();
-  if (!pair || !enabled() || typeof candidate !== "string") return false;
-  if (candidate.length > 1024) return false;
-  // Passwords are not general-purpose SHA-256 hashes. Use a memory-hard KDF
-  // and a deployment-unique secret as its salt before constant-time comparison.
-  const salt = Buffer.from(pair.secret, "utf8");
-  const supplied = scryptSync(candidate, salt, 32);
-  const actual = scryptSync(pair.password, salt, 32);
-  return timingSafeEqual(supplied, actual);
+function isWorkspaceSession(value: unknown): value is WorkspaceSession {
+  if (typeof value !== "object" || value === null) return false;
+  const session = value as Partial<WorkspaceSession>;
+  return typeof session.apiKey === "string"
+    && session.apiKey.length >= 16
+    && session.apiKey.length <= 1024
+    && typeof session.user_id === "string"
+    && session.user_id.length > 0
+    && session.user_id.length <= 128
+    && typeof session.name === "string"
+    && session.name.length > 0
+    && session.name.length <= 128
+    && typeof session.role === "string"
+    && VALID_ROLES.has(session.role)
+    && Number.isSafeInteger(session.expiresAt);
 }
 
 export function sessionCookieOptions() {
-  return { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict" as const, path: "/", maxAge: SESSION_SECONDS };
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict" as const,
+    path: "/",
+    maxAge: SESSION_SECONDS,
+  };
 }

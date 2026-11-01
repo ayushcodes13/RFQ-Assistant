@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { workspaceAuthStatus, WORKSPACE_COOKIE } from "@/lib/workspace-auth";
+import { readWorkspaceSession, workspaceAuthStatus, WORKSPACE_COOKIE } from "@/lib/workspace-auth";
 
 type RouteContext = { params: Promise<{ path: string[] }> };
 
@@ -11,6 +11,11 @@ async function proxy(request: NextRequest, context: RouteContext) {
   if (access === "unauthenticated") {
     return Response.json({ detail: "Sign in to access the RFQ workspace." }, { status: 401 });
   }
+  const sessionCookie = request.cookies.get(WORKSPACE_COOKIE)?.value;
+  const session = sessionCookie ? readWorkspaceSession(sessionCookie) : null;
+  if (access === "authenticated" && !session) {
+    return Response.json({ detail: "Sign in to access the RFQ workspace." }, { status: 401 });
+  }
   const { path } = await context.params;
   const upstream = (process.env.RFQ_ASSISTANT_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
   const target = `${upstream}/${path.map(encodeURIComponent).join("/")}${request.nextUrl.search}`;
@@ -19,8 +24,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }
-  const apiKey = process.env.RFQ_ASSISTANT_API_KEY;
-  if (apiKey) headers.set("X-API-Key", apiKey);
+  if (session) headers.set("X-API-Key", session.apiKey);
 
   try {
     const response = await fetch(target, {

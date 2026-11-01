@@ -248,6 +248,16 @@ def health_check():
     return {"status": "healthy"}
 
 
+@app.get("/api/session", response_model=dict[str, str])
+def get_authenticated_session(current_user: PilotUser = Depends(get_current_user)):
+    """Return the identity bound to this API credential, never the credential itself."""
+    return {
+        "user_id": current_user.user_id,
+        "name": current_user.name,
+        "role": current_user.role,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Catalog Endpoints
 # ---------------------------------------------------------------------------

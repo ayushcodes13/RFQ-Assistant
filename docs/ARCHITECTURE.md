@@ -93,7 +93,7 @@ review work without claiming that a five-row sample proves accuracy.
 - Match service: canonicalized *exact* part number + manufacturer matching over an imported catalog; possible collisions remain unresolved.
 - Export: deterministic XLSX/CSV, quote-preparation template, plain text **unsent** email draft.
 - Workbench documents: `GET /api/rfqs/{case_id}/exports` lists case-scoped generated worksheets and reports missing artifacts; original-source metadata and extraction warnings come from the case record. Recorded stock shortfalls are shared line blockers for readiness and export validation, and prevent approval until catalog stock is corrected.
-- Auth: local demo clearly labeled; production pilots require authenticated tenant isolation and access controls before any real data.
+- Auth: the protected single-workspace web UI validates each operator's own API key and keeps it in an encrypted, short-lived, HTTP-only session cookie. The same per-user key reaches FastAPI so backend roles and audit actors remain distinct; a shared privileged frontend API key is not used. This still has no organization ownership or tenant-scoped persistence. Use one isolated deployment and data store per customer until tenant-scoped database, catalog, worker, export, and file operations are implemented and adversarially tested.
 
 ## Components
 

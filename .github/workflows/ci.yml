@@ -143,8 +143,11 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: "1"
         run: |
-          # Runtime-only random test credentials; never commit fixed secrets.
-          export RFQ_WORKSPACE_PASSWORD="$(openssl rand -hex 24)"
+          # Runtime-only unique user credentials; never commit fixed secrets.
+          export RFQ_WORKSPACE_TEST_ADMIN_KEY="$(openssl rand -hex 24)"
+          export RFQ_WORKSPACE_TEST_VIEWER_KEY="$(openssl rand -hex 24)"
+          export PILOT_API_KEYS="${RFQ_WORKSPACE_TEST_ADMIN_KEY}:admin:demo-admin:Demo Administrator,${RFQ_WORKSPACE_TEST_VIEWER_KEY}:viewer:demo-viewer:Read-Only Auditor"
+          export REQUIRE_AUTH=true
           export RFQ_WORKSPACE_SESSION_SECRET="$(openssl rand -hex 48)"
           cd frontend
           npx playwright test e2e/workspace-auth.spec.ts
