@@ -116,7 +116,18 @@ test("distributor reviews manufacturer changes before buyer RFQ uses accepted it
   await approve.first().click();
   await expect(page.getByText("Approved", { exact: true })).toHaveCount(2);
 
+  const quoteResponse = page.waitForResponse((response) =>
+    response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/draft-quote"),
+  );
   await page.getByRole("button", { name: "Prepare quote draft" }).click();
+  const generatedQuote = await quoteResponse;
+  const quoteBody = await generatedQuote.json() as {
+    lines: { requested_mpn: string; catalogue_part_id: string | null; stock_qty: number | null }[];
+    validation_errors: string[];
+  };
+  expect(generatedQuote.ok(), JSON.stringify(quoteBody)).toBe(true);
+  expect(quoteBody.lines.map((row) => row.catalogue_part_id).sort(),
+    JSON.stringify(quoteBody)).toEqual([skuOmron, skuWago].sort());
   const quote = page.locator('section[aria-labelledby="quote-preparation-heading"]');
   await expect(quote.getByText(mpnOmron, { exact: true })).toBeVisible();
   await expect(quote.getByText(mpnWago, { exact: true })).toBeVisible();
