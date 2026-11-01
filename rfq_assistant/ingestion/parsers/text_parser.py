@@ -223,10 +223,11 @@ class TextParser(BaseDocumentParser):
         for line in lines:
             if not line.requested_mpn:
                 continue
-            identity = (
-                normalize_manufacturer(line.requested_manufacturer or ""),
-                normalize_mpn(line.requested_mpn),
-            )
+            manufacturer = normalize_manufacturer(line.requested_manufacturer or "")
+            normalized_mpn = normalize_mpn(line.requested_mpn)
+            if manufacturer is None or normalized_mpn is None:
+                continue
+            identity = (manufacturer, normalized_mpn)
             by_identity.setdefault(identity, []).append(line)
         for duplicates in by_identity.values():
             quantities = {(line.quantity, line.unit) for line in duplicates}

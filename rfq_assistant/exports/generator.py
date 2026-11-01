@@ -9,7 +9,7 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
@@ -81,9 +81,8 @@ class ExportGenerator:
             if not isinstance(file_name, str) or Path(file_name).name != file_name:
                 file_name = ""
             artifact_path = export_dir / file_name if file_name else None
-            file_format = Path(file_name).suffix.lower().removeprefix(".") if file_name else ""
-            if file_format not in {"xlsx", "csv"}:
-                file_format = "xlsx"
+            suffix = Path(file_name).suffix.lower().removeprefix(".") if file_name else ""
+            file_format: Literal["xlsx", "csv"] = "csv" if suffix == "csv" else "xlsx"
             try:
                 generated_at = datetime.fromisoformat(manifest_data["generated_at"])
             except (KeyError, TypeError, ValueError):

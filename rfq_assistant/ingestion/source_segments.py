@@ -38,9 +38,9 @@ def source_segments(content: bytes, filename: str, source_type: SourceType) -> L
     Spreadsheet formulas are preserved as formula strings, never evaluated.
     Callers should pass only the relevant segments to an external model.
     """
+    segments: List[EvidenceSegment] = []
     if source_type == SourceType.PDF_NATIVE:
         reader = pypdf.PdfReader(io.BytesIO(content))
-        segments: List[EvidenceSegment] = []
         total_chars = 0
         for page_number, page in enumerate(reader.pages, start=1):
             text = page.extract_text() or ""
@@ -73,7 +73,7 @@ def source_segments(content: bytes, filename: str, source_type: SourceType) -> L
             content = convert_legacy_xls(content)
         workbook = openpyxl.load_workbook(io.BytesIO(content), data_only=False, read_only=True)
         try:
-            segments: List[EvidenceSegment] = []
+            segments = []
             total_chars = 0
             for sheet in workbook.worksheets:
                 hidden = sheet.sheet_state != "visible"

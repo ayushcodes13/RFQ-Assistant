@@ -25,12 +25,11 @@ class ExcelBOMInspector:
     def inspect(self, content_or_path: Union[bytes, Path, str]) -> Dict[str, Any]:
         """Inspects workbook structure, metadata, formulas, and rows."""
         if isinstance(content_or_path, (str, Path)):
-            wb_source = content_or_path
-            wb_formula = openpyxl.load_workbook(wb_source, read_only=False, data_only=False)
-            wb_data = openpyxl.load_workbook(wb_source, read_only=False, data_only=True)
+            wb_formula = openpyxl.load_workbook(content_or_path, read_only=False, data_only=False)
+            wb_data = openpyxl.load_workbook(content_or_path, read_only=False, data_only=True)
         else:
-            wb_source = BytesIO(content_or_path)
-            wb_formula = openpyxl.load_workbook(wb_source, read_only=False, data_only=False)
+            formula_source = BytesIO(content_or_path)
+            wb_formula = openpyxl.load_workbook(formula_source, read_only=False, data_only=False)
             wb_data = openpyxl.load_workbook(BytesIO(content_or_path), read_only=False, data_only=True)
 
         sheets_meta: List[Dict[str, Any]] = []

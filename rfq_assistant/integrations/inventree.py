@@ -61,6 +61,8 @@ def map_catalog_item_to_inventree(item: CatalogItem, part_pk: int = 1, supplier_
 
 def map_quote_line_to_inventree_bom(line: QuoteLine, bom_pk: int = 1, parent_part_pk: int = 100) -> Dict[str, Any]:
     """Maps a quotation line into an InvenTree BOM item."""
+    if line.quantity is None:
+        raise ValueError("A BOM item requires a confirmed quantity.")
     return {
         "pk": bom_pk,
         "part": parent_part_pk,

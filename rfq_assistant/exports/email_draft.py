@@ -33,7 +33,7 @@ def _source_excerpt(text: str, line_number: int, limit: int = 60) -> str:
     if len(normalized) <= limit:
         return normalized
 
-    words = []
+    words: list[str] = []
     for word in normalized.split(" "):
         candidate = " ".join((*words, word))
         if len(candidate) + 1 > limit:  # Reserve one character for the ellipsis.
