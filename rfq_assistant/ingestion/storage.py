@@ -1,7 +1,11 @@
 """Local file persistence for original RFQ documents and digests."""
 
+import re
 from pathlib import Path
 from typing import Optional
+
+_SAFE_CASE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
+_SAFE_STORED_NAME = re.compile(r"[\w][\w.-]{0,254}\Z", re.UNICODE)
 
 
 class DocumentStorage:
@@ -15,6 +19,10 @@ class DocumentStorage:
         self.uploads_dir.mkdir(parents=True, exist_ok=True)
 
     def _case_directory(self, case_id: str) -> Path:
+        # Validate path components before composing a filesystem path. The
+        # resolve/containment check below also protects against symlink escapes.
+        if not _SAFE_CASE_ID.fullmatch(case_id):
+            raise ValueError("Case ID contains unsafe path characters for uploads storage.")
         candidate = (self.uploads_dir / case_id).resolve()
         root = self.uploads_dir.resolve()
         try:
@@ -27,11 +35,13 @@ class DocumentStorage:
 
     @staticmethod
     def _file_in_case(case_dir: Path, filename: str) -> Path:
+        if not _SAFE_STORED_NAME.fullmatch(filename) or filename in {".", ".."}:
+            raise ValueError(f"Path traversal blocked for filename: {filename}")
         candidate = (case_dir / filename).resolve()
         try:
             relative = candidate.relative_to(case_dir.resolve())
         except ValueError as exc:
-            raise ValueError("Filename escaped the case storage directory.") from exc
+            raise ValueError(f"Path traversal blocked for filename: {filename}") from exc
         if not relative.parts:
             raise ValueError("Filename must identify a file within the case directory.")
         return candidate

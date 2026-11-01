@@ -8,7 +8,7 @@ from rfq_assistant.ingestion.storage import DocumentStorage
 def test_storage_rejects_traversal_for_write_read_and_delete(tmp_path):
     storage = DocumentStorage(tmp_path / "storage")
 
-    with pytest.raises(ValueError, match="escaped"):
+    with pytest.raises(ValueError, match="Path traversal blocked"):
         storage.save_file("RFQ-SAFE", "../../outside.txt", b"synthetic")
     assert storage.get_file("RFQ-SAFE", "../../outside.txt") is None
     assert storage.get_file("../../outside", "file.txt") is None
@@ -26,7 +26,7 @@ def test_storage_rejects_symlink_escape_on_read_and_write(tmp_path):
     (case_dir / "linked.txt").symlink_to(outside)
 
     assert storage.get_file("RFQ-SAFE", "linked.txt") is None
-    with pytest.raises(ValueError, match="escaped"):
+    with pytest.raises(ValueError, match="Path traversal blocked"):
         storage.save_file("RFQ-SAFE", "linked.txt", b"replace")
     assert outside.read_bytes() == b"private"
 
