@@ -248,6 +248,11 @@
       },
       "Body_stage_catalog_update_api_catalogs_updates_post": {
         "properties": {
+          "clear_fields": {
+            "default": "",
+            "title": "Clear Fields",
+            "type": "string"
+          },
           "file": {
             "anyOf": [
               {
@@ -508,6 +513,18 @@
             },
             "title": "Changed Fields",
             "type": "object"
+          },
+          "clear_fields": {
+            "items": {
+              "enum": [
+                "list_price",
+                "currency",
+                "stock_qty"
+              ],
+              "type": "string"
+            },
+            "title": "Clear Fields",
+            "type": "array"
           },
           "created_at": {
             "format": "date-time",

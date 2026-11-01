@@ -67,10 +67,11 @@ function CatalogChange({
       </div>
 
       {unchanged && <p className="mt-3 text-[13px] text-[#52656b]">This source matches the active catalog. No update is needed.</p>}
+      {(proposal.clear_fields?.length ?? 0) > 0 && <p className="mt-3 rounded-md border border-[#ead8c6] bg-[#fbf5ee] px-3 py-2 text-[13px] text-[#6f452c]">This proposal clears the stored {proposal.clear_fields?.map((field) => field.replaceAll("_", " ")).join(" and ")}. The catalog changes only if you accept it.</p>}
       {rows.length > 0 && <div className="mt-4 overflow-x-auto">
         <table className="w-full min-w-[430px] border-collapse text-left text-[13px]">
-          <thead><tr className="text-[12px] font-medium text-[#52656b]"><th className="pb-2 pr-4">Field</th><th className="pb-2 pr-4">Current data</th><th className="pb-2">From this source</th></tr></thead>
-          <tbody>{rows.map(([field, change]) => <tr key={field} className="border-t border-[#edf1f2]"><th scope="row" className="py-2 pr-4 font-medium text-[#35484e]">{field.replaceAll("_", " ")}</th><td className="py-2 pr-4 text-[#52656b]">{displayValue(change.current)}</td><td className="py-2 text-[#142126]">{displayValue(change.proposed)}</td></tr>)}</tbody>
+          <thead><tr className="text-[12px] font-medium text-[#52656b]"><th className="pb-2 pr-4">Field</th><th className="pb-2 pr-4">Current data</th><th className="pb-2">Proposed value</th></tr></thead>
+          <tbody>{rows.map(([field, change]) => <tr key={field} className="border-t border-[#edf1f2]"><th scope="row" className="py-2 pr-4 font-medium text-[#35484e]">{field.replaceAll("_", " ")}</th><td className="py-2 pr-4 text-[#52656b]">{displayValue(change.current)}</td><td className="py-2 text-[#142126]">{proposal.clear_fields?.some((clearField) => clearField === field) ? "Clear stored value" : displayValue(change.proposed)}</td></tr>)}</tbody>
         </table>
       </div>}
 

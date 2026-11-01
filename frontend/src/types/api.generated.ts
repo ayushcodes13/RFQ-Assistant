@@ -730,6 +730,11 @@ export interface components {
         };
         /** Body_stage_catalog_update_api_catalogs_updates_post */
         Body_stage_catalog_update_api_catalogs_updates_post: {
+            /**
+             * Clear Fields
+             * @default
+             */
+            clear_fields: string;
             /** File */
             file?: string | null;
             /** Pasted Text */
@@ -828,6 +833,8 @@ export interface components {
                     [key: string]: unknown;
                 };
             };
+            /** Clear Fields */
+            clear_fields?: ("list_price" | "currency" | "stock_qty")[];
             /**
              * Created At
              * Format: date-time

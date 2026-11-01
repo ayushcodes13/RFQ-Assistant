@@ -383,6 +383,7 @@ async def stage_catalog_update(
     file: Optional[UploadFile] = File(None),
     pasted_text: Optional[str] = Form(None),
     revision_of: Optional[str] = Form(None),
+    clear_fields: str = Form(""),
     current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
 ):
     """Preserve a distributor source and stage grounded proposals without applying them."""
@@ -416,6 +417,7 @@ async def stage_catalog_update(
             pasted_text=pasted_text if file is None else None,
             revision_of=revision_of,
             source_warnings=source_warnings,
+            clear_fields=clear_fields.split(",") if clear_fields else [],
         )
         return proposals
     except (CatalogUpdateError, ValueError) as exc:
