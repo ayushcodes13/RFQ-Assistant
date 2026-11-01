@@ -17,7 +17,7 @@ const KNOWN_GOOD_RFQ_TEXT = `Please quote the following spare parts:
 const RFQ_WITH_MISSING_QUANTITY = `Please quote the following spare parts:
 1. 5 units of Schneider Electric LC1D09BD contactors
 2. 3 units of Omron E2E-X7D1-N sensors
-3. Schneider Electric LC1D09BD contactor`;
+3. Siemens 6ES7223-1BL32-0XB0 digital I/O module`;
 
 type ApiCase = { case_id: string; title: string };
 type ApiLine = {

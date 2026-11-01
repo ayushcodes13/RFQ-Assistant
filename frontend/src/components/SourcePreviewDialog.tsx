@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { getSpreadsheetSourcePreview } from "@/services/api";
 import { SpreadsheetSourcePreview } from "@/types";
+import { useSourceDrawer } from "@/components/useSourceDrawer";
 
 interface SourcePreviewDialogProps {
   caseId: string;
@@ -20,16 +21,13 @@ export function SourcePreviewDialog({
   targetCells,
   onClose,
 }: SourcePreviewDialogProps) {
+  const { dialogRef, closeButtonRef } = useSourceDrawer(onClose);
   const [preview, setPreview] = useState<SpreadsheetSourcePreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const targetCellKey = targetCells.join(",");
 
   useEffect(() => {
     let current = true;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
     getSpreadsheetSourcePreview(caseId, sheetName, rowNumber, targetCellKey.split(",").filter(Boolean))
       .then((result) => {
         if (current) setPreview(result);
@@ -39,31 +37,33 @@ export function SourcePreviewDialog({
       });
     return () => {
       current = false;
-      window.removeEventListener("keydown", onKeyDown);
     };
   }, [caseId, sheetName, rowNumber, targetCellKey, onClose]);
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#142126]/55 p-3 sm:p-6" role="presentation" onMouseDown={(event) => {
+    <div className="fixed inset-0 z-[80] bg-[#142126]/30" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="source-preview-title"
-        className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-[#d9d0c5] bg-[#fffdfa] shadow-2xl"
+        className="fixed inset-y-0 right-0 flex w-full max-w-[min(680px,94vw)] flex-col overflow-hidden border-l border-[#d9d0c5] bg-[#fffdfa] shadow-2xl animate-in slide-in-from-right duration-200"
       >
         <header className="flex items-start justify-between gap-4 border-b border-[#e9e1d6] px-5 py-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#8d482e]">Original workbook</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#8d482e]">Source evidence · spreadsheet</p>
             <h2 id="source-preview-title" className="mt-1 text-lg font-semibold text-[#1d2b30]">
-              {sheetName} · row {rowNumber}
+              {preview?.file_name ?? "Source file"} · {preview?.sheet_name ?? sheetName} · row {rowNumber}
             </h2>
             <p className="mt-1 text-sm text-[#52656b]">
-              Highlighted cells are the recorded source for this line. Formula values are shown as stored and are not recalculated.
+              {preview?.sheet_name === "CSV"
+                ? "The highlighted row is the recorded source for this line. Compare the extracted values with the original file."
+                : "Highlighted cells are the recorded source for this line. Formula values are shown as stored and are not recalculated."}
             </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close source preview" className="rounded-md p-2 text-[#52656b] hover:bg-[#f3eee6]">
+          <button ref={closeButtonRef} type="button" onClick={onClose} aria-label="Close source preview" className="rounded-md p-2 text-[#52656b] hover:bg-[#f3eee6]">
             <X size={18} />
           </button>
         </header>

@@ -2,6 +2,10 @@
 
 This document defines the test plan and records the local synthetic verification run below. No customer performance, accuracy, time-savings, or ROI claims are established.
 
+The current 10-shape human-input matrix passed locally on 2026-11-01: `pytest -q tests/test_human_input_matrix.py` → **11 passed**. It covers six conversational inputs plus title-row XLSX, headerless CSV, wrapped native PDF, and scanned PDF with OCR disabled. The combined case-intake test checks original-file retention and requires extracted lines, surfaced warnings, or an explicit failure. It is synthetic and does not exercise a live Luna deployment or a full browser quote-to-export flow for every case.
+
+The new second-stage quote evidence mapper passed with synthetic clients: `pytest -q tests/test_quote_proposal.py tests/test_stale_quote_snapshots.py tests/test_oss_stack_and_ai_pipeline.py` → **23 passed**. It exercises the endpoint call, exact catalog retrieval, citation mapping, deterministic price/Decimal total, and rejection of non-verbatim buyer evidence. It is not a live provider run.
+
 ## Golden fixture pack
 
 Maintain a synthetic annotated corpus covering:
@@ -31,7 +35,7 @@ Maintain a synthetic annotated corpus covering:
 2. System never fabricates a catalog SKU/price/stock/lead time.
 3. Cross-manufacturer IDs never auto-approve because of a matching part number alone.
 4. Changes made by a human persist through reprocessing.
-5. Unresolved required attributes, nonpositive/nonfinite quantities, unknown selected SKUs and high-severity extraction contradictions block a full validated export, **even if the line is marked approved**. Such rows may appear only in prominently labeled partial drafts.
+5. Unresolved required attributes, nonpositive/nonfinite quantities, unknown selected SKUs, recorded stock shortfalls and high-severity extraction contradictions block a full validated export, **even if the line is marked approved**. Stock-shortfall lines cannot be approved until the catalog quantity is corrected. Such rows may appear only in prominently labeled partial drafts.
 6. Broken files or model errors cannot produce a silent "all clear".
 7. No outbound email or order submission exists in v0.
    Unsent customer clarification drafts must never describe an unresolved collision or critical source contradiction as verified, or ask customers to resolve a line that only awaits internal review.
@@ -128,3 +132,7 @@ Live Luna smoke executed on 2026-10-31 using the explicitly configured GPT-6 Lun
 ## Evidence required in each PR
 
 Record commands actually executed, test count/results, failed cases, screenshots for UX and remaining risks. "Not run" is acceptable when honest; invented passes are not.
+
+## Catalog and workbench additions (2026-11-01)
+
+Focused verification for catalog edit proposals, export document listing, and stock-shortfall blocking: `.venv/bin/pytest -q tests/test_export_blockers_adversarial.py tests/test_exports.py tests/test_catalog_update_proposals.py` → **21 passed** (7 dependency deprecation warnings). `cd frontend && npm run lint` and `RFQ_E2E_NEXT_DIST_DIR=.next-qa-ui npm run build` passed. Aside Browser visually confirmed catalog Edit/Ask AI controls, the restored Keyboard shortcuts dialog, case IDs in the inbox, original and generated documents in the workbench, and a synthetic request for 200 units against catalog stock of 150 showing the blocker and increasing the review count. The synthetic case was deleted after the check. Screenshots: [mobile catalog actions](screenshots/catalog-mobile-edit.png), [workbench documents](screenshots/workbench-documents.png). This is local UI evidence; no live Luna call was made.

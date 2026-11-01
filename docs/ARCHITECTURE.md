@@ -2,6 +2,61 @@
 
 This file describes the current local prototype and its safety boundary. Its SQLite worker is single-host prototype infrastructure; production deployment still needs shared durable storage and worker operations.
 
+## Expanded target workflow (implementation in progress)
+
+The product has two operator entry points: **New customer request** and **Update distributor data**. They share source validation, durable source references, the bounded Luna provider, strict Pydantic schemas, source-grounding checks, and an audit trail. They have separate domain workflows so buyer claims cannot overwrite distributor facts and distributor updates cannot rewrite an existing RFQ silently.
+
+```mermaid
+flowchart TD
+    subgraph Buyer[Buyer request workflow]
+        B[Buyer email, chat, transcript, PDF, XLSX, CSV, or pasted text] --> V1[Validate type, size, malware, and retain original + digest]
+        V1 --> P[Deterministic parser and source-region coverage]
+        P -->|Known structured fields| D[Deterministic field extraction]
+        P -->|Ambiguous or unstructured regions| L1[Luna call 1: propose RFQ JSON]
+        D --> S1[Pydantic schema + numeric and verbatim source checks]
+        L1 --> S1
+        S1 --> M[Exact manufacturer + MPN match against approved distributor catalog]
+        M --> R[Human review of exceptions and required clean-row sample]
+        R --> Q[Retrieve distributor records for reviewed exact items]
+        Q --> L2[Luna call 2: organize evidence-backed quote draft]
+        L2 --> S2[Pydantic quote schema]
+        S2 --> C[Deterministic Decimal totals + customer/distributor source-grounding checks]
+        C --> H[Human review: correct, approve or request clarification]
+        H --> X[Draft worksheet + unsent reply; distributor sends through normal process]
+    end
+
+    subgraph Updates[Distributor data update workflow]
+        U[Paste ordinary text or upload authorized catalog/reference files] --> UV[Validate, scan, preserve original + digest]
+        UV --> UP[Parse structured rows and source regions]
+        UP --> U1[Luna or deterministic extraction proposes typed facts]
+        U1 --> U2[Pydantic + verbatim/value grounding]
+        U2 --> CMP[Compare with current catalog/reference records]
+        CMP --> DIFF[New / changed / unchanged / conflicting proposals]
+        DIFF -->|Accept one proposal| WRITE[Versioned catalog/reference update + audit event]
+        DIFF -->|Reject| KEEP[Current records stay unchanged]
+        KEEP -->|Reopen with plain-language correction| U
+    end
+
+    WRITE --> Q
+```
+
+The RFQ intake, staged catalog updates, and bounded quote-evidence call are implemented in the local prototype. `POST /v1/rfqs/{case_id}/draft-quote` performs deterministic lookup by exact catalog identity, then makes a second GPT-6 Luna call when the configured provider is available. That call receives only the buyer lines and already-retrieved distributor records; it returns evidence references, not prices or totals. Pydantic validates its shape, source IDs and verbatim excerpts are checked in code, and Python `Decimal` calculates totals. If Luna is unavailable, the draft is explicitly labeled as catalog-only; if the quote-evidence call fails or returns unsupported evidence, quote approval is blocked. Drafts persist in SQLite and the case workbench shows line values, validation blockers, source references, and an evidence drawer. A missing quantity stays null and blocks line readiness; it is never replaced with zero or a guessed amount. Distributor retrieval currently reaches active catalog rows and accepted catalog-update evidence for those rows. A general searchable library for arbitrary distributor manuals and commercial-terms PDFs, and durable persistence for approval records, remain incomplete.
+
+For operator-facing observations and prioritized remaining workflow gaps, see [the workflow walkthrough audit](WORKFLOW_WALKTHROUGH_AUDIT.md).
+
+### Trust boundaries and ordered checks
+
+1. **Customer source**: store the original and digest; extract one or more source regions, each with a page/sheet/row/text locator. Parsing coverage reports what was extracted, routed for review, filtered, truncated, or failed.
+2. **RFQ extraction call**: only bounded unresolved regions are sent to the configured GPT-6 Luna adapter, when enabled and authorized. The model proposes fields and cites a segment ID plus verbatim evidence. It does not match, price, approve, or send.
+3. **Pydantic and deterministic extraction validation**: reject unknown fields, invalid types, non-finite/nonpositive quantities, duplicate ordinals, unsupported source IDs, values not present in evidence, and ungrounded numeric quantities. Preserve failed proposals as blocking reviewer exceptions; never silently drop the source region.
+4. **Catalog matching**: compare normalized manufacturer plus full MPN to the active distributor catalog. Description retrieval can help a human search, but cannot establish equivalence.
+5. **Distributor retrieval**: fetch only records whose exact identity is supported by the reviewed RFQ and the active authorized catalog/reference corpus. Retrieval is deterministic and provides immutable source IDs/locators to the next step; the model does not browse the file store or choose arbitrary documents.
+6. **Quote proposal call**: the second GPT-6 Luna call may organize retrieved facts into a constrained draft shape. It must identify a distributor source for every commercial value and a customer source for every requested quantity/item attribute. Missing evidence stays null and becomes a reviewer task.
+7. **Quote validation**: Pydantic checks the proposal schema. Python `Decimal` recomputes per-line and grand totals from validated quantity and authorized unit price; totals supplied by a model are ignored or compared and flagged. Currency consistency, nonnegative prices, authoritative price source IDs, exact match status, current catalog version, and source grounding are deterministic gates. A successful validation is not human approval.
+8. **Distributor data updates**: upload/paste is parsed into proposal records, compared to the current version, and persisted separately from active data. Accept is an explicit human write for one proposal at a time. Reject records the choice but does not alter active records. Reopening creates a linked revision, preserving the earlier proposal and evidence.
+
+The selective extraction consistency call remains separate: it may flag uncertain extracted rows and cannot approve them. The second quote-evidence call is only reached by the quotation-draft endpoint, after deterministic retrieval. Its status and warnings are attached to the in-memory quote draft; they are not yet durable operational telemetry, and should be persisted before a customer pilot.
+
 ## Guiding choices
 
 - Keep a small monolith for v0. No orchestration framework or agent swarm.
@@ -37,6 +92,7 @@ review work without claiming that a five-row sample proves accuracy.
 - Data extraction: streaming openpyxl/CSV readers for tables, bounded legacy `.xls` conversion through LibreOffice, pypdf row-shaped native PDF text, PyMuPDF image-page triage/rendering, and bounded local Tesseract OCR when available. A Luna-only optional LLM adapter proposes fields for unresolved/unstructured segments.
 - Match service: canonicalized *exact* part number + manufacturer matching over an imported catalog; possible collisions remain unresolved.
 - Export: deterministic XLSX/CSV, quote-preparation template, plain text **unsent** email draft.
+- Workbench documents: `GET /api/rfqs/{case_id}/exports` lists case-scoped generated worksheets and reports missing artifacts; original-source metadata and extraction warnings come from the case record. Recorded stock shortfalls are shared line blockers for readiness and export validation, and prevent approval until catalog stock is corrected.
 - Auth: local demo clearly labeled; production pilots require authenticated tenant isolation and access controls before any real data.
 
 ## Components
@@ -96,6 +152,24 @@ Deterministic parse/OCR artifacts are zlib-compressed, limited to 10 MiB raw, an
 
 Deterministic parsing is used where columns and values are already explicit because it is cheaper, repeatable, and easier to validate than asking a model to reinterpret structured cells. The optional Luna LLM fallback handles ambiguous or unstructured input. Non-empty PDF text lines, pasted-text lines, and CSV/XLSX rows that do not map to known fields are retained as candidate regions after narrow document/email metadata filters; candidate creation is capped at 500 per document. If Luna is disabled, fails, or omits a candidate, it becomes a visible individual exception row. A compact, content-free coverage manifest persists counts and an aggregate hash for each PDF page, workbook sheet, CSV table, or text document. It also records empty PDF pages/sheets, OCR decisions and outcomes with per-page OCR duration, PDF rotation, sheet visibility and detected header row, hidden row/column counts, formula-backed fields, and explicit parser limit/failure status. Coverage entries identify `structured_rows` for CSV/XLSX row accounting and `heuristic_regions` for PDF/email/text accounting. The workbench explains that spreadsheet row counts are deterministic but still do not prove that every row is an RFQ request, while unstructured region counts are heuristic and never a completeness guarantee. OCR-derived line locators also carry normalized page rectangles and line confidence, so the reviewer can identify the scanned source area. Excel line locators include source cell addresses; vertically merged cells are inherited only within their column and each inherited value receives a reviewer warning. Parsed rows sourced from hidden rows or mapped hidden columns receive reviewer warnings. Parser failures retain the partial manifest; failures before a parser can inspect the document receive an explicit failed document receipt. The workbench surfaces these states beside coverage counts. This manifest is a processing receipt, not a substitute for row-level source locators: each extracted/review row still links to its original page/sheet/row. Luna does not replace exact catalog matching or numeric/evidence gates. Its output remains an untrusted proposal. A second Luna call reviews only LLM-extracted rows after deterministic checks; conflict/uncertain results and review-call failures become individual exceptions. Empty model results skip the otherwise unhelpful second review call. The second pass cannot approve anything and does not add cost to already structured rows. Expensive parsing, OCR, and model work run in a background worker when `RFQ_ASYNC_INGEST_ENABLED` is enabled (default on); API creation returns a processing case and the frontend polls for completion. Set the flag to false for synchronous local/test operation. The SQLite job queue uses leases, heartbeats, bounded retries, and startup reconciliation, but it is suitable only for a single host. A multi-host deployment needs a shared queue and database, worker supervision, and operational monitoring.
 
+## Source evidence in the review workspace
+
+Each line retains a source locator from ingestion. The workbench opens a right-side evidence drawer for PDF, XLSX, and CSV file sources. PDF pages are rendered on demand by the authenticated API; a normalized page rectangle is overlaid only when the parser recorded one. XLSX and CSV previews return a bounded row neighborhood from the original upload and mark the target row and recorded cells. Preview endpoints are read-only and apply page, row, column, and radius limits. The UI never derives coordinates from the extracted text or asks the LLM to guess a visual location. If a PDF rectangle or spreadsheet cell reference is absent, the drawer shows the known page/row and source snippet without claiming a highlight. Pasted email and plain text keep line/snippet provenance in line details, but have no document citation drawer because there is no page or cell object to cite. This view supports verification; it does not itself validate an extracted value or approve a line.
+
+```mermaid
+flowchart LR
+    Parse[Parser records source locator] --> Line[Line detail in review workspace]
+    Line -->|PDF page| Drawer[Right-side evidence drawer]
+    Drawer --> Render[Authenticated PDF page preview]
+    Render -->|Recorded bbox exists| Overlay[Highlight parser-recorded region]
+    Render -->|No bbox| PageOnly[Show page and extracted snippet]
+    Line -->|XLSX sheet and row| Drawer
+    Drawer --> Workbook[Bounded worksheet window + recorded cells]
+    Line -->|CSV row| Drawer
+    Drawer --> CSV[Bounded CSV window + target row]
+    Line -->|Pasted text| TextOnly[Line/snippet provenance; no document citation]
+```
+
 For repeated exact manufacturer+MPN lines in pasted text, the case manager flags differing quantities as a blocking possible source conflict only when the line text identifies both a message/email region and an attachment/spreadsheet region. It preserves both rows and their source locations; a reviewer can correct the discrepant quantity, after which conflict state is recomputed. The intake API currently accepts one uploaded file or pasted text per case, so separate email and attachment files must be combined before intake; native multi-file case intake remains future work.
 
 The review plan classifies every non-clean row as an exception, selects up to five otherwise clean rows across source locations using a per-case stable pseudorandom rank, and leaves remaining rows in represented strata eligible for explicit batch approval only after the full sample passes without correction. If more source strata exist than sample slots, rows in unrepresented strata remain individual-review exceptions. If any sampled row changes, the batch path is disabled for that case. All Luna-derived fields are individual-review exceptions, even when they have source-quote validation and an exact catalog match. All exceptions require individual review. The sample is a practical review control, not a statistical guarantee of extraction accuracy; customer pilots still need format-specific labeled validation. The local worker runs a configurable, bounded number of claim loops (default two, maximum four). Each final snapshot is committed only while its worker still owns the live lease, preventing an expired worker from overwriting a newer attempt.
@@ -136,7 +210,7 @@ The review plan classifies every non-clean row as an exception, selects up to fi
 8. Review actions are versioned; a fresh parse must not silently replace human corrections.
 9. Every match is tied to a catalog snapshot. Replacing the active CSV atomically installs a new SHA-256-versioned snapshot; rows retain their original candidate evidence, block validated export, and require explicit rematching and fresh human approval before they become eligible again.
 
-## Prototype API proposal
+## Prototype API surface and planned endpoints
 
 - POST /api/rfqs — create draft case with uploaded file or pasted text.
 - GET /api/rfqs/{id} — case, status and warnings.
@@ -144,12 +218,22 @@ The review plan classifies every non-clean row as an exception, selects up to fi
 - PATCH /api/rfqs/{id}/lines/{line_id} — human correction, optimistic concurrency control.
 - POST /api/rfqs/{id}/review — confirm a set of line decisions with actor ID.
 - POST /api/catalogs/import — validate/import tenant-authorized CSV.
+- POST /api/catalogs/updates — stage proposed catalog/reference changes from pasted text or an authorized file; does not mutate active records.
+- GET /api/catalogs/updates — list staged, accepted, rejected and reopened change proposals.
+- POST /api/catalogs/updates/{proposal_id}/accept — validate the pending proposal and apply one versioned update with an audit record.
+- POST /api/catalogs/updates/{proposal_id}/reject — record rejection without changing active catalog/reference records.
+- POST /api/catalogs/updates/{proposal_id}/reopen — create a revision from the user's plain-language correction and link it to the prior proposal.
+- GET /api/distributor-sources — **planned** searchable inventory for authorized distributor reference documents; arbitrary reference documents are not yet independently indexed.
+- POST /api/distributor-sources — **planned** upload and stage for a searchable source library. Today, accepted item facts from catalog updates retain their source evidence and can be retrieved for the matching item.
+- GET /v1/quote-drafts/{quote_id} — retrieve a quote draft, source citations, second-stage status/warnings, deterministic totals, and validation errors from the local commercial service.
+- GET /v1/rfqs/{case_id}/quote-draft — retrieve the saved quote draft attached to a case, when one exists.
+- GET /api/rfqs/{id}/quote-proposal — **planned** case-scoped durable proposal view with review actions and a persisted stage trace.
 - POST /api/rfqs/{id}/lines/{line_id}/rematch — explicitly refresh a stale match against the active catalog snapshot and revoke the previous approval.
 - POST /api/rfqs/{id}/exports — request draft export after validation.
 - GET /api/rfqs/{id}/exports/{export_id} — download authorized artifact.
 - DELETE /api/rfqs/{id} — delete case and uploaded artifacts subject to agreed retention policy.
 
-These endpoints are implemented in the prototype backend. The FastAPI OpenAPI
+The implemented and planned endpoints are distinguished above. The FastAPI OpenAPI
 schema is checked in as `frontend/openapi.json`; `frontend/src/types/api.generated.ts`
 is generated from it with `openapi-typescript`, and
 `tests/test_openapi_contract.py` fails if the checked-in schema drifts from the
@@ -166,7 +250,7 @@ cd frontend && npm run gen:types
 - Configure max upload size/pages/sheets/rows and parsing time limits.
 - Content in PDF/email is untrusted user data; no instruction following or tool invocation from it.
 - Do not send customer uploads to third-party AI APIs without explicit consent, documented provider, retention terms and region suitability.
-- Avoid passing entire files to LLMs if only small fields need processing.
+- Avoid passing entire files to LLMs if only small fields need processing. Retrieve bounded, relevant chunks from approved distributor records and include stable source IDs.
 - Tenant segregation, minimal rights, deletion, private objects, TLS and audit are required before production.
 - Use fixture-based regression tests and fail closed when provenance is missing.
 - Export rows should be reproducible from input digest, parser version, catalog version and reviewer decisions.

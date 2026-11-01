@@ -131,8 +131,40 @@ class CatalogItem(BaseModel):
     manufacturer_part_number: str
     description: str
     list_price: Optional[float] = None
+    currency: Optional[str] = None
     stock_qty: Optional[int] = None
     catalog_version: Optional[str] = "v1"
+
+
+class CatalogUpdateProposal(BaseModel):
+    """Unapplied distributor-data change with source evidence and review history."""
+
+    proposal_id: str
+    batch_id: str
+    revision_of: Optional[str] = None
+    source_name: str
+    source_sha256: str
+    source_locator: SourceLocator
+    evidence_quote: str
+    change_type: Literal["new", "changed", "unchanged", "conflict"]
+    review_status: Literal["pending", "accepted", "rejected"] = "pending"
+    current_item: Optional[CatalogItem] = None
+    proposed_values: Dict[str, object] = Field(default_factory=dict)
+    changed_fields: Dict[str, Dict[str, object]] = Field(default_factory=dict)
+    blocking_reasons: List[str] = Field(default_factory=list)
+    source_warnings: List[str] = Field(default_factory=list)
+    created_by: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    review_note: Optional[str] = None
+    version: int = 1
+
+
+class CatalogUpdateReviewRequest(BaseModel):
+    """Optional reviewer note for an explicit proposal decision."""
+
+    note: Optional[str] = Field(default=None, max_length=2000)
 
 
 class MatchCandidate(BaseModel):
@@ -316,4 +348,20 @@ class ExportManifest(BaseModel):
     generated_at: datetime = Field(default_factory=datetime.utcnow)
     reviewer_name: str
     unsent_email_draft: str
+    download_url: str
+
+
+class ExportDocumentSummary(BaseModel):
+    """A locally generated RFQ document available in a case's document list."""
+
+    export_id: str
+    file_name: str
+    format: Literal["xlsx", "csv"]
+    is_draft: bool = True
+    total_lines: int = 0
+    approved_lines: int = 0
+    unresolved_lines_omitted: int = 0
+    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    file_available: bool = True
+    problem: Optional[str] = None
     download_url: str

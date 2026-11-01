@@ -12,6 +12,22 @@ from rfq_assistant.schemas.enums import MatchStatus, ReviewDecision
 from rfq_assistant.schemas.models import RFQLineItem
 
 
+def stock_shortfall_issue(line: RFQLineItem, catalog: CatalogRepository) -> str | None:
+    """Return a blocker when requested quantity exceeds recorded on-hand stock."""
+    if line.quantity is None or not line.selected_catalog_sku or line.catalog_rematch_required:
+        return None
+    try:
+        quantity = float(line.quantity)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(quantity):
+        return None
+    selected_item = catalog.get_by_sku(line.selected_catalog_sku)
+    if selected_item is None or selected_item.stock_qty is None or quantity <= selected_item.stock_qty:
+        return None
+    return f"requested quantity {quantity:g} exceeds catalog stock {selected_item.stock_qty}"
+
+
 def blocking_line_issues(line: RFQLineItem, catalog: CatalogRepository) -> List[str]:
     """Return human-readable blockers that prohibit a full validated worksheet."""
     issues: List[str] = []
@@ -40,6 +56,9 @@ def blocking_line_issues(line: RFQLineItem, catalog: CatalogRepository) -> List[
             or line.matched_catalog_version != selected_item.catalog_version
         ):
             issues.append("catalog changed since match; rematch required")
+        stock_issue = stock_shortfall_issue(line, catalog)
+        if stock_issue:
+            issues.append(stock_issue)
 
     for warning in line.extraction_warnings:
         if warning.severity.lower() == "error":

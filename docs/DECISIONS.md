@@ -10,6 +10,21 @@ Do not silently revise architecture or customer claims. Add dated entries when r
 
 **Evidence status:** Research hypothesis. A distributor advertising an RFQ form only verifies that a request channel exists. It does **not** prove its staff have a significant bottleneck, its budget, willingness to pay or ROI.
 
+## 2026-11-01 — ADR 002: Two source-separated operator workflows
+
+**Observation:** The initial product workbench is centered on buyer requests, exact catalog matching, human review, and draft worksheet preparation. Distributors also need to add authorized catalog or commercial-reference data without replacing the active item master blindly. A buyer RFQ and a distributor data update have different owners, evidence, and write permissions.
+
+**Decision:**
+1. Keep two explicit entry points: **RFQ inbox** for buyer requests and **Update data** for distributor-owned information. Keep catalog browsing as a separate read/search surface.
+2. Treat the first Luna call as an untrusted RFQ field proposal. Validate the returned JSON with Pydantic, deterministic numeric and verbatim-source checks, completeness accounting, and exact manufacturer+MPN matching.
+3. After retrieval from approved distributor records, use a second bounded Luna call only to organize an evidence-backed quote proposal. The model cannot browse files or source prices independently. Pydantic validates the draft; Decimal arithmetic recomputes totals; deterministic source checks require request fields to cite the buyer and commercial values to cite distributor data.
+4. Stage distributor catalog/reference changes as proposals. Compare each with active data, show new/changed/unchanged/conflicting states, and require a human accept/reject action for every write. Rejected changes remain in history and may be reopened as linked revisions.
+5. Keep all model calls optional behind the configured GPT-6 Luna adapter. If disabled or unavailable, preserve source bytes and present an explicit manual/retry path; never claim extraction succeeded with zero proposals.
+
+**Trade-offs:** This is broader than the original extraction-to-worksheet slice. It adds a distributor knowledge lifecycle and a second model stage, so processing cost, source retention, permissions, and recovery behavior must be tested separately. A single-host SQLite prototype remains unsuitable for multi-user production. No live-customer or production-readiness claim follows from this decision.
+
+**Acceptance evidence:** Pydantic/schema tests, source-grounding tests, Decimal calculation tests, accept/reject/reopen persistence tests, and a 10-scenario human-input matrix spanning conversational, document, structured, conflicting, and insufficient input.
+
 ## Scope decisions
 
 | Question | Current answer | Revisit when |

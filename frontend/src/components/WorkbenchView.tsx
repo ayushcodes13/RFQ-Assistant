@@ -11,6 +11,8 @@ import {
   Check,
   X as XIcon,
   Info,
+  FileText,
+  RefreshCw,
 } from "lucide-react";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ProcessingProgress } from "@/components/ProcessingProgress";
@@ -20,6 +22,7 @@ import { SourcePreviewDialog } from "@/components/SourcePreviewDialog";
 import { PdfSourcePreviewDialog } from "@/components/PdfSourcePreviewDialog";
 import { ClarificationDraftDialog } from "@/components/ClarificationDraftDialog";
 import { AuditHistoryDialog } from "@/components/AuditHistoryDialog";
+import { QuotePreparationPanel } from "@/components/QuotePreparationPanel";
 import {
   approveRemainingValidatedLines,
   batchReviewLines,
@@ -27,6 +30,8 @@ import {
   getReviewPlan,
   rematchLineItem,
   updateLineItem,
+  listCaseExports,
+  listCatalog,
 } from "@/services/api";
 import {
   RFQCase,
@@ -34,12 +39,15 @@ import {
   RFQLineItemUpdate,
   ReviewPlan,
   SourceLocator,
+  ExportDocumentSummary,
+  CatalogItem,
 } from "@/types";
 
 interface WorkbenchViewProps {
   caseData: RFQCase;
   onOpenExport: () => void;
   onCaseUpdated: () => Promise<void>;
+  documentsRefreshToken?: number;
 }
 
 type FilterType = "all" | "sample" | "exact" | "ambiguous" | "missing";
@@ -97,7 +105,15 @@ function fieldValidationLabel(status: string): string {
   return labels[status] ?? status.replaceAll("_", " ");
 }
 
-function hasBlockingIssue(line: RFQLineItem): boolean {
+function stockShortfall(line: RFQLineItem, catalogBySku: Map<string, CatalogItem>): string | null {
+  if (line.quantity == null || !Number.isFinite(line.quantity) || !line.selected_catalog_sku) return null;
+  const item = catalogBySku.get(line.selected_catalog_sku);
+  if (!item || item.stock_qty == null || line.catalog_rematch_required) return null;
+  if (line.quantity > item.stock_qty) return `Requested ${line.quantity}; catalog stock ${item.stock_qty}. Confirm current stock and update the catalog.`;
+  return null;
+}
+
+function hasBlockingIssue(line: RFQLineItem, catalogBySku: Map<string, CatalogItem>): boolean {
   if (
     line.quantity == null ||
     !Number.isFinite(line.quantity) ||
@@ -113,6 +129,7 @@ function hasBlockingIssue(line: RFQLineItem): boolean {
     return true;
   }
   if (!line.selected_catalog_sku) return true;
+  if (stockShortfall(line, catalogBySku)) return true;
   if (
     line.extraction_warnings.some(
       (warning) => warning.severity.toLowerCase() === "error"
@@ -127,9 +144,14 @@ export function WorkbenchView({
   caseData,
   onOpenExport,
   onCaseUpdated,
+  documentsRefreshToken = 0,
 }: WorkbenchViewProps) {
   const [lines, setLines] = useState<RFQLineItem[]>([]);
   const [reviewPlan, setReviewPlan] = useState<ReviewPlan | null>(null);
+  const [documents, setDocuments] = useState<ExportDocumentSummary[]>([]);
+  const [documentsError, setDocumentsError] = useState<string | null>(null);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [catalogBySku, setCatalogBySku] = useState<Map<string, CatalogItem>>(new Map());
   const [reviewPlanBusy, setReviewPlanBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterType>("all");
@@ -148,6 +170,29 @@ export function WorkbenchView({
   const [showAuditHistory, setShowAuditHistory] = useState(false);
   const closeSourcePreview = useCallback(() => setShowSourcePreview(false), []);
   const closePdfSourcePreview = useCallback(() => setShowPdfSourcePreview(false), []);
+
+  const refreshDocuments = useCallback(async () => {
+    setDocumentsLoading(true);
+    try {
+      setDocuments(await listCaseExports(caseData.case_id));
+      setDocumentsError(null);
+    } catch (error) {
+      setDocumentsError(error instanceof Error ? error.message : "Documents could not be loaded.");
+    } finally {
+      setDocumentsLoading(false);
+    }
+  }, [caseData.case_id]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void refreshDocuments(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refreshDocuments, documentsRefreshToken]);
+
+  useEffect(() => {
+    let active = true;
+    listCatalog().then((items) => { if (active) setCatalogBySku(new Map(items.map((item) => [item.internal_sku, item]))); }).catch(() => { if (active) setCatalogBySku(new Map()); });
+    return () => { active = false; };
+  }, [caseData.case_id]);
 
   const fetchLines = useCallback(async () => {
     setLoading(true);
@@ -247,7 +292,7 @@ export function WorkbenchView({
     return true;
   });
 
-  const unresolvedCount = lines.filter(hasBlockingIssue).length;
+  const unresolvedCount = lines.filter((line) => hasBlockingIssue(line, catalogBySku)).length;
 
   const handleStartEdit = (
     lineId: string,
@@ -447,25 +492,21 @@ export function WorkbenchView({
         </div>
       </MotionWrapper>
 
-      {(caseData.document_warnings ?? []).length > 0 && (
-        <div className="mb-4 space-y-2" aria-label="Document extraction warnings">
-          {(caseData.document_warnings ?? []).map((warning, index) => (
-            <div
-              key={`${warning.code}-${index}`}
-              role={warning.severity.toLowerCase() === "error" ? "alert" : "status"}
-              className="flex items-start gap-2 rounded-lg border px-3 py-2 text-sm"
-              style={{
-                borderColor: warning.severity.toLowerCase() === "error" ? "var(--color-warning-100)" : "var(--color-sand-200)",
-                backgroundColor: warning.severity.toLowerCase() === "error" ? "var(--color-warning-50)" : "var(--color-cream-100)",
-                color: "var(--color-brown-800)",
-              }}
-            >
-              <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
-              <span>{warning.message}</span>
-            </div>
-          ))}
+      <QuotePreparationPanel caseData={caseData} />
+
+      <section className="mb-4 rounded-lg border border-[#d7e1e3] bg-white px-4 py-3" aria-labelledby="documents-heading">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div><h2 id="documents-heading" className="text-sm font-semibold text-[#1d2b30]">Documents</h2><p className="mt-0.5 text-xs text-[#52656b]">Original request and generated draft worksheets for this case.</p></div>
+          <button type="button" className="rfq-secondary !px-2 !py-1" onClick={() => void refreshDocuments()} disabled={documentsLoading}><RefreshCw size={13} aria-hidden="true" />Refresh</button>
         </div>
-      )}
+        {documentsError && <p className="mt-3 text-sm text-[#84241f]" role="alert">{documentsError}</p>}
+        <ul className="mt-3 divide-y divide-[#edf1f2]">
+          {caseData.source_file && <li className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0"><span className="flex min-w-0 items-center gap-2 text-sm text-[#35484e]"><FileText size={15} className="shrink-0 text-[#667980]" aria-hidden="true" /><span className="truncate">{caseData.source_file.file_name}</span><span className="text-xs text-[#667980]">Original request</span></span><a className="text-xs font-medium underline underline-offset-2" href={`/api/proxy/api/rfqs/${encodeURIComponent(caseData.case_id)}/source`} target="_blank" rel="noreferrer">Open</a></li>}
+          {documents.map((document) => <li key={document.export_id} className="flex flex-wrap items-center justify-between gap-2 py-2"><span className="flex min-w-0 items-center gap-2 text-sm text-[#35484e]"><FileText size={15} className="shrink-0 text-[#667980]" aria-hidden="true" /><span className="truncate">{document.file_name}</span><span className="text-xs text-[#667980]">Draft · {document.approved_lines}/{document.total_lines} approved</span></span>{document.file_available ? <a className="text-xs font-medium underline underline-offset-2" href={`/api/proxy${document.download_url}`} target="_blank" rel="noreferrer">Open</a> : <span className="text-xs text-[#84241f]" role="alert">{document.problem || "File unavailable"}</span>}</li>)}
+          {!caseData.source_file && documents.length === 0 && !documentsLoading && <li className="py-2 text-sm text-[#667980]">No source or generated documents are recorded for this request.</li>}
+        </ul>
+        {(caseData.document_warnings ?? []).length > 0 && <div className="mt-2 border-t border-[#edf1f2] pt-2" aria-label="Document problems">{(caseData.document_warnings ?? []).map((warning, index) => <p key={`${warning.code}-${index}`} className="mt-1 flex items-start gap-2 text-xs text-[#815408]" role={warning.severity.toLowerCase() === "error" ? "alert" : "status"}><AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />{warning.message}</p>)}</div>}
+      </section>
 
       {(caseData.source_coverage ?? []).length > 0 && (() => {
         const coverage = caseData.source_coverage ?? [];
@@ -757,6 +798,7 @@ export function WorkbenchView({
                             —
                           </span>
                         )}
+                        {stockShortfall(line, catalogBySku) && <p className="mt-1 max-w-[190px] text-[11px] leading-4 text-[#9b3e24]" title={stockShortfall(line, catalogBySku) ?? undefined}>{stockShortfall(line, catalogBySku)}</p>}
                       </td>
 
                       {/* Unit of measure */}
@@ -966,8 +1008,9 @@ export function WorkbenchView({
                               e.stopPropagation();
                               handleApprove(line.line_id);
                             }}
-                            title="Approve"
+                            title={stockShortfall(line, catalogBySku) ? "Resolve the stock discrepancy before approving" : "Approve"}
                             aria-label={`Approve line ${line.line_number}`}
+                            disabled={Boolean(stockShortfall(line, catalogBySku))}
                             className="inline-flex items-center justify-center w-7 h-7 rounded-md border transition-all duration-200 active:scale-90"
                             style={{
                               backgroundColor:
@@ -1042,14 +1085,14 @@ export function WorkbenchView({
                 <dd style={{ color: "var(--color-brown-700)" }}>
                   {formatLocator(selectedLine.source_locator)}
                   <div className="mt-2">
-                    {caseData.source_file?.file_name.toLowerCase().endsWith(".xlsx") &&
+                    {(caseData.source_file?.file_name.toLowerCase().endsWith(".xlsx") || caseData.source_file?.file_name.toLowerCase().endsWith(".csv")) &&
                     selectedLine.source_locator.sheet_name && selectedLine.source_locator.row_number ? (
                       <button type="button" onClick={() => setShowSourcePreview(true)} className="rfq-secondary">
-                        Open source row and cells
+                        View source evidence
                       </button>
                     ) : caseData.source_file?.file_name.toLowerCase().endsWith(".pdf") && selectedLine.source_locator.page_number ? (
                       <button type="button" onClick={() => setShowPdfSourcePreview(true)} className="rfq-secondary">
-                        View original page
+                        View source evidence
                       </button>
                     ) : (
                       <a
@@ -1192,6 +1235,7 @@ export function WorkbenchView({
                     >
                       {selectedLine.selected_catalog_sku}
                     </code>
+                    {stockShortfall(selectedLine, catalogBySku) && <p className="mt-2 text-xs font-medium text-[#9b3e24]" role="alert">{stockShortfall(selectedLine, catalogBySku)}</p>}
                   </dd>
                 </div>
               )}

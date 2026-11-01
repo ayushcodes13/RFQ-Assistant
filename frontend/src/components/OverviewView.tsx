@@ -125,14 +125,14 @@ export function OverviewView({
                   key={item.case_id}
                   className="rfq-list-row w-full grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_minmax(120px,180px)_auto]"
                   onClick={() => onSelectCase(item.case_id)}
-                  aria-label={`Open ${item.title || item.case_id}`}
+                  aria-label={`Open ${item.title || item.case_id}, case ${item.case_id}`}
                 >
                   <span className="flex min-w-0 items-center gap-3">
                     <span className="rfq-status-mark" style={{ color: item.status === "FAILED" ? "#a52e27" : "#a96c0b" }} />
                     <span className="min-w-0">
                       <span className="block truncate text-[14px] font-medium text-[#1d2b30]">{item.title || item.case_id}</span>
                       <span className="mt-0.5 block truncate text-[12px] text-[#52656b]">
-                        {item.customer_label || "Customer not specified"} · {plural(item.line_count, "line")}
+                        <span className="rfq-mono">{item.case_id}</span> · {item.customer_label || "Customer not specified"} · {plural(item.line_count, "line")} · {plural(item.unresolved_count, "unresolved line")}
                       </span>
                     </span>
                   </span>

@@ -7,11 +7,12 @@ Keeps commercial and safety validation rules outside the LLM:
 - Currencies must be explicitly defined and consistent.
 """
 
-from decimal import Decimal
 import hashlib
 import json
-from typing import List, Optional
-from pydantic import BaseModel, Field
+from decimal import Decimal
+from typing import List, Literal, Optional
+
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 
 class SourceRef(BaseModel):
@@ -21,6 +22,7 @@ class SourceRef(BaseModel):
     sheet: Optional[str] = None
     cell_range: Optional[str] = None
     text_excerpt: Optional[str] = None
+    bbox: Optional[List[float]] = None
 
 
 class QuoteLine(BaseModel):
@@ -30,7 +32,9 @@ class QuoteLine(BaseModel):
     requested_manufacturer: Optional[str] = None
     catalogue_part_id: Optional[str] = None
     description: Optional[str] = None
-    quantity: Decimal = Field(..., gt=0)
+    # Keep unresolved quantities visible in a draft instead of fabricating a
+    # value or raising a schema error while building the review artifact.
+    quantity: Optional[Decimal] = Field(default=None, gt=0)
     unit: str = "EA"
     unit_price: Optional[Decimal] = None
     currency: Optional[str] = "USD"
@@ -39,6 +43,14 @@ class QuoteLine(BaseModel):
     requires_human_review: bool = True
     sources: List[SourceRef] = Field(default_factory=list)
     line_notes: Optional[str] = None
+
+    @computed_field
+    @property
+    def line_total(self) -> Optional[Decimal]:
+        """Deterministic unrounded extension; never trust a model-supplied total."""
+        if self.unit_price is None or self.quantity is None:
+            return None
+        return self.quantity * self.unit_price
 
 
 class ProposedQuote(BaseModel):
@@ -57,6 +69,20 @@ class ProposedQuote(BaseModel):
     approved_at: Optional[str] = None
     requires_human_review: bool = True
     validation_errors: List[str] = Field(default_factory=list)
+    quote_proposal_status: Literal["grounded", "not_configured", "failed", "no_retrieved_prices"] = "not_configured"
+    quote_proposal_warnings: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def calculate_total_when_all_prices_are_present(self):
+        """Fill a missing grand total from Decimal line extensions; retain supplied totals for checking."""
+        if self.total_amount is None and self.lines and all(
+            line.unit_price is not None and line.quantity is not None for line in self.lines
+        ):
+            self.total_amount = sum(
+                (line.quantity * line.unit_price for line in self.lines),
+                start=Decimal("0"),
+            )
+        return self
 
     def compute_draft_hash(self) -> str:
         """Computes cryptographic digest of the draft for version-bound approvals.
@@ -121,6 +147,9 @@ def validate_quote_line(line: QuoteLine) -> List[str]:
         errors.append(f"Line {line.line_no}: Price has no authoritative source ID.")
 
     try:
+        if line.quantity is None:
+            errors.append(f"Line {line.line_no}: Quantity is missing and needs reviewer confirmation.")
+            return errors
         q_val = float(line.quantity)
         if math.isnan(q_val) or math.isinf(q_val):
             errors.append(f"Line {line.line_no}: Quantity cannot be NaN or Infinite.")
@@ -142,6 +171,9 @@ def validate_proposed_quote(quote: ProposedQuote) -> List[str]:
     if not quote.lines:
         errors.append("Quotation draft contains no line items.")
 
+    if quote.quote_proposal_status == "failed":
+        errors.append("The evidence-bounded quote proposal stage failed. Retry it before approval.")
+
     currencies = set()
     for line in quote.lines:
         line_errs = validate_quote_line(line)
@@ -152,5 +184,21 @@ def validate_proposed_quote(quote: ProposedQuote) -> List[str]:
     if len(currencies) > 1:
         errors.append(f"Mixed currencies detected ({', '.join(currencies)}). Commercial policy requires unified currency.")
 
+    calculated = calculate_quote_total(quote.lines)
+    if calculated is not None:
+        if quote.total_amount is None:
+            errors.append("Grand total is missing; deterministic recalculation is required.")
+        elif quote.total_amount != calculated:
+            errors.append(
+                f"Grand total mismatch: supplied {quote.total_amount}, calculated {calculated}."
+            )
+
     return errors
+
+
+def calculate_quote_total(lines: List[QuoteLine]) -> Optional[Decimal]:
+    """Return a Decimal total only when every line has quantity and authoritative price."""
+    if not lines or any(line.unit_price is None or line.quantity is None for line in lines):
+        return None
+    return sum((line.quantity * line.unit_price for line in lines), start=Decimal("0"))
 

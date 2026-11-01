@@ -133,3 +133,34 @@ def test_valid_reviewed_exact_match_can_still_export(services):
     )
     assert manifest.approved_lines == 1
     assert manifest.unresolved_lines_omitted == 0
+
+
+def test_requested_quantity_above_catalog_stock_blocks_full_export(services):
+    manager, exporter, catalog = services
+    catalog.upsert_item(
+        CatalogItem(
+            internal_sku="SKU-SYN-1",
+            manufacturer="Schneider Electric",
+            manufacturer_part_number="LC1D09BD",
+            description="Synthetic contactor",
+            list_price=45.0,
+            stock_qty=8,
+        )
+    )
+    case = manager.create_case_from_text("10 pcs Schneider Electric LC1D09BD")
+    line = manager.get_lines(case.case_id)[0]
+    with pytest.raises(ValueError, match="Cannot approve line: requested quantity 10 exceeds catalog stock 8"):
+        manager.update_line(
+            case.case_id,
+            line.line_id,
+            RFQLineItemUpdate(expected_version=line.version, review_decision=ReviewDecision.APPROVED),
+        )
+
+    assert manager.get_case(case.case_id).status == CaseStatus.NEEDS_REVIEW
+    assert manager.get_case(case.case_id).unresolved_count == 1
+    with pytest.raises(ExportValidationError, match="requested quantity 10 exceeds catalog stock 8"):
+        exporter.generate_export(
+            manager.get_case(case.case_id),
+            manager.get_lines(case.case_id),
+            ExportRequest(case_id=case.case_id, allow_partial=False),
+        )

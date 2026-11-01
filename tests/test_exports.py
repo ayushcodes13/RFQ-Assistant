@@ -179,6 +179,15 @@ class TestExportAPIEndpoints:
         manifest = export_resp.json()
         export_id = manifest["export_id"]
 
+        documents_resp = client.get(f"/api/rfqs/{case_id}/exports")
+        assert documents_resp.status_code == 200
+        documents = documents_resp.json()
+        assert len(documents) == 1
+        assert documents[0]["export_id"] == export_id
+        assert documents[0]["file_name"] == manifest["file_name"]
+        assert documents[0]["file_available"] is True
+        assert documents[0]["is_draft"] is True
+
         # Download file
         download_resp = client.get(f"/api/rfqs/{case_id}/exports/{export_id}")
         assert download_resp.status_code == 200

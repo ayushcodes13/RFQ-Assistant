@@ -2,22 +2,25 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import { BookOpen, ChartNoAxesCombined, Inbox, Keyboard, Menu, X } from "lucide-react";
+import { BookOpen, ChartNoAxesCombined, Database, Inbox, Keyboard, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { RFQCase } from "@/types";
 
-export type AppTab = "overview" | "inbox" | "workbench" | "catalog";
+export type AppTab = "overview" | "inbox" | "workbench" | "catalog" | "updates";
 
 interface HeaderProps {
   currentTab: AppTab;
   onTabChange: (tab: AppTab) => void;
   onOpenShortcuts: () => void;
   cases: RFQCase[];
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
 }
 
 const navigation = [
   { id: "overview" as const, label: "Overview", icon: ChartNoAxesCombined },
   { id: "inbox" as const, label: "RFQ inbox", icon: Inbox },
   { id: "catalog" as const, label: "Catalog", icon: BookOpen },
+  { id: "updates" as const, label: "Update data", icon: Database },
 ];
 
 function ProductMark({ size = 34 }: { size?: number }) {
@@ -29,24 +32,28 @@ function NavItems({
   cases,
   onTabChange,
   onNavigate,
+  collapsed = false,
 }: {
   currentTab: AppTab;
   cases: RFQCase[];
   onTabChange: (tab: AppTab) => void;
   onNavigate?: () => void;
+  collapsed?: boolean;
 }) {
   const waitingCount = cases.filter((item) => item.status === "NEEDS_REVIEW").length;
   const activeTab = currentTab === "workbench" ? "inbox" : currentTab;
 
   return (
     <nav aria-label="Main navigation" className="mt-8">
-      <p className="px-3 pb-2 text-[12px] font-medium text-[var(--color-brown-500)]">Workspace</p>
+      {!collapsed && <p className="px-3 pb-2 text-[12px] font-medium text-[var(--color-brown-500)]">Workspace</p>}
       <div className="space-y-1">
         {navigation.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
             className="rfq-nav-link"
+            title={collapsed ? label : undefined}
+            aria-label={collapsed ? label : undefined}
             aria-current={activeTab === id ? "page" : undefined}
             onClick={() => {
               onTabChange(id);
@@ -54,8 +61,8 @@ function NavItems({
             }}
           >
             <Icon size={17} strokeWidth={1.7} aria-hidden="true" />
-            <span>{label}</span>
-            {id === "inbox" && waitingCount > 0 && (
+            {!collapsed && <span>{label}</span>}
+            {!collapsed && id === "inbox" && waitingCount > 0 && (
               <span className="rfq-nav-count" aria-label={`${waitingCount} cases need review`}>
                 {waitingCount}
               </span>
@@ -67,34 +74,39 @@ function NavItems({
   );
 }
 
-export function Header({ currentTab, onTabChange, onOpenShortcuts, cases }: HeaderProps) {
+export function Header({ currentTab, onTabChange, onOpenShortcuts, cases, sidebarCollapsed, onToggleSidebar }: HeaderProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
     <>
-      <aside className="rfq-sidebar" aria-label="RFQ Assistant navigation">
-        <a href="#main-content" className="flex items-center gap-3 px-2 no-underline">
+      <aside className={`rfq-sidebar${sidebarCollapsed ? " rfq-sidebar-collapsed" : ""}`} aria-label="RFQ Assistant navigation">
+        <div className={`flex items-center ${sidebarCollapsed ? "justify-center" : "justify-between"} gap-2 px-2`}>
+        <a href="#main-content" className="flex min-w-0 items-center gap-3 no-underline" title={sidebarCollapsed ? "RFQ Assistant" : undefined}>
           <ProductMark />
-          <span className="min-w-0">
+          {!sidebarCollapsed && <span className="min-w-0">
             <span className="block text-[15px] font-semibold leading-5 text-[#142126]">RFQ Assistant</span>
             <span className="block text-[12px] leading-4 text-[#52656b]">Quotation workspace</span>
-          </span>
+          </span>}
         </a>
+        <button type="button" className="rfq-collapse-toggle hidden min-[701px]:inline-flex" onClick={onToggleSidebar} aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
+          {sidebarCollapsed ? <PanelLeftOpen size={17} aria-hidden="true" /> : <PanelLeftClose size={17} aria-hidden="true" />}
+        </button>
+        </div>
 
-        <NavItems currentTab={currentTab} cases={cases} onTabChange={onTabChange} />
+        <NavItems currentTab={currentTab} cases={cases} onTabChange={onTabChange} collapsed={sidebarCollapsed} />
 
         <div className="mt-auto border-t border-[#dfe7e9] pt-4">
-          <button type="button" className="rfq-nav-link" onClick={onOpenShortcuts}>
+          <button type="button" className="rfq-nav-link" onClick={onOpenShortcuts} title={sidebarCollapsed ? "Keyboard shortcuts" : undefined} aria-label={sidebarCollapsed ? "Keyboard shortcuts" : undefined}>
             <Keyboard size={16} strokeWidth={1.7} aria-hidden="true" />
-            <span>Keyboard shortcuts</span>
+            {!sidebarCollapsed && <span>Keyboard shortcuts</span>}
           </button>
-          <div className="mt-4 rounded-md border border-[#dfe7e9] bg-[#f8fafb] px-3 py-3">
+          {!sidebarCollapsed && <div className="mt-4 rounded-md border border-[#dfe7e9] bg-[#f8fafb] px-3 py-3">
             <div className="flex items-center gap-2 text-[13px] font-medium text-[#26373d]">
               <span className="size-2 rounded-full bg-[#c64c22]" />
               Local demo
             </div>
             <p className="mt-1 text-[12px] leading-[17px] text-[#52656b]">Files stay in local storage. Quotes are never sent automatically.</p>
-          </div>
+          </div>}
         </div>
       </aside>
 
@@ -133,7 +145,7 @@ export function Header({ currentTab, onTabChange, onOpenShortcuts, cases }: Head
 }
 
 export function AppTopbar({ currentTab, activeCaseTitle }: { currentTab: AppTab; activeCaseTitle?: string }) {
-  const pageLabel = currentTab === "workbench" ? activeCaseTitle || "RFQ review" : currentTab === "inbox" ? "RFQ inbox" : currentTab === "catalog" ? "Catalog" : "Overview";
+  const pageLabel = currentTab === "workbench" ? activeCaseTitle || "RFQ review" : currentTab === "inbox" ? "RFQ inbox" : currentTab === "catalog" ? "Catalog" : currentTab === "updates" ? "Update data" : "Overview";
   return (
     <div className="rfq-topbar">
       <div className="flex min-w-0 items-center gap-2 text-[13px]">

@@ -1,17 +1,17 @@
 """Deterministic text parser for pasted email bodies and plain text RFQs."""
 
 import re
-from typing import List, Optional, Tuple
 
 from rfq_assistant.ingestion.parsers.base import (
     BaseDocumentParser,
-    enforce_candidate_region_limit,
     EvidenceSegment,
-    make_coverage_entry,
     ParsedDocumentResult,
     ParsedLineDraft,
     SourceCoverageAccumulator,
+    enforce_candidate_region_limit,
+    make_coverage_entry,
 )
+from rfq_assistant.matching.normalizer import normalize_manufacturer, normalize_mpn
 from rfq_assistant.schemas.models import ExtractionWarning, SourceLocator
 
 KNOWN_OEMS = [
@@ -27,6 +27,47 @@ KNOWN_OEMS = [
     "Allen-Bradley",
     "ABB",
 ]
+VAGUE_ITEM_REFERENCE = r"sensor from last time|same as previous|the one from last|custom bracket|same .{1,50} as last time"
+
+
+def _is_electrical_specification_token(value: str) -> bool:
+    """Recognize quantity-like electrical specs without backtracking regexes."""
+    token = value.upper()
+    index = 0
+    while index < len(token) and "0" <= token[index] <= "9":
+        index += 1
+    if index == 0:
+        return False
+
+    if index < len(token) and token[index] == ".":
+        index += 1
+        decimal_start = index
+        while index < len(token) and "0" <= token[index] <= "9":
+            index += 1
+        if index == decimal_start:
+            return False
+
+    units = ("VA", "HZ", "KW", "MA", "V", "W", "A")
+    suffix = next((unit for unit in units if token.startswith(unit, index)), None)
+    if suffix is None:
+        return False
+    index += len(suffix)
+    while index < len(token) and "0" <= token[index] <= "9":
+        index += 1
+    return index == len(token)
+
+
+def _is_prefixed_numeric_mpn(value: str) -> bool:
+    """Recognize PREFIX-123 style identifiers without regex on untrusted text."""
+    prefix, separator, suffix = value.partition("-")
+    if not separator or len(prefix) < 2 or not prefix.isalpha() or not prefix.isupper():
+        return False
+    index = 0
+    while index < len(suffix) and "0" <= suffix[index] <= "9":
+        index += 1
+    if index == 0:
+        return False
+    return all(char.isascii() and char.isalnum() or char == "-" for char in suffix[index:])
 
 
 class TextParser(BaseDocumentParser):
@@ -36,9 +77,9 @@ class TextParser(BaseDocumentParser):
         text = content.decode("utf-8", errors="replace")
         raw_lines = text.splitlines()
 
-        lines: List[ParsedLineDraft] = []
-        warnings: List[ExtractionWarning] = []
-        candidate_segments: List[EvidenceSegment] = []
+        lines: list[ParsedLineDraft] = []
+        warnings: list[ExtractionWarning] = []
+        candidate_segments: list[EvidenceSegment] = []
         source_coverage = SourceCoverageAccumulator()
         source_coverage.record_unit(
             "document", SourceLocator(file_name=filename), unit_kind="text_document", is_empty=True,
@@ -98,7 +139,7 @@ class TextParser(BaseDocumentParser):
                 or re.search(r"\b(?:\d+\s*(?:pcs|units?|ea|x)\b)", clean, re.IGNORECASE)
                 or any(oem.lower() in clean.lower() for oem in KNOWN_OEMS)
                 or re.search(r"\b[A-Z0-9]{3,}[-_][A-Z0-9]+\b", clean)
-                or re.search(r"sensor from last time|same as previous|the one from last|custom bracket", clean, re.IGNORECASE)
+                or re.search(VAGUE_ITEM_REFERENCE, clean, re.IGNORECASE)
             )
 
             if not has_item_indicator:
@@ -113,9 +154,25 @@ class TextParser(BaseDocumentParser):
                 record("review_candidate", "NO_DETERMINISTIC_ITEM_INDICATOR")
                 continue
 
+            # Do not let a recognizable part on a line hide a second vague
+            # item such as "and the same relay as last time". Route the whole
+            # region to grounded/manual review so the tail is not lost.
+            if re.search(
+                VAGUE_ITEM_REFERENCE,
+                clean,
+                re.IGNORECASE,
+            ) and re.search(r"\b[A-Z0-9]{3,}[-_][A-Z0-9]+\b|\b\d{5,}\b", clean):
+                candidate_segments.append(EvidenceSegment(
+                    segment_id=f"candidate-text-{row_idx}",
+                    locator=locator,
+                    text=clean,
+                ))
+                record("review_candidate", "KNOWN_AND_VAGUE_ITEMS_IN_ONE_REGION")
+                continue
+
 
             # Check for vague item reference (Scenario 2: "the sensor from last time")
-            if re.search(r"sensor from last time|same as previous|the one from last|custom bracket", clean, re.IGNORECASE):
+            if re.search(VAGUE_ITEM_REFERENCE, clean, re.IGNORECASE):
                 locator = SourceLocator(
                     file_name=filename,
                     row_number=row_idx,
@@ -159,6 +216,28 @@ class TextParser(BaseDocumentParser):
                 ))
                 record("review_candidate", "DETERMINISTIC_PARSE_UNRESOLVED")
 
+        # Repeated manufacturer+MPN rows with different quantities may be
+        # separate requests or a correction in an email thread. Preserve all
+        # rows and require a human to decide; never choose the latest/first one.
+        by_identity: dict[tuple[str, str], list[ParsedLineDraft]] = {}
+        for line in lines:
+            if not line.requested_mpn:
+                continue
+            identity = (
+                normalize_manufacturer(line.requested_manufacturer or ""),
+                normalize_mpn(line.requested_mpn),
+            )
+            by_identity.setdefault(identity, []).append(line)
+        for duplicates in by_identity.values():
+            quantities = {(line.quantity, line.unit) for line in duplicates}
+            if len(duplicates) > 1 and len(quantities) > 1:
+                for line in duplicates:
+                    line.extraction_warnings.append(ExtractionWarning(
+                        code="REPEATED_PART_QUANTITY_REQUIRES_REVIEW",
+                        message="This manufacturer and part number appears with different quantities in the source. Review both locations to determine whether one corrects the other or they are separate request lines.",
+                        severity="error",
+                    ))
+
         if not lines:
             warnings.append(
                 ExtractionWarning(
@@ -180,7 +259,7 @@ class TextParser(BaseDocumentParser):
 
     def _parse_item_line(
         self, raw_line: str, filename: str, row_idx: int, line_counter: int
-    ) -> Optional[ParsedLineDraft]:
+    ) -> ParsedLineDraft | None:
         # Strip leading bullet/index: e.g. "1. ", "- ", "3) "
         cleaned = re.sub(r"^(?:\d+[\.\)]|\-|\*|\•)\s*", "", raw_line).strip()
 
@@ -188,7 +267,7 @@ class TextParser(BaseDocumentParser):
         qty, unit = self._extract_quantity_unit(cleaned)
 
         # Detect manufacturer
-        detected_oem: Optional[str] = None
+        detected_oem: str | None = None
         for oem in KNOWN_OEMS:
             if re.search(rf"\b{re.escape(oem)}\b", cleaned, re.IGNORECASE):
                 detected_oem = oem
@@ -197,7 +276,7 @@ class TextParser(BaseDocumentParser):
         # Extract MPN candidate
         mpn = self._extract_mpn(cleaned)
 
-        line_warnings: List[ExtractionWarning] = []
+        line_warnings: list[ExtractionWarning] = []
         if qty is None:
             line_warnings.append(
                 ExtractionWarning(
@@ -243,7 +322,7 @@ class TextParser(BaseDocumentParser):
         ))
 
     @staticmethod
-    def _extract_quantity_unit(text: str) -> Tuple[Optional[float], Optional[str]]:
+    def _extract_quantity_unit(text: str) -> tuple[float | None, str | None]:
         # Pattern 1: "10 pcs of", "4 units", "5 pcs", "12 EA of", "25x"
         m = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:x|pcs|units?|ea|m|ft|set)\b", text, re.IGNORECASE)
         if m:
@@ -262,14 +341,14 @@ class TextParser(BaseDocumentParser):
         return None, "EA"
 
     @staticmethod
-    def _extract_vague_quantity(text: str) -> Optional[float]:
+    def _extract_vague_quantity(text: str) -> float | None:
         m = re.search(r"(?:about|need|around|qty:?)\s*(\d+)", text, re.IGNORECASE)
         if m:
             return float(m.group(1))
         return None
 
     @staticmethod
-    def _extract_mpn(text: str) -> Optional[str]:
+    def _extract_mpn(text: str) -> str | None:
         # Tokens with uppercase letters, numbers, hyphens, slashes
         tokens = text.split()
         for t in tokens:
@@ -289,12 +368,10 @@ class TextParser(BaseDocumentParser):
                 if re.fullmatch(r"\d+-pole|spst|spdt|dpst|dpdt|spsc|npdt", cleaned, re.IGNORECASE):
                     continue
                 # Exclude decimal quantity+unit specification tokens (e.g., 9A, 100mA, 5VA, 24V)
-                if re.fullmatch(r"\d+(?:\.\d+)?(?:A|VA|V|W|HZ|KW|MA)\d*", cleaned, re.IGNORECASE):
+                if _is_electrical_specification_token(cleaned):
                     continue
                 return cleaned
             # Allow numeric-only MPNs (e.g., Phoenix Contact 2900364) when long enough
-            elif cleaned.isdigit() and len(cleaned) >= 5:
-                return cleaned
-            elif re.search(r"^[A-Z]{2,}\-[0-9]+[A-Z0-9\-]*$", cleaned):
+            elif (cleaned.isdigit() and len(cleaned) >= 5) or _is_prefixed_numeric_mpn(cleaned):
                 return cleaned
         return None

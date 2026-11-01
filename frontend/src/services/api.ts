@@ -3,12 +3,15 @@ import {
   BatchReviewRequest,
   CatalogImportResponse,
   CatalogItem,
+  CatalogUpdateProposal,
   ExportManifest,
+  ExportDocumentSummary,
   RFQCase,
   RFQCaseSummary,
   RFQLineItem,
   RFQLineItemUpdate,
   ReviewPlan,
+  QuoteDraft,
   SpreadsheetSourcePreview,
 } from "@/types";
 
@@ -61,6 +64,18 @@ export async function listCases(): Promise<RFQCaseSummary[]> {
 
 export async function getCase(caseId: string): Promise<RFQCase> {
   return getJson<RFQCase>(`/api/rfqs/${caseId}`, "Failed to load case details");
+}
+
+export async function listCaseExports(caseId: string): Promise<ExportDocumentSummary[]> {
+  return getJson<ExportDocumentSummary[]>(`/api/rfqs/${encodeURIComponent(caseId)}/exports`, "Failed to load case documents");
+}
+
+export async function getCaseQuoteDraft(caseId: string): Promise<QuoteDraft> {
+  return getJson<QuoteDraft>(`/v1/rfqs/${encodeURIComponent(caseId)}/quote-draft`, "Failed to load quote draft");
+}
+
+export async function createCaseQuoteDraft(caseId: string): Promise<QuoteDraft> {
+  return sendJson<QuoteDraft>(`/v1/rfqs/${encodeURIComponent(caseId)}/draft-quote`, "POST", {}, "Quote draft could not be prepared");
 }
 
 export async function getCaseLines(caseId: string): Promise<RFQLineItem[]> {
@@ -197,6 +212,37 @@ export async function deleteCase(caseId: string): Promise<void> {
 
 export async function listCatalog(): Promise<CatalogItem[]> {
   return getJson<CatalogItem[]>("/api/catalogs", "Failed to load catalog");
+}
+
+export async function listCatalogUpdateProposals(): Promise<CatalogUpdateProposal[]> {
+  return getJson<CatalogUpdateProposal[]>("/api/catalogs/updates", "Failed to load distributor data changes");
+}
+
+export async function stageCatalogUpdate(input: { text?: string; file?: File; revisionOf?: string }): Promise<CatalogUpdateProposal[]> {
+  const formData = new FormData();
+  if (input.text) formData.append("pasted_text", input.text);
+  if (input.file) formData.append("file", input.file);
+  if (input.revisionOf) formData.append("revision_of", input.revisionOf);
+  const res = await fetch(`${API_BASE}/api/catalogs/updates`, { method: "POST", body: formData });
+  if (!res.ok) throw new Error(await readError(res, "Distributor data could not be processed"));
+  return res.json();
+}
+
+async function reviewCatalogUpdate(proposalId: string, decision: "accept" | "reject", note?: string): Promise<CatalogUpdateProposal> {
+  return sendJson<CatalogUpdateProposal>(
+    `/api/catalogs/updates/${encodeURIComponent(proposalId)}/${decision}`,
+    "POST",
+    { note },
+    decision === "accept" ? "Change could not be applied" : "Change could not be rejected",
+  );
+}
+
+export function acceptCatalogUpdate(proposalId: string): Promise<CatalogUpdateProposal> {
+  return reviewCatalogUpdate(proposalId, "accept");
+}
+
+export function rejectCatalogUpdate(proposalId: string): Promise<CatalogUpdateProposal> {
+  return reviewCatalogUpdate(proposalId, "reject");
 }
 
 export async function importCatalogCSV(file: File): Promise<CatalogImportResponse> {

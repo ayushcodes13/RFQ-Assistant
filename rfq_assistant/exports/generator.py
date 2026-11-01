@@ -2,9 +2,11 @@
 
 import csv
 import io
+import json
 import os
+import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple
 import openpyxl
@@ -15,6 +17,7 @@ from rfq_assistant.matching.catalog import CatalogRepository
 from rfq_assistant.quotation.line_rules import blocking_line_issues
 from rfq_assistant.schemas.enums import MatchStatus, ReviewDecision
 from rfq_assistant.schemas.models import (
+    ExportDocumentSummary,
     ExportManifest,
     ExportRequest,
     RFQCase,
@@ -50,6 +53,67 @@ class ExportGenerator:
         self.catalog = catalog
         self.base_export_dir = base_export_dir or Path("storage/exports")
         self.base_export_dir.mkdir(parents=True, exist_ok=True)
+
+    def list_exports(self, case_id: str) -> List[ExportDocumentSummary]:
+        """List case-scoped export artifacts without exposing filesystem paths."""
+        records: List[ExportDocumentSummary] = []
+        if not self.base_export_dir.exists():
+            return records
+
+        for export_dir in self.base_export_dir.iterdir():
+            export_id = export_dir.name
+            if (
+                export_dir.is_symlink()
+                or not export_dir.is_dir()
+                or not re.fullmatch(r"EXP-[A-F0-9]{8}", export_id)
+            ):
+                continue
+            manifest_path = export_dir / "manifest.json"
+            try:
+                manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if manifest_data.get("case_id") != case_id:
+                continue
+
+            file_name = manifest_data.get("file_name")
+            if not isinstance(file_name, str) or Path(file_name).name != file_name:
+                file_name = ""
+            artifact_path = export_dir / file_name if file_name else None
+            file_format = Path(file_name).suffix.lower().removeprefix(".") if file_name else ""
+            if file_format not in {"xlsx", "csv"}:
+                file_format = "xlsx"
+            try:
+                generated_at = datetime.fromisoformat(manifest_data["generated_at"])
+            except (KeyError, TypeError, ValueError):
+                generated_at = datetime.fromtimestamp(
+                    manifest_path.stat().st_mtime, tz=timezone.utc
+                )
+
+            file_available = bool(
+                artifact_path
+                and artifact_path.is_file()
+                and not artifact_path.is_symlink()
+                and artifact_path.resolve().parent == export_dir.resolve()
+            )
+            records.append(
+                ExportDocumentSummary(
+                    export_id=export_id,
+                    file_name=file_name or f"Export {export_id}",
+                    format=file_format,
+                    is_draft=bool(manifest_data.get("is_draft", True)),
+                    total_lines=int(manifest_data.get("total_lines", 0)),
+                    approved_lines=int(manifest_data.get("approved_lines", 0)),
+                    unresolved_lines_omitted=int(
+                        manifest_data.get("unresolved_lines_omitted", 0)
+                    ),
+                    generated_at=generated_at,
+                    file_available=file_available,
+                    problem=None if file_available else "Generated document file is missing.",
+                    download_url=f"/api/rfqs/{case_id}/exports/{export_id}",
+                )
+            )
+        return sorted(records, key=lambda item: item.generated_at, reverse=True)
 
     def generate_export(
         self, case: RFQCase, lines: List[RFQLineItem], request: ExportRequest
@@ -91,18 +155,23 @@ class ExportGenerator:
         else:
             self._write_csv(case, lines, file_path, request.allow_partial, request.actor)
 
-        import json
+        approved_count = sum(1 for line in lines if line.review_decision == ReviewDecision.APPROVED)
         manifest_path = export_dir / "manifest.json"
         with open(manifest_path, "w", encoding="utf-8") as mf:
             json.dump({
                 "export_id": export_id,
                 "case_id": case.case_id,
                 "file_name": file_name,
+                "format": fmt,
+                "is_draft": True,
+                "total_lines": len(lines),
+                "approved_lines": approved_count,
+                "unresolved_lines_omitted": len(unresolved_lines),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
             }, mf)
 
         unsent_email = generate_unsent_email_draft(case, lines)
 
-        approved_count = sum(1 for l in lines if l.review_decision == ReviewDecision.APPROVED)
         omitted_or_draft = len(unresolved_lines)
 
         return ExportManifest(
@@ -243,8 +312,6 @@ class ExportGenerator:
                     horizontal="center" if col_idx in (1, 9, 10) else "right" if col_idx in (11, 12) else "left",
                     vertical="center",
                 )
-                if col_idx in (11, 12) and isinstance(cell.value, (int, float)):
-                    cell.number_format = "$#,##0.00"
 
         # Auto-adjust column widths
         for col in ws.columns:
