@@ -18,6 +18,7 @@ RFQ files can contain names, email addresses, purchase quantities, customer pric
 - No autonomous quotation transmission or purchasing actions.
 - Require explicit human approval and visible source evidence.
 - The authenticated Next.js API proxy requires an exact same-origin `Origin` header on state-changing requests. SameSite cookies add defense in depth but do not make sibling subdomains cross-site.
+- The Next.js app sets `nosniff`, frame denial, a restrictive referrer policy, disabled DNS prefetch, and a Permissions Policy that disables unused camera, microphone, and geolocation features. Configure HSTS at the HTTPS edge; this repository does not choose a TLS termination policy.
 - Keep customer records tenant-scoped and ensure deletion works before a production pilot.
 - Do not use company/employer intellectual property, data or accounts without permission.
 
