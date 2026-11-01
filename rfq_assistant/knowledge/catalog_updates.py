@@ -11,7 +11,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Literal, Optional, Protocol
+from typing import Any, Literal, Optional, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -22,6 +22,7 @@ from rfq_assistant.matching.normalizer import normalize_manufacturer
 from rfq_assistant.persistence import StateStore
 from rfq_assistant.schemas.enums import SourceType
 from rfq_assistant.schemas.models import (
+    CatalogClearField,
     CatalogItem,
     CatalogUpdateProposal,
     SourceLocator,
@@ -248,11 +249,15 @@ class CatalogUpdateService:
     @staticmethod
     def _validate_clear_fields(
         requested: list[str], *, facts: list[CatalogFactProposal], filename: str
-    ) -> list[str]:
+    ) -> list[CatalogClearField]:
         """Allow explicit clearing only in a single-row structured catalog edit."""
         if not requested:
             return []
-        allowed = {"list_price", "currency", "stock_qty"}
+        allowed: set[CatalogClearField] = {
+            "list_price",
+            "currency",
+            "stock_qty",
+        }
         fields = list(
             dict.fromkeys(value.strip() for value in requested if value.strip())
         )
@@ -274,7 +279,7 @@ class CatalogUpdateService:
             raise CatalogUpdateError(
                 "A catalog SKU is required to clear a value safely."
             )
-        return fields
+        return cast(list[CatalogClearField], fields)
 
     def _facts_from_source(self, content: bytes, filename: str):
         # A canonical distributor catalog CSV is already structured. Keep this
@@ -449,7 +454,7 @@ class CatalogUpdateService:
         batch_id: str,
         revision_of: str | None,
         source_warnings: list[str],
-        clear_fields: list[str] | None = None,
+        clear_fields: list[CatalogClearField] | None = None,
     ) -> CatalogUpdateProposal:
         all_items = self.catalog.list_all()
         if fact.internal_sku:
