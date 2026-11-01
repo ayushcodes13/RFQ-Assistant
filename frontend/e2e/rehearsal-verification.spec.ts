@@ -621,3 +621,39 @@ test("Rehearsal E — failure recovery on unsupported file type", async ({
     timeout: 30_000,
   });
 });
+
+
+test("Rehearsal G — export modal refreshes stale review status from backend", async ({ page }) => {
+  await page.goto("/workspace");
+  await page.getByRole("button", { name: /New RFQ/i }).first().click();
+  const ingest = page.getByRole("dialog", { name: "New RFQ" });
+  await ingest.getByRole("button", { name: /Paste text/i }).click();
+  await ingest.getByPlaceholder(/Paste email or RFQ text here/i).fill(KNOWN_GOOD_RFQ_TEXT);
+  await ingest.getByPlaceholder("Optional case title").fill("Rehearsal G stale state");
+  await ingest.getByRole("button", { name: /Extract line items/i }).click();
+  await expect(ingest).toBeHidden({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "Rehearsal G stale state" })).toBeVisible();
+
+  const approve = page.getByRole("button", { name: /^Approve line \d+$/ });
+  await approve.first().click();
+  await page.getByRole("button", { name: /^Approve line \d+$/ }).first().click();
+  await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+
+  const { case_id } = await findCaseByTitle(page, "Rehearsal G stale state");
+  const linesResp = await page.request.get(`/api/proxy/api/rfqs/${case_id}/lines`);
+  expect(linesResp.status()).toBe(200);
+  const [line] = (await linesResp.json()) as ApiLine[];
+  const update = await page.request.patch(`/api/proxy/api/rfqs/${case_id}/lines/${line.line_id}`, {
+    data: { expected_version: line.version, quantity: (line.quantity ?? 10) + 1 },
+  });
+  expect(update.status()).toBe(200);
+
+  // No parent UI refresh after the API edit: ExportModal must read fresh case.
+  await page.getByRole("button", { name: /Export draft/i }).click();
+  const dialog = page.getByRole("dialog", { name: "Export draft" });
+  await expect(dialog.getByText("NEEDS_REVIEW", { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/line\(s\) remain unresolved/i)).toBeVisible();
+  await dialog.getByRole("button", { name: /Generate draft export/i }).click();
+  await expect(dialog.getByRole("alert")).toBeVisible();
+  await expect(dialog.getByRole("link", { name: /Download worksheet/i })).toHaveCount(0);
+});
