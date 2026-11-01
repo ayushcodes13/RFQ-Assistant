@@ -367,11 +367,11 @@ test("Rehearsal C — persistence across browser refresh", async ({
   await page.reload();
   await page.goto("/workspace");
 
-  // Navigate to Overview and find our case.
-  await page.getByRole("button", { name: /^Overview$/i }).click({ timeout: 5000 });
+  // Use the full inbox rather than the capped Overview recent-cases list.
+  // Additional synthetic E2E cases must not hide older persisted cases.
+  await page.getByRole("button", { name: /^RFQ inbox$/i }).first().click();
 
-  // The case appears in the overview list. Use .first() to handle any
-  // duplicate matches.
+  // The case remains accessible through the complete inbox after refresh.
   await expect(
     page.getByRole("button", { name: /Open Rehearsal C persistence/i }).first()
   ).toBeVisible({ timeout: 15_000 });
