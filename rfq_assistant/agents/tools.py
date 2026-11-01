@@ -24,7 +24,8 @@ class QuoteApprovalRecord(BaseModel):
     approved_hash: str
     approver_name: str
     approved_at: str
-    commercial_status: str  # APPROVED, REJECTED
+    commercial_status: str  # APPROVED, REJECTED, REVOKED
+    reason: Optional[str] = None
 
 
 class QuotationCommercialService:
@@ -39,6 +40,12 @@ class QuotationCommercialService:
             for payload in state_store.load_quote_drafts():
                 draft = ProposedQuote.model_validate(payload)
                 self._drafts[draft.quote_id] = draft
+            for payload in state_store.load_quote_decisions():
+                record = QuoteApprovalRecord.model_validate(payload)
+                if record.commercial_status == "REVOKED":
+                    self._approvals.pop(record.quote_id, None)
+                else:
+                    self._approvals[record.quote_id] = record
 
     def register_draft(self, draft: ProposedQuote) -> ProposedQuote:
         """Registers a draft and computes its version hash."""
@@ -49,11 +56,25 @@ class QuotationCommercialService:
         draft.is_approved = False
         draft.approved_by = None
         draft.approved_at = None
+        prior_review = self._approvals.get(draft.quote_id)
+        revocation = None
+        if prior_review is not None:
+            revocation = QuoteApprovalRecord(
+                quote_id=draft.quote_id,
+                approved_hash=prior_review.approved_hash,
+                approver_name="System",
+                approved_at=datetime.now(timezone.utc).isoformat(),
+                commercial_status="REVOKED",
+                reason="A new draft replaced the previously reviewed version.",
+            )
+        if self._state_store is not None:
+            self._state_store.save_quote_draft_with_decision(
+                draft.model_dump(mode="json"),
+                revocation.model_dump(mode="json") if revocation else None,
+            )
         self._approvals.pop(draft.quote_id, None)
         self._sent_quotes.pop(draft.quote_id, None)
         self._drafts[draft.quote_id] = draft
-        if self._state_store is not None:
-            self._state_store.save_quote_draft(draft.model_dump(mode="json"))
         return draft
 
     def get_draft(self, quote_id: str) -> Optional[ProposedQuote]:
@@ -95,6 +116,10 @@ class QuotationCommercialService:
         draft.is_approved = True
         draft.approved_by = approver_name
         draft.approved_at = record.approved_at
+        if self._state_store is not None:
+            self._state_store.save_quote_draft_with_decision(
+                draft.model_dump(mode="json"), record.model_dump(mode="json")
+            )
         self._approvals[quote_id] = record
         return record
 
@@ -116,8 +141,15 @@ class QuotationCommercialService:
             approver_name=approver_name,
             approved_at=datetime.now(timezone.utc).isoformat(),
             commercial_status="REJECTED",
+            reason=reason,
         )
         draft.is_approved = False
+        draft.approved_by = None
+        draft.approved_at = None
+        if self._state_store is not None:
+            self._state_store.save_quote_draft_with_decision(
+                draft.model_dump(mode="json"), record.model_dump(mode="json")
+            )
         self._approvals[quote_id] = record
         return record
 
@@ -137,6 +169,8 @@ class QuotationCommercialService:
         draft = self._drafts.get(quote_id)
         if not draft:
             raise ApprovalGateError(f"Draft '{quote_id}' no longer exists.")
+        if not draft.is_approved:
+            raise ApprovalGateError("Blocked: The current quote draft is not approved.")
 
         current_hash = draft.compute_draft_hash()
         if current_hash != expected_hash or current_hash != approval.approved_hash:
