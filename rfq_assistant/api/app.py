@@ -45,7 +45,7 @@ from rfq_assistant.ingestion.excel_values import render_excel_cell
 from rfq_assistant.ingestion.malware import ClamAVScanner
 from rfq_assistant.ingestion.parsers.base import DocumentParserError
 from rfq_assistant.ingestion.storage import DocumentStorage
-from rfq_assistant.ingestion.validator import UploadValidationError
+from rfq_assistant.ingestion.validator import MAX_UPLOAD_BYTES, UploadValidationError
 from rfq_assistant.ingestion.worker import RFQIngestionWorker
 from rfq_assistant.knowledge.catalog_updates import (
     CatalogUpdateError,
@@ -255,6 +255,24 @@ def _unscanned_warning(scan) -> List[ExtractionWarning]:
     )]
 
 
+async def _read_bounded_upload(file: UploadFile) -> bytes:
+    """Read at most the configured file limit plus one sentinel byte."""
+    if file.size is not None and file.size > MAX_UPLOAD_BYTES:
+        await file.close()
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"File exceeds the {MAX_UPLOAD_BYTES}-byte upload limit.",
+        )
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        await file.close()
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"File exceeds the {MAX_UPLOAD_BYTES}-byte upload limit.",
+        )
+    return content
+
+
 @app.get("/api/health", response_model=HealthResponse)
 def health_check():
     """Public liveness probe; expose no catalog or customer activity counts."""
@@ -435,7 +453,7 @@ async def create_rfq(
     try:
         if file:
             read_started = time.perf_counter()
-            content = await file.read()
+            content = await _read_bounded_upload(file)
             upload_read_ms = (time.perf_counter() - read_started) * 1000
             filename = file.filename or "upload.xlsx"
             # 1. Attachment security scan
@@ -1004,7 +1022,7 @@ async def v1_extract_rfq(
         )
 
     if file:
-        content = await file.read()
+        content = await _read_bounded_upload(file)
         filename = file.filename or "upload.dat"
         # 1. Attachment security scan
         scan = clamav_scanner.scan_bytes(content, filename=filename)

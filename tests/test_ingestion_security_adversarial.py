@@ -52,6 +52,48 @@ def test_v1_extract_blocks_eicar_attachment(client):
     assert "Security alert: Malicious attachment quarantined" in response.json()["detail"]
 
 
+@pytest.mark.parametrize("endpoint", ["/api/rfqs", "/v1/rfqs/extract"])
+def test_rfq_upload_endpoints_reject_oversized_files_before_processing(client, endpoint):
+    from rfq_assistant.ingestion.validator import MAX_UPLOAD_BYTES
+
+    payload = b"x" * (MAX_UPLOAD_BYTES + 1)
+    response = client.post(
+        endpoint,
+        files={"file": ("oversized.txt", io.BytesIO(payload), "text/plain")},
+    )
+    assert response.status_code == 413
+    assert "upload limit" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_bounded_upload_reader_never_requests_unbounded_bytes():
+    from fastapi import HTTPException
+    from rfq_assistant.api.app import _read_bounded_upload
+    from rfq_assistant.ingestion.validator import MAX_UPLOAD_BYTES
+
+    class UnknownSizeUpload:
+        size = None
+
+        def __init__(self):
+            self.requested_size = None
+            self.closed = False
+
+        async def read(self, size=-1):
+            self.requested_size = size
+            return b"x" * size
+
+        async def close(self):
+            self.closed = True
+
+    upload = UnknownSizeUpload()
+    with pytest.raises(HTTPException) as exc_info:
+        await _read_bounded_upload(upload)
+
+    assert exc_info.value.status_code == 413
+    assert upload.requested_size == MAX_UPLOAD_BYTES + 1
+    assert upload.closed
+
+
 def test_clamav_protected_mode_fail_closed_on_outage():
     """When protected_mode is enabled, daemon unavailability strictly fails closed."""
     # Use invalid port where no daemon is running
