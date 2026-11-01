@@ -89,6 +89,10 @@ Keep private customer data out of the public repo and CI artifacts.
 
 Stop or narrow scope if unflagged critical mistakes occur. No invented ROI percentage or unsupported claim of "faster quotes."
 
+### Record feedback after the demo
+
+Use the [operator feedback record](OPERATOR_FEEDBACK_FORM.md) to capture the buyer's workflow observations and any authorized evaluation measurements. The form is a blank template; keep completed records and approved customer evidence outside this repository. A demo conversation alone is not a pilot result.
+
 ### Recording checklist
 
 - Start with title card: **RFQ Assistant | Synthetic quotation preparation example**.
