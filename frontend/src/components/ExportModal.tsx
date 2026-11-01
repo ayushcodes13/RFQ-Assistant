@@ -109,9 +109,9 @@ export function ExportModal({
       if (verified.status === "PROCESSING" || verified.status === "FAILED") {
         throw new Error("RFQ processing has not completed successfully.");
       }
-      if (verified.unresolved_count > 0 && !allowPartial) {
-        throw new Error(`${verified.unresolved_count} line(s) still need review. Complete review or select partial draft.`);
-      }
+      // Keep the backend's specific, source-based blocker message as the
+      // operator's actionable error (e.g. missing UOM or catalog collision).
+      // The refreshed summary warns early, but does not replace this detail.
       const res = await exportWorksheet(caseData.case_id, allowPartial);
       setManifest(res);
       setDownloadUrl(resolveDownloadUrl(res.download_url));
