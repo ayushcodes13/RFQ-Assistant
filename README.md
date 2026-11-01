@@ -297,6 +297,30 @@ environment are not an OS/container sandbox. Ask the distributor to convert
 the workbook in its own isolated office environment and upload `.xlsx`.
 Supporting protected legacy conversion requires a separately isolated worker.
 
+### Workspace authentication boundary
+
+Anonymous browser access is allowed only in the **local development demo**
+when no privileged server API key or workspace credentials are configured.
+In a production Next.js server, or whenever `RFQ_ASSISTANT_API_KEY` is set,
+the Next.js proxy is fail-closed until both of these server-only variables exist:
+
+```bash
+RFQ_WORKSPACE_PASSWORD=<a-unique-high-entropy-password-at-least-16-characters>
+RFQ_WORKSPACE_SESSION_SECRET=<an-independent-random-secret-at-least-32-characters>
+```
+
+Operators visit `/login`. The proxy checks a signed, eight-hour,
+HTTP-only, same-site cookie on every request. In production, the cookie
+requires HTTPS. The login endpoint has a local ten-attempts-per-minute guard.
+
+**This is a single-operator/single-workspace protection layer, not a
+multi-user or multi-tenant identity and authorization system.** All authenticated
+visitors still share the backend API-key identity. For an external customer
+pilot, also require protected backend authentication, loopback/private API
+network access, a shared trusted-edge login limiter, actual per-user identities,
+tenant ownership checks and a reviewed retention policy. Do not expose the
+backend or this one-password workspace to unrelated distributors.
+
 ### Local intake protection
 
 The FastAPI process admits up to `RFQ_MAX_INTAKES_PER_MINUTE` (default 240)

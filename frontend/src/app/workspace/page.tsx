@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Header, AppTopbar, AppTab } from "@/components/Header";
 import { OverviewView } from "@/components/OverviewView";
 import { InboxView } from "@/components/InboxView";
@@ -13,6 +14,18 @@ import { getCase, listCases } from "@/services/api";
 import { RFQCase } from "@/types";
 
 export default function Home() {
+  const router = useRouter();
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/workspace-session", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((status: { authenticated?: boolean }) => {
+        if (active && !status.authenticated) router.replace("/login");
+      })
+      .catch(() => { if (active) router.replace("/login"); });
+    return () => { active = false; };
+  }, [router]);
+
   const [currentTab, setCurrentTab] = useState<AppTab>("overview");
   const [cases, setCases] = useState<RFQCase[]>([]);
   const [activeCase, setActiveCase] = useState<RFQCase | null>(null);
