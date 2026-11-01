@@ -521,7 +521,7 @@ export function WorkbenchView({
               </h2>
               <p className="mt-1 text-sm text-[#52656b]">
                 Check the marked rows against the original. {reviewPlan.exception_line_ids.length} exception rows still need individual review.
-                AI-proposed rows are eligible for the sample only after JSON, number, and source-quote checks pass.
+                Luna-proposed rows require individual source verification; only clean deterministic rows can enter the quick-review sample.
                 The sample spans {new Set(Object.values(reviewPlan.sample_rationale ?? {})).size} source and extraction groups; it reduces routine review, but does not statistically prove every line is correct.
                 {reviewPlan.remaining_line_ids.length > 0 && " After the sample is approved, you can approve the remaining clean rows together."}
                 {reviewPlan.sample_correction_found && " A sampled row needed correction, so the remaining clean rows must be checked individually."}

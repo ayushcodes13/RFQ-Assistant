@@ -219,7 +219,7 @@ def test_llm_fills_missing_manufacturer_but_keeps_human_review_warning(tmp_path)
     assert case.llm_review_call_count == 1
 
 
-def test_grounded_llm_rows_can_enter_the_review_sample_after_exact_matching(tmp_path):
+def test_grounded_llm_rows_require_individual_review_even_after_exact_matching(tmp_path):
     text = "Fabrikam Controls ABC-123 10 EA relay"
     catalog = CatalogRepository()
     catalog.add_item(CatalogItem(
@@ -241,8 +241,9 @@ def test_grounded_llm_rows_can_enter_the_review_sample_after_exact_matching(tmp_
 
     assert line.extraction_status.value == "EXTRACTED"
     assert line.match_status.value == "EXACT_MATCH"
-    assert plan.sample_line_ids == [line.line_id]
-    assert plan.exception_line_ids == []
+    assert plan.sample_line_ids == []
+    assert plan.exception_line_ids == [line.line_id]
+    assert not plan.can_batch_approve
 
 
 def test_repaired_llm_output_is_routed_as_an_exception_not_a_clean_sample(tmp_path):
