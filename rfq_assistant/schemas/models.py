@@ -75,7 +75,7 @@ class SourceCoverageUnit(BaseModel):
     filtered_regions: int = 0
     ocr_failures: int = 0
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]  # Pydantic descriptor typing limitation
     @property
     def coverage_basis(self) -> str:
         """Distinguish deterministic spreadsheet scanning from heuristic text regions."""
