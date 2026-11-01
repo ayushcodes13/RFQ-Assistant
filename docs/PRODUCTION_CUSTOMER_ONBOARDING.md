@@ -107,7 +107,7 @@ These are platform tasks, not one-time customer settings. They must be completed
 - [ ] Test restart, restore-from-backup, and recovery after a partial failure.
 - [ ] Track and resolve defects found in the customer's agreed test set before expanding scope.
 
-**Current gap:** The main intake path runs synchronously in the API process. It uses deterministic parsers and local storage. Scanned-PDF OCR is not configured. The current corpus proves behavior on synthetic fixtures only; it does not prove performance or accuracy on arbitrary customer files.
+**Current gap:** Background ingestion is enabled by default and runs through a SQLite-backed worker that is suitable for one host; the isolated local demo launcher deliberately uses synchronous mode. The service uses local storage, and deployment-scale queues, shared storage, monitoring and recovery are not established. OCR is bounded and local when the required engine is available, but is not enabled or validated as a customer service. Current corpus results are synthetic and do not prove performance or accuracy on arbitrary customer files.
 
 ## 6. Protect and operate the service
 
