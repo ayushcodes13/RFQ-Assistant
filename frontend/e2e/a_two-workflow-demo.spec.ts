@@ -128,9 +128,13 @@ test("distributor reviews manufacturer changes before buyer RFQ uses accepted it
   expect(generatedQuote.ok(), JSON.stringify(quoteBody)).toBe(true);
   expect(quoteBody.lines.map((row) => row.catalogue_part_id).sort(),
     JSON.stringify(quoteBody)).toEqual([skuOmron, skuWago].sort());
+  expect(quoteBody.lines.map((row) => row.requested_mpn).sort(),
+    JSON.stringify(quoteBody)).toEqual([mpnOmron, mpnWago].sort());
   const quote = page.locator('section[aria-labelledby="quote-preparation-heading"]');
-  await expect(quote.getByText(mpnOmron, { exact: true })).toBeVisible();
-  await expect(quote.getByText(mpnWago, { exact: true })).toBeVisible();
+  // Each header also contains manufacturer text in a nested span, so exact
+  // whole-element text matching is incorrect even when the RFQ is fully matched.
+  await expect(quote.getByRole("row").filter({ hasText: mpnOmron })).toBeVisible();
+  await expect(quote.getByRole("row").filter({ hasText: mpnWago })).toBeVisible();
   await expect(quote.getByRole("cell", { name: "35", exact: true })).toBeVisible();
   await expect(quote.getByRole("cell", { name: "42", exact: true })).toBeVisible();
   await quote.getByRole("button", { name: /Show evidence for line 1,/ }).first().click();
