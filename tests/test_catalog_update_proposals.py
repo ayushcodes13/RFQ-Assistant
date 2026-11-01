@@ -117,6 +117,188 @@ def test_rejected_change_does_not_mutate_catalog_and_can_be_revised(tmp_path):
     assert catalog.get_by_sku("SKU-EXISTING").stock_qty == 8
 
 
+def test_nullable_catalog_values_can_be_cleared_only_after_explicit_acceptance(
+    tmp_path,
+):
+    service, catalog, store = isolated_service(tmp_path)
+    proposal = service.stage(
+        content=canonical_csv(
+            "SKU-EXISTING,Siemens,6ES7134-6GD01-0BA1,Analog input module,,,"
+        ),
+        filename="manual-catalog-edit-SKU-EXISTING.csv",
+        actor="Distributor",
+        clear_fields=["list_price", "currency", "stock_qty"],
+    )[0]
+
+    assert proposal.review_status == "pending"
+    assert proposal.clear_fields == ["list_price", "currency", "stock_qty"]
+    assert proposal.proposed_values["list_price"] is None
+    assert proposal.proposed_values["currency"] is None
+    assert proposal.proposed_values["stock_qty"] is None
+    assert catalog.get_by_sku("SKU-EXISTING").list_price == 42.5
+    assert catalog.get_by_sku("SKU-EXISTING").currency == "USD"
+    assert catalog.get_by_sku("SKU-EXISTING").stock_qty == 8
+
+    accepted = service.review(proposal.proposal_id, actor="Distributor", accept=True)
+
+    active = catalog.get_by_sku("SKU-EXISTING")
+    assert accepted.review_status == "accepted"
+    assert accepted.reviewed_by == "Distributor"
+    assert active.list_price is None
+    assert active.currency is None
+    assert active.stock_qty is None
+    assert active.description == "Analog input module"
+    assert store.load_catalog_update_proposal(proposal.proposal_id)["clear_fields"] == [
+        "list_price",
+        "currency",
+        "stock_qty",
+    ]
+
+
+def test_clear_proposal_requires_existing_unique_item_and_nullable_fields(tmp_path):
+    service, catalog, _ = isolated_service(tmp_path)
+    for fields, csv, filename, message in [
+        (
+            ["description"],
+            "SKU-EXISTING,Siemens,6ES7134-6GD01-0BA1,Analog input module,42.50,USD,8",
+            "manual.csv",
+            "Only list price, currency, and stock can be cleared",
+        ),
+        (
+            ["list_price"],
+            "SKU-EXISTING,Siemens,6ES7134-6GD01-0BA1,Analog input module,,,",
+            "manual.csv",
+            "Clear price and currency together",
+        ),
+        (
+            ["stock_qty"],
+            "SKU-NEW,Siemens,6ES7134-6GD01-0BA2,New module,,,",
+            "manual.csv",
+            "uniquely matched existing catalog item",
+        ),
+        (
+            ["list_price"],
+            "SKU-EXISTING,Siemens,6ES7134-6GD01-0BA1,Analog input module,42.50,USD,8\n"
+            "SKU-NEW,Siemens,6ES7134-6GD01-0BA2,New module,1.00,USD,2",
+            "manual.csv",
+            "one structured catalog item at a time",
+        ),
+        (
+            ["stock_qty", "stock_qty"],
+            "SKU-EXISTING,Siemens,6ES7134-6GD01-0BA1,Analog input module,42.50,USD,",
+            "manual.csv",
+            "Only list price, currency, and stock can be cleared",
+        ),
+    ]:
+        try:
+            service.stage(
+                content=canonical_csv(csv),
+                filename=filename,
+                actor="Distributor",
+                clear_fields=fields,
+            )
+        except CatalogUpdateError as exc:
+            assert message in str(exc)
+        else:
+            raise AssertionError("Unsafe clear proposal should be rejected")
+
+    assert catalog.get_by_sku("SKU-EXISTING").list_price == 42.5
+
+
+def test_clear_fields_cannot_be_inferred_from_unstructured_or_multirow_input(tmp_path):
+    service, catalog, _ = isolated_service(tmp_path)
+    try:
+        service.stage(
+            content=b"",
+            filename="note.txt",
+            actor="Distributor",
+            pasted_text="Remove the price from SKU-EXISTING",
+            clear_fields=["list_price", "currency"],
+        )
+    except CatalogUpdateError as exc:
+        assert "one structured catalog item" in str(exc)
+    else:
+        raise AssertionError("Unstructured clear request must not be staged")
+    assert catalog.get_by_sku("SKU-EXISTING").list_price == 42.5
+
+
+def test_clear_fields_must_refer_to_populated_nullable_values(tmp_path):
+    service, catalog, _ = isolated_service(tmp_path)
+    item = catalog.get_by_sku("SKU-EXISTING")
+    item.stock_qty = None
+    catalog.upsert_item(item)
+    try:
+        service.stage(
+            content=canonical_csv(
+                "SKU-EXISTING,Siemens,6ES7134-6GD01-0BA1,Analog input module,42.50,USD,"
+            ),
+            filename="manual-catalog-edit-SKU-EXISTING.csv",
+            actor="Distributor",
+            clear_fields=["stock_qty"],
+        )
+    except CatalogUpdateError as exc:
+        assert "already empty: stock qty" in str(exc)
+    else:
+        raise AssertionError("An already-empty value must not create a clear proposal")
+
+
+def test_catalog_update_api_stages_an_explicit_clear_without_applying_it(
+    tmp_path, monkeypatch
+):
+    import importlib
+
+    api_module = importlib.import_module("rfq_assistant.api.app")
+    store = SQLiteStateStore(tmp_path / "api-clear-state.sqlite3")
+    catalog = CatalogRepository(state_store=store)
+    item = CatalogItem(
+        internal_sku="SKU-CLEAR",
+        manufacturer="Siemens",
+        manufacturer_part_number="6ES7134-6GD01-0BA1",
+        description="Analog input module",
+        list_price=42.5,
+        currency="USD",
+        stock_qty=8,
+        catalog_version="seed",
+    )
+    catalog.add_item(item)
+    store.replace_catalog(catalog.list_all())
+    service = CatalogUpdateService(catalog, store)
+    monkeypatch.setattr(api_module, "catalog_update_service", service)
+    monkeypatch.setattr(
+        api_module,
+        "catalog_update_source_storage",
+        DocumentStorage(tmp_path / "clear-source"),
+    )
+    monkeypatch.setattr(
+        api_module, "clamav_scanner", ClamAVScanner(protected_mode=False)
+    )
+    monkeypatch.delenv("REQUIRE_AUTH", raising=False)
+    monkeypatch.delenv("PILOT_API_KEYS", raising=False)
+    content = canonical_csv(
+        "SKU-CLEAR,Siemens,6ES7134-6GD01-0BA1,Analog input module,,,"
+    )
+
+    with TestClient(api_module.app) as client:
+        response = client.post(
+            "/api/catalogs/updates",
+            files={"file": ("manual-catalog-edit-SKU-CLEAR.csv", content, "text/csv")},
+            data={"clear_fields": "list_price,currency,stock_qty"},
+        )
+        assert response.status_code == 200, response.text
+        proposal = response.json()[0]
+        assert proposal["clear_fields"] == ["list_price", "currency", "stock_qty"]
+        assert catalog.get_by_sku("SKU-CLEAR").list_price == 42.5
+
+        accepted = client.post(
+            f"/api/catalogs/updates/{proposal['proposal_id']}/accept", json={}
+        )
+        assert accepted.status_code == 200, accepted.text
+        active = catalog.get_by_sku("SKU-CLEAR")
+        assert active.list_price is None
+        assert active.currency is None
+        assert active.stock_qty is None
+
+
 def test_incomplete_proposal_cannot_be_accepted(tmp_path):
     service, catalog, _ = isolated_service(tmp_path)
     proposal = service.stage(

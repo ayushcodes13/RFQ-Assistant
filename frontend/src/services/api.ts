@@ -242,11 +242,12 @@ export async function listCatalogUpdateProposals(): Promise<CatalogUpdateProposa
   return getJson<CatalogUpdateProposal[]>("/api/catalogs/updates", "Failed to load distributor data changes");
 }
 
-export async function stageCatalogUpdate(input: { text?: string; file?: File; revisionOf?: string }): Promise<CatalogUpdateProposal[]> {
+export async function stageCatalogUpdate(input: { text?: string; file?: File; revisionOf?: string; clearFields?: ("list_price" | "currency" | "stock_qty")[] }): Promise<CatalogUpdateProposal[]> {
   const formData = new FormData();
   if (input.text) formData.append("pasted_text", input.text);
   if (input.file) formData.append("file", input.file);
   if (input.revisionOf) formData.append("revision_of", input.revisionOf);
+  if (input.clearFields?.length) formData.append("clear_fields", input.clearFields.join(","));
   const res = await fetch(`${API_BASE}/api/catalogs/updates`, { method: "POST", body: formData });
   if (!res.ok) throw new Error(await readError(res, "Distributor data could not be processed"));
   return res.json();

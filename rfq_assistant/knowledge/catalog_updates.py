@@ -170,6 +170,7 @@ class CatalogUpdateService:
         pasted_text: str | None = None,
         revision_of: str | None = None,
         source_warnings: list[str] | None = None,
+        clear_fields: list[str] | None = None,
     ) -> list[CatalogUpdateProposal]:
         if not content and not pasted_text:
             raise CatalogUpdateError(
@@ -186,6 +187,10 @@ class CatalogUpdateService:
             raise CatalogUpdateError(
                 "The source is empty. Nothing was added or changed."
             )
+        if clear_fields and not filename.casefold().endswith(".csv"):
+            raise CatalogUpdateError(
+                "Clearing a value is available only for one structured catalog item at a time."
+            )
         if len(content) > MAX_UPDATE_SOURCE_BYTES:
             raise CatalogUpdateError(
                 "Distributor update source exceeds the 10 MB limit."
@@ -201,6 +206,9 @@ class CatalogUpdateService:
             raise CatalogUpdateError(
                 "No distributor item facts were found. The source is preserved for manual review."
             )
+        fields_to_clear = self._validate_clear_fields(
+            clear_fields or [], facts=facts, filename=filename
+        )
         batch_id = f"CATUP-{uuid.uuid4().hex[:12].upper()}"
         proposals = [
             self._compare_and_save(
@@ -212,9 +220,11 @@ class CatalogUpdateService:
                 batch_id=batch_id,
                 revision_of=revision_of,
                 source_warnings=source_warnings or [],
+                clear_fields=fields_to_clear,
             )
             for fact in facts
         ]
+
         def fact_identity(fact: CatalogFactProposal) -> Optional[str]:
             if fact.internal_sku:
                 return f"sku:{fact.internal_sku.casefold()}"
@@ -234,6 +244,37 @@ class CatalogUpdateService:
                 proposal.blocking_reasons.append("This source contains multiple rows for the same item identity.")
                 self.state_store.save_catalog_update_proposal(proposal.model_dump(mode="json"))
         return proposals
+
+    @staticmethod
+    def _validate_clear_fields(
+        requested: list[str], *, facts: list[CatalogFactProposal], filename: str
+    ) -> list[str]:
+        """Allow explicit clearing only in a single-row structured catalog edit."""
+        if not requested:
+            return []
+        allowed = {"list_price", "currency", "stock_qty"}
+        fields = list(
+            dict.fromkeys(value.strip() for value in requested if value.strip())
+        )
+        if len(fields) != len(requested) or any(
+            field not in allowed for field in fields
+        ):
+            raise CatalogUpdateError(
+                "Only list price, currency, and stock can be cleared."
+            )
+        if (
+            not filename.casefold().endswith(".csv")
+            or len(facts) != 1
+            or not facts[0].segment_id.startswith("csv-row-")
+        ):
+            raise CatalogUpdateError(
+                "Clearing a value is available only for one structured catalog item at a time."
+            )
+        if not facts[0].internal_sku:
+            raise CatalogUpdateError(
+                "A catalog SKU is required to clear a value safely."
+            )
+        return fields
 
     def _facts_from_source(self, content: bytes, filename: str):
         # A canonical distributor catalog CSV is already structured. Keep this
@@ -408,6 +449,7 @@ class CatalogUpdateService:
         batch_id: str,
         revision_of: str | None,
         source_warnings: list[str],
+        clear_fields: list[str] | None = None,
     ) -> CatalogUpdateProposal:
         all_items = self.catalog.list_all()
         if fact.internal_sku:
@@ -427,10 +469,41 @@ class CatalogUpdateService:
             matches = []
         conflict = len(matches) > 1
         current = matches[0] if len(matches) == 1 else None
+        if clear_fields:
+            if current is None:
+                raise CatalogUpdateError(
+                    "Values can be cleared only from one uniquely matched existing catalog item."
+                )
+            if (
+                "list_price" in clear_fields
+                and current.currency is not None
+                and "currency" not in clear_fields
+            ) or (
+                "currency" in clear_fields
+                and current.list_price is not None
+                and "list_price" not in clear_fields
+            ):
+                raise CatalogUpdateError(
+                    "Clear price and currency together when both are present."
+                )
+            empty_fields = [
+                field_name
+                for field_name in clear_fields
+                if getattr(current, field_name, None) is None
+            ]
+            if empty_fields:
+                raise CatalogUpdateError(
+                    "These fields are already empty: "
+                    + ", ".join(field.replace("_", " ") for field in empty_fields)
+                    + "."
+                )
         values = fact.model_dump(
             mode="json", exclude={"segment_id", "evidence_quote"}, exclude_none=True
         )
-        values.pop("currency", None) if values.get("currency") is None else None
+        for field_name in clear_fields or []:
+            values[field_name] = None
+        if values.get("currency") is None and "currency" not in (clear_fields or []):
+            values.pop("currency", None)
         required_fields = (
             "internal_sku",
             "manufacturer",
@@ -449,11 +522,9 @@ class CatalogUpdateService:
                 old = getattr(current, key, None)
                 normalized_old = old
                 normalized_new = value
-                if key == "list_price" and old is not None:
-                    normalized_old, normalized_new = (
-                        Decimal(str(old)),
-                        Decimal(str(value)),
-                    )
+                if key == "list_price":
+                    normalized_old = Decimal(str(old)) if old is not None else None
+                    normalized_new = Decimal(str(value)) if value is not None else None
                 if normalized_old != normalized_new:
                     changed_fields[key] = {"current": old, "proposed": value}
         if conflict:
@@ -475,6 +546,7 @@ class CatalogUpdateService:
             current_item=current,
             proposed_values=values,
             changed_fields=changed_fields,
+            clear_fields=clear_fields or [],
             blocking_reasons=blockers,
             source_warnings=source_warnings,
             created_by=actor,
