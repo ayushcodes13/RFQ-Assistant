@@ -115,11 +115,12 @@ def test_delete_case_removes_durable_state_and_file(tmp_path):
 
 
 def test_failed_pdf_case_persists_empty_source_coverage(tmp_path):
-    from fpdf import FPDF
+    import pymupdf as fitz
 
-    pdf = FPDF()
-    pdf.add_page()
-    content = bytes(pdf.output())
+    pdf = fitz.open()
+    pdf.new_page()
+    content = pdf.tobytes()
+    pdf.close()
     store = SQLiteStateStore(tmp_path / "state" / "rfq.sqlite3")
     manager = CaseManager(CatalogRepository(state_store=store), state_store=store)
 

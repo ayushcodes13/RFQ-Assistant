@@ -366,24 +366,26 @@ class TestPDFParser:
 
     def test_scanned_pdf_rejection_when_ocr_disabled(self):
         # A valid empty PDF without text layer simulates a scanned document
-        from fpdf import FPDF
-        pdf = FPDF()
-        pdf.add_page()
-        empty_pdf_bytes = bytes(pdf.output())
+        import pymupdf as fitz
+        pdf = fitz.open()
+        pdf.new_page()
+        empty_pdf_bytes = pdf.tobytes()
+        pdf.close()
 
         parser = get_parser(SourceType.PDF_NATIVE, allow_ocr=False)
         with pytest.raises(DocumentParserError, match="Scanned or image-only PDF detected"):
             parser.parse(empty_pdf_bytes, "scanned.pdf")
 
     def test_unparsed_numbered_product_row_is_retained_for_fallback_or_manual_review(self):
-        from fpdf import FPDF
+        import pymupdf as fitz
 
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Helvetica", size=12)
-        pdf.multi_cell(0, 10, "1 safety disconnect switch")
+        pdf = fitz.open()
+        page = pdf.new_page()
+        page.insert_textbox(fitz.Rect(30, 30, 560, 800), "1 safety disconnect switch", fontsize=12)
+        content = pdf.tobytes()
+        pdf.close()
         result = get_parser(SourceType.PDF_NATIVE, allow_ocr=False).parse(
-            bytes(pdf.output()), "unusual_native_rfq.pdf"
+            content, "unusual_native_rfq.pdf"
         )
 
         assert result.lines == []
@@ -393,14 +395,15 @@ class TestPDFParser:
         assert "disconnect switch" in candidate.text
 
     def test_unfamiliar_nonempty_pdf_text_is_retained_even_without_product_keywords(self):
-        from fpdf import FPDF
+        import pymupdf as fitz
 
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Helvetica", size=12)
-        pdf.multi_cell(0, 10, "Need a custom assembly for the remote panel")
+        pdf = fitz.open()
+        page = pdf.new_page()
+        page.insert_textbox(fitz.Rect(30, 30, 560, 800), "Need a custom assembly for the remote panel", fontsize=12)
+        content = pdf.tobytes()
+        pdf.close()
         result = get_parser(SourceType.PDF_NATIVE, allow_ocr=False).parse(
-            bytes(pdf.output()), "unfamiliar_rfq.pdf"
+            content, "unfamiliar_rfq.pdf"
         )
 
         assert len(result.candidate_segments) == 1
@@ -477,16 +480,16 @@ class TestPDFParser:
 
     def test_sparse_image_page_uses_bounded_local_ocr(self, monkeypatch):
         """Only image-heavy pages are OCRed and every OCR-derived row stays reviewable."""
-        import io
-        import fitz
-        from PIL import Image
+        import pymupdf as fitz
         from rfq_assistant.ingestion.parsers import pdf_parser
 
-        image_buffer = io.BytesIO()
-        Image.new("RGB", (600, 800), "white").save(image_buffer, format="PNG")
+        image_source = fitz.open()
+        image_source.new_page(width=600, height=800)
+        image_bytes = image_source[0].get_pixmap(alpha=False).tobytes("png")
+        image_source.close()
         pdf = fitz.open()
         page = pdf.new_page(width=595, height=842)
-        page.insert_image(page.rect, stream=image_buffer.getvalue())
+        page.insert_image(page.rect, stream=image_bytes)
         content = pdf.tobytes()
         pdf.close()
 
@@ -510,13 +513,13 @@ class TestPDFParser:
 
     def test_mixed_pdf_ocr_runs_only_on_the_scanned_page(self, monkeypatch):
         """Native text is retained while OCR is limited to the unreadable page."""
-        import io
-        import fitz
-        from PIL import Image
+        import pymupdf as fitz
         from rfq_assistant.ingestion.parsers import pdf_parser
 
-        image_buffer = io.BytesIO()
-        Image.new("RGB", (600, 800), "white").save(image_buffer, format="PNG")
+        image_source = fitz.open()
+        image_source.new_page(width=600, height=800)
+        image_bytes = image_source[0].get_pixmap(alpha=False).tobytes("png")
+        image_source.close()
         document = fitz.open()
         native_page = document.new_page(width=595, height=842)
         native_page.insert_textbox(
@@ -525,7 +528,7 @@ class TestPDFParser:
             fontsize=16,
         )
         scanned_page = document.new_page(width=595, height=842)
-        scanned_page.insert_image(scanned_page.rect, stream=image_buffer.getvalue())
+        scanned_page.insert_image(scanned_page.rect, stream=image_bytes)
         content = document.tobytes()
         document.close()
 
@@ -547,18 +550,18 @@ class TestPDFParser:
 
     def test_multi_page_ocr_opens_pdf_once_for_all_page_renders(self, monkeypatch):
         """Selected pages reuse one decoded PDF and keep OCR work per page."""
-        import io
-        import fitz
-        from PIL import Image
+        import pymupdf as fitz
         import pymupdf
         from rfq_assistant.ingestion.parsers import pdf_parser
 
-        image_buffer = io.BytesIO()
-        Image.new("RGB", (300, 400), "white").save(image_buffer, format="PNG")
+        image_source = fitz.open()
+        image_source.new_page(width=300, height=400)
+        image_bytes = image_source[0].get_pixmap(alpha=False).tobytes("png")
+        image_source.close()
         pdf = fitz.open()
         for _ in range(3):
             page = pdf.new_page(width=595, height=842)
-            page.insert_image(page.rect, stream=image_buffer.getvalue())
+            page.insert_image(page.rect, stream=image_bytes)
         content = pdf.tobytes()
         pdf.close()
 
@@ -584,14 +587,14 @@ class TestPDFParser:
 
     def test_page_triage_failure_sends_every_page_to_ocr(self, monkeypatch):
         """An unknown page classification must not silently trust native text alone."""
-        from fpdf import FPDF
+        import pymupdf as fitz
         from rfq_assistant.ingestion.parsers import pdf_parser
 
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Helvetica", size=12)
-        pdf.cell(0, 10, text="1 Siemens 6ES7214-1AG40-0XB0 PLC 2 EA")
-        content = bytes(pdf.output())
+        pdf = fitz.open()
+        page = pdf.new_page()
+        page.insert_text((72, 72), "1 Siemens 6ES7214-1AG40-0XB0 PLC 2 EA", fontsize=12)
+        content = pdf.tobytes()
+        pdf.close()
         calls = []
 
         def fail_triage(_page, _text):
@@ -620,8 +623,8 @@ class TestPDFParser:
     def test_rotated_scan_is_ocrd_in_reading_orientation_with_timing(self, rotation):
         """A rotated image-only page keeps readable OCR and rotation provenance."""
         import io
-        import fitz
-        from PIL import Image
+        import pymupdf as fitz
+        Image = pytest.importorskip("PIL.Image")
         from rfq_assistant.matching import ExactMatchEngine
         from rfq_assistant.matching.catalog import CatalogRepository
         from rfq_assistant.ingestion.parsers.pdf_parser import PDFParser
@@ -689,15 +692,15 @@ class TestPDFParser:
         )
 
     def test_image_heavy_page_is_blocked_when_ocr_disabled(self):
-        import io
-        import fitz
-        from PIL import Image
+        import pymupdf as fitz
 
-        image_buffer = io.BytesIO()
-        Image.new("RGB", (600, 800), "white").save(image_buffer, format="PNG")
+        image_source = fitz.open()
+        image_source.new_page(width=600, height=800)
+        image_bytes = image_source[0].get_pixmap(alpha=False).tobytes("png")
+        image_source.close()
         pdf = fitz.open()
         page = pdf.new_page(width=595, height=842)
-        page.insert_image(page.rect, stream=image_buffer.getvalue())
+        page.insert_image(page.rect, stream=image_bytes)
         content = pdf.tobytes()
         pdf.close()
 

@@ -4,8 +4,8 @@ All fixtures are marked explicitly as SYNTHETIC.
 
 import json
 from pathlib import Path
+import pymupdf as fitz
 import openpyxl
-from fpdf import FPDF
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -177,27 +177,27 @@ Line 4: 2 EA Omron S8VK-G24024
 def generate_native_pdf():
     """Generates a clean native PDF with table headers and lines."""
     pdf_path = FIXTURES_DIR / "formal_rfq_native.pdf"
-    pdf = FPDF(orientation="P", unit="mm", format="A4")
-    pdf.add_page()
-    pdf.set_font("Helvetica", "B", 14)
-    pdf.cell(0, 10, "REQUEST FOR QUOTATION (SYNTHETIC SAMPLE)", ln=True, align="L")
-    pdf.set_font("Helvetica", "I", 9)
-    pdf.set_text_color(100, 116, 139)
-    pdf.cell(0, 6, "Document Ref: RFQ-2026-SYNTH-01 | Issue Date: 2026-10-27 | Notice: SYNTHETIC DATA ONLY", ln=True, align="L")
-    pdf.ln(4)
-
-    # Table Header
-    pdf.set_text_color(15, 23, 42)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_fill_color(241, 245, 249)
-    col_widths = [15, 45, 45, 60, 15, 15]
+    pdf = fitz.open()
+    page = pdf.new_page(width=595, height=842)
+    page.insert_text((36, 48), "REQUEST FOR QUOTATION (SYNTHETIC SAMPLE)", fontsize=14)
+    page.insert_text(
+        (36, 66),
+        "Document Ref: RFQ-2026-SYNTH-01 | Issue Date: 2026-10-27 | Notice: SYNTHETIC DATA ONLY",
+        fontsize=8,
+        color=(0.39, 0.45, 0.55),
+    )
+    x_positions = [36, 62, 160, 270, 460, 510, 559]
+    table_top = 82
+    header_height = 28
+    row_height = 27
     headers = ["Line", "OEM / Brand", "Part Number", "Description", "Qty", "UOM"]
-    for i, h in enumerate(headers):
-        pdf.cell(col_widths[i], 8, h, border=1, fill=True, align="C" if i in [0, 4, 5] else "L")
-    pdf.ln()
+    for index, header in enumerate(headers):
+        left, right = x_positions[index], x_positions[index + 1]
+        rect = fitz.Rect(left, table_top, right, table_top + header_height)
+        page.draw_rect(rect, color=(0.45, 0.50, 0.58), fill=(0.94, 0.96, 0.98), width=0.5)
+        page.insert_text((left + 3, table_top + 18), header, fontsize=8)
 
     # Table Rows
-    pdf.set_font("Helvetica", "", 9)
     rows = [
         ["1", "Schneider Electric", "LC1D09BD", "TeSys D Contactor 9A 24VDC", "10", "EA"],
         ["2", "Schneider Electric", "LC1D25BD", "TeSys D Contactor 25A 24VDC", "4", "EA"],
@@ -208,12 +208,16 @@ def generate_native_pdf():
         ["7", "Phoenix Contact", "2900364", "PLC Relay Module SPDT 24VDC", "15", "EA"],
     ]
 
-    for row in rows:
-        for i, val in enumerate(row):
-            pdf.cell(col_widths[i], 7, val, border=1, align="C" if i in [0, 4, 5] else "L")
-        pdf.ln()
+    for row_index, row in enumerate(rows):
+        top = table_top + header_height + row_index * row_height
+        for index, value in enumerate(row):
+            left, right = x_positions[index], x_positions[index + 1]
+            rect = fitz.Rect(left, top, right, top + row_height)
+            page.draw_rect(rect, color=(0.65, 0.68, 0.72), width=0.4)
+            page.insert_text((left + 3, top + 17), value, fontsize=7.5)
 
-    pdf.output(str(pdf_path))
+    pdf.save(str(pdf_path))
+    pdf.close()
     print(f"Generated {pdf_path}")
 
 

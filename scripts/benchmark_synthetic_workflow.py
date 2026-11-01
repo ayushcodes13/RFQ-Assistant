@@ -21,7 +21,7 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
-from fpdf import FPDF
+import pymupdf as fitz
 from openpyxl import Workbook
 
 from rfq_assistant.cases.manager import CaseManager
@@ -101,30 +101,27 @@ def _xlsx_document(indices: range) -> bytes:
 
 
 def _pdf_document(indices: range) -> bytes:
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=12)
-    pdf.add_page()
-    pdf.set_font("Helvetica", size=8)
-    pdf.cell(
-        0,
-        6,
-        "SYNTHETIC RFQ - generated benchmark data only",
-        new_x="LMARGIN",
-        new_y="NEXT",
-    )
-    pdf.cell(
-        0,
-        6,
-        "Line OEM / Brand Part Number Description Qty UOM",
-        new_x="LMARGIN",
-        new_y="NEXT",
-    )
+    pdf = fitz.open()
+    page = pdf.new_page()
+    y = 38
+
+    def add_heading(target_page, top: float) -> float:
+        target_page.insert_text((36, top), "SYNTHETIC RFQ - generated benchmark data only", fontsize=9)
+        target_page.insert_text((36, top + 14), "Line OEM / Brand Part Number Description Qty UOM", fontsize=8)
+        return top + 30
+
+    y = add_heading(page, y)
     for index in indices:
+        if y > page.rect.height - 28:
+            page = pdf.new_page()
+            y = add_heading(page, 38)
         manufacturer, mpn, quantity, unit, description = _row(index)
         text = f"{index} {manufacturer} {mpn} {description} {quantity} {unit}"
-        pdf.set_x(pdf.l_margin)
-        pdf.multi_cell(pdf.w - pdf.l_margin - pdf.r_margin, 5, text)
-    return bytes(pdf.output())
+        page.insert_text((36, y), text, fontsize=8)
+        y += 12
+    content = pdf.tobytes()
+    pdf.close()
+    return content
 
 
 def _document(filename: str, indices: range) -> bytes:

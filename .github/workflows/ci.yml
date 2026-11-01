@@ -38,7 +38,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip setuptools
           pip install -e .[test]
 
       - name: Backend lint and format checks
@@ -115,6 +115,7 @@ jobs:
       - name: Install backend dependencies
         run: |
           python -m pip install --upgrade pip
+          python -m pip install --upgrade setuptools
           pip install -e .
 
       - name: Set up Node.js
@@ -169,22 +170,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.12"
 
       - name: Install backend and scanners
         run: |
-          python -m pip install --upgrade pip
-          pip install -e .[test]
+          python -m pip install --upgrade pip setuptools
+          pip install -e .
+          pip install bandit pip-audit
 
       - name: Audit Python dependencies
-        # Report the current dependency inventory without making a known
-        # vulnerable transitive baseline a false-green/false-red release gate.
-        # Ratchet this to blocking after the dependency upgrade PR resolves it.
-        continue-on-error: true
-        run: pip-audit
+        run: pip-audit --skip-editable
 
       - name: Scan Python source
         run: bandit -r rfq_assistant -ll

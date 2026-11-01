@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from fpdf import FPDF
+import pymupdf as fitz
 from openpyxl import Workbook
 
 RUN_DIR = tempfile.TemporaryDirectory(prefix="rfq-synthetic-e2e-")
@@ -108,12 +108,11 @@ def _document(kind: str, number: int) -> tuple[str | None, bytes | None, str | N
         orientation = "landscape" if number % 2 else "portrait"
         split_pages = number % 3 == 0
         layout_id = number % 4 + 1
-        pdf = FPDF(orientation="L" if orientation == "landscape" else "P", unit="mm", format="A4")
-        pdf.set_auto_page_break(auto=True, margin=15)
-        pdf.add_page()
-        pdf.set_font("Helvetica", "B", 14)
-        pdf.cell(0, 10, f"SYNTHETIC RFQ {number:02d} - LAYOUT {layout_id}", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("Helvetica", size=10)
+        width, height = (842, 595) if orientation == "landscape" else (595, 842)
+        pdf = fitz.open()
+        page = pdf.new_page(width=width, height=height)
+        page.insert_text((36, 42), f"SYNTHETIC RFQ {number:02d} - LAYOUT {layout_id}", fontsize=14)
+        y = 80
         formats = [
             "Qty: {qty} EA | Manufacturer: {manufacturer} | MPN: {mpn} | {description}",
             "{qty} EA - {manufacturer} - {mpn} - {description}",
@@ -123,14 +122,15 @@ def _document(kind: str, number: int) -> tuple[str | None, bytes | None, str | N
         row_format = formats[layout_id - 1]
         for index, ((manufacturer, mpn, description), quantity) in enumerate(rows):
             if split_pages and index == 1:
-                pdf.add_page()
-                pdf.set_font("Helvetica", "B", 10)
-                pdf.cell(0, 8, "Line | OEM / Brand | Description | Part Number | Qty | UOM", new_x="LMARGIN", new_y="NEXT")
-                pdf.set_font("Helvetica", size=10)
+                page = pdf.new_page(width=width, height=height)
+                page.insert_text((36, 42), "Line | OEM / Brand | Description | Part Number | Qty | UOM", fontsize=10)
+                y = 72
             row = row_format.format(qty=quantity, manufacturer=manufacturer, mpn=mpn, description=description)
-            pdf.set_x(10)
-            pdf.multi_cell(pdf.epw, 8, row)
-        return f"synthetic-{number}.pdf", bytes(pdf.output()), None
+            page.insert_textbox(fitz.Rect(36, y, width - 36, y + 42), row, fontsize=10)
+            y += 48
+        content = pdf.tobytes()
+        pdf.close()
+        return f"synthetic-{number}.pdf", content, None
     raise ValueError(f"Unsupported synthetic corpus format: {kind}")
 
 
