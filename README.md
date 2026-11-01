@@ -13,17 +13,16 @@
   <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-black?logo=next.js">
 </p>
 
+<p align="center"><a href="#the-proposed-experience">Workflow</a> · <a href="#architecture">Architecture</a> · <a href="#current-synthetic-verification">Testing</a> · <a href="#running-locally">Run locally</a></p>
+
 RFQ Assistant is a working local prototype for independent industrial component distributors. It turns pasted email, PDF, XLSX, and CSV requests into source-linked line items for human review and draft worksheet export.
 
-It is not a production-ready multi-tenant service and does not prove customer demand, extraction accuracy, time savings, or ROI. The local workspace is single-user. Do not upload real customer RFQs without an approved data-handling plan.
+It is a single-user local prototype, not a production-ready multi-tenant service. Screenshots below use synthetic RFQ data; landing imagery is illustrative. They do not prove customer demand, extraction accuracy, time savings, or ROI. Do not upload real customer RFQs without an approved data-handling plan.
 
-## Product screenshots
-
-Screenshots show the local app with synthetic inputs. Landing imagery is illustrative.
-
-| Landing page | Working review workspace |
-| --- | --- |
-| ![RFQ Assistant landing page](docs/screenshots/readme-landing.png) | ![RFQ Assistant workbench with synthetic rows and review warnings](docs/screenshots/readme-workbench.png) |
+<p align="center">
+  <img src="docs/screenshots/readme-landing.jpg" width="1000" alt="RFQ Assistant landing page with illustrative industrial parts imagery and a sample request preview" />
+</p>
+<p align="center"><em>Landing page · illustrative artwork and sample data</em></p>
 
 ## The problem we are testing
 
@@ -52,6 +51,15 @@ A distributor receives an RFQ through an email, PDF bill of materials, spreadshe
        Human sends through normal tools
 
 **Never auto-send a quote. Never invent part numbers, prices, technical equivalence, inventory, or lead time.**
+
+### The workspace starts with a clear queue
+
+The overview shows open requests, lines that still need review, and cases ready for draft preparation. It gives the operator a starting point without presenting inferred sales or availability figures.
+
+<p align="center">
+  <img src="docs/screenshots/readme-overview.jpg" width="1000" alt="RFQ Assistant overview showing one synthetic request that needs review" />
+</p>
+<p align="center"><em>Overview · one synthetic request awaiting review</em></p>
 
 ## Architecture
 
@@ -108,12 +116,32 @@ SQLite and its worker are local, single-host prototype infrastructure. A custome
 
 ## First product slice
 
-- Accept pasted email text and CSV/XLSX/PDF files.
-- Produce editable, source-linked RFQ rows: part number, description, quantity, unit, notes, and extraction warnings.
-- Import a small distributor-provided catalog CSV for **exact manufacturer part number matches**.
-- Flag missing/contradictory data, duplicates, no-match lines, and possible equivalents as **review required**; no automatic engineering substitute.
-- Let an operator approve every row and export a quote-preparation XLSX/CSV plus an **unsent** email draft.
-- Record reviewer edits and a lightweight audit trail.
+### Review extracted lines
+
+Paste email text or add a CSV, XLSX, or PDF. The app produces editable, source-linked rows with quantity, unit, manufacturer, part number, description, and extraction warnings. A small distributor catalog is used for exact manufacturer and part-number matching; similar descriptions never establish interchangeability.
+
+<p align="center">
+  <img src="docs/screenshots/readme-review.jpg" width="1000" alt="RFQ Assistant review table with five exact synthetic matches and one unresolved part request" />
+</p>
+<p align="center"><em>Review table · exact matches are distinct from the unresolved line</em></p>
+
+### Keep evidence with each value
+
+Missing or conflicting fields, duplicates, no-match lines, and possible equivalents stay flagged for review. Opening a row shows source location, raw text, and field-level evidence; edits and approvals are recorded in the case history.
+
+<p align="center">
+  <img src="docs/screenshots/readme-source-provenance.jpg" width="1000" alt="Line detail panel with source row, raw text, and field-level source evidence" />
+</p>
+<p align="center"><em>Line detail · source text and field-level evidence</em></p>
+
+### Export a draft only
+
+After review, an operator can create a quote-preparation XLSX/CSV and unsent email text. Unresolved rows block a validated export. A partial draft requires explicit opt-in and remains labeled for human review.
+
+<p align="center">
+  <img src="docs/screenshots/readme-export-gate.jpg" width="1000" alt="Draft export dialog showing unresolved lines and the validated export block" />
+</p>
+<p align="center"><em>Draft export · unresolved lines block validated output</em></p>
 
 Use one component family for the initial benchmark; do not attempt a universal industrial search engine in v0.
 
@@ -207,6 +235,10 @@ The browser talks to the same-origin Next.js API proxy. Configure
 `NEXT_PUBLIC_` variable for credentials. This proxy does not provide user or
 tenant authentication: the local demo is single-user, and a shared API key is
 not sufficient authorization for a distributor pilot.
+
+<details>
+<summary>Advanced Luna provider settings</summary>
+
 When enabling the optional Luna fallback, `RFQ_LLM_DEPLOYMENT_VERSION` may be
 set to an immutable provider deployment revision to enable retry-safe caching
 of validated model results. If the provider offers only a mutable model alias,
@@ -234,6 +266,9 @@ the URL, pacing remains process-local. Configure `RFQ_LLM_MAX_CONCURRENT_REQUEST
 rejects a call, the affected extraction goes to human review. Global pacing is
 shared when Redis is configured; concurrency limits and the circuit breaker
 remain process-local and require separately coordinated deployment settings.
+
+</details>
+
 Open `http://localhost:3000` for the product landing page and `http://localhost:3000/workspace` for the RFQ workspace. The workspace supports RFQ intake, line-level provenance review, catalog browsing, approval, and draft worksheet export.
 
 ### Client demo
