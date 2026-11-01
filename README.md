@@ -253,6 +253,17 @@ the processes started by this script with `./scripts/demo.sh stop`. Synthetic
 drag-and-drop examples are in `demo-data/` (email text, PDF, and XLSX). The
 catalog is preloaded from `fixtures/catalogs/` in a fresh demo database.
 
+### Local intake protection
+
+The FastAPI process admits up to `RFQ_MAX_INTAKES_PER_MINUTE` (default 240)
+expensive POST requests per 60-second rolling window across RFQ uploads,
+catalog imports and the v1 extraction endpoint. Excess requests receive HTTP 429
+with `Retry-After` before the application reads and processes their upload.
+This is a **single-process resource guard**, not tenant throttling or a
+distributed security boundary. Customer deployment requires authenticated
+ingress and an edge/shared rate limiter; set a smaller operational cap only
+after representative workload testing.
+
 ### Local persistence
 
 The API stores RFQ cases, extracted lines, audit events, and the imported catalog
