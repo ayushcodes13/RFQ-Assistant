@@ -1,8 +1,10 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function WorkspaceLogin() {
+  const router = useRouter();
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
@@ -23,7 +25,7 @@ export default function WorkspaceLogin() {
         const body: { detail?: string } = await response.json().catch(() => ({}));
         throw new Error(body.detail || "Could not sign in.");
       }
-      window.location.assign("/workspace");
+      router.replace("/workspace");
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "Could not sign in.");
       setPassword("");
