@@ -1,9 +1,32 @@
 import { expect, test } from "@playwright/test";
 
 test("nullable catalog values clear through an explicit reviewed proposal", async ({ page }) => {
+  const sku = `E2E-CLEAR-${Date.now()}`;
+  const seedCsv = [
+    "internal_sku,manufacturer,manufacturer_part_number,description,list_price,currency,stock_qty",
+    `${sku},Synthetic Parts,E2E-CLEAR-MPN,Temporary clear test item,42.50,USD,8`,
+  ].join("\r\n");
+
+  const staged = await page.request.post("/api/proxy/api/catalogs/updates", {
+    multipart: {
+      file: {
+        name: `${sku}.csv`,
+        mimeType: "text/csv",
+        buffer: Buffer.from(seedCsv),
+      },
+    },
+  });
+  expect(staged.ok()).toBe(true);
+  const [seedProposal] = await staged.json();
+  const acceptedSeed = await page.request.post(
+    `/api/proxy/api/catalogs/updates/${seedProposal.proposal_id}/accept`,
+    { data: {} },
+  );
+  expect(acceptedSeed.ok()).toBe(true);
+
   await page.goto("/workspace");
   await page.getByRole("button", { name: "Catalog" }).click();
-  await page.getByRole("button", { name: "Edit SKU-SCH-001" }).click();
+  await page.getByRole("button", { name: `Edit ${sku}` }).click();
 
   const dialog = page.getByRole("dialog", { name: "Edit item" });
   await dialog.getByRole("checkbox", { name: /Clear list price/ }).check();
@@ -12,8 +35,8 @@ test("nullable catalog values clear through an explicit reviewed proposal", asyn
   await expect(dialog).toBeHidden();
 
   await page.locator("#main-content").getByRole("button", { name: "Update data" }).click();
-  const proposal = page.getByRole("article").filter({ hasText: "SKU-SCH-001" });
-  await expect(proposal.getByText("This proposal clears the stored list price and stock qty.")).toBeVisible();
+  const proposal = page.getByRole("article").filter({ hasText: sku });
+  await expect(proposal.getByText("This proposal clears the stored list price and currency and stock qty.")).toBeVisible();
   await expect(proposal.getByRole("row", { name: /list price.*Clear stored value/ })).toBeVisible();
   await expect(proposal.getByRole("row", { name: /stock qty.*Clear stored value/ })).toBeVisible();
 
@@ -21,11 +44,11 @@ test("nullable catalog values clear through an explicit reviewed proposal", asyn
   const response = await page.request.get("/api/proxy/api/catalogs");
   expect(response.ok()).toBe(true);
   const items = await response.json();
-  const item = items.find((row: { internal_sku: string }) => row.internal_sku === "SKU-SCH-001");
+  const item = items.find((row: { internal_sku: string }) => row.internal_sku === sku);
   expect(item.list_price).toBeNull();
   expect(item.currency).toBeNull();
   expect(item.stock_qty).toBeNull();
   expect(item.description).toBeTruthy();
-  expect(item.manufacturer).toBe("Schneider Electric");
-  expect(item.manufacturer_part_number).toBe("LC1D09BD");
+  expect(item.manufacturer).toBe("Synthetic Parts");
+  expect(item.manufacturer_part_number).toBe("E2E-CLEAR-MPN");
 });
