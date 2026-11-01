@@ -192,11 +192,13 @@ class CaseManager:
 
         # The queued case already exists durably, so expose the real first
         # worker stage before the second, defensive upload validation pass.
+        case: RFQCase
         if _existing_case_id:
             case_id = _existing_case_id
-            case = self._cases.get(case_id)
-            if case is None:
+            existing_case = self._cases.get(case_id)
+            if existing_case is None:
                 raise DocumentParserError("The queued RFQ case no longer exists.")
+            case = existing_case
             if case.status != CaseStatus.PROCESSING:
                 return case
             require_lease()
@@ -593,7 +595,11 @@ class CaseManager:
             actor=actor, _defer_processing=True,
             intake_warnings=intake_warnings,
         )
-        self.state_store.enqueue_ingestion_job(case.case_id, case.source_file.sha256_digest)
+        if case.source_file is None:
+            raise RuntimeError("The queued RFQ case was created without source metadata.")
+        self.state_store.enqueue_ingestion_job(
+            case.case_id, case.source_file.sha256_digest
+        )
         return case
 
     def create_case_from_uploads(
@@ -837,8 +843,13 @@ class CaseManager:
                 continue
             quantities = {line.quantity for line in duplicates}
             manufacturers = {
-                normalize_manufacturer(line.requested_manufacturer).casefold()
-                for line in duplicates if normalize_manufacturer(line.requested_manufacturer)
+                manufacturer.casefold()
+                for line in duplicates
+                if (
+                    manufacturer := normalize_manufacturer(
+                        line.requested_manufacturer
+                    )
+                )
             }
             revisions = set()
             for line in duplicates:
