@@ -4,7 +4,6 @@ Maps RFQ cases, supplier quotations, and approved customer quotations
 into ERPNext standard Frappe DocTypes without copying GPL-3.0 code.
 """
 
-from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
@@ -43,7 +42,11 @@ def map_proposed_quote_to_erpnext(quote: ProposedQuote) -> Dict[str, Any]:
     total = 0.0
 
     for line in quote.lines:
-        rate = float(line.unit_price or Decimal("0.0"))
+        if line.unit_price is None:
+            raise ValueError("An ERPNext quotation item requires an authoritative unit price.")
+        if line.quantity is None:
+            raise ValueError("An ERPNext quotation item requires a confirmed quantity.")
+        rate = float(line.unit_price)
         qty = float(line.quantity)
         amount = rate * qty
         total += amount

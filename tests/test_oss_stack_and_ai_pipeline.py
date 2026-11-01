@@ -23,7 +23,10 @@ from rfq_assistant.api.app import app
 from rfq_assistant.ingestion.excel import ExcelBOMInspector
 from rfq_assistant.ingestion.malware import ClamAVScanner, EICAR_SIGNATURE
 from rfq_assistant.integrations.erpnext import map_proposed_quote_to_erpnext
-from rfq_assistant.integrations.inventree import map_catalog_item_to_inventree
+from rfq_assistant.integrations.inventree import (
+    map_catalog_item_to_inventree,
+    map_quote_line_to_inventree_bom,
+)
 from rfq_assistant.matching.fuzzy import RapidFuzzCandidateEngine, canonical_mpn
 from rfq_assistant.quotation.validate import (
     ProposedQuote,
@@ -370,6 +373,33 @@ class TestDomainIntegrations:
         assert erp_quote["party_name"] == "Delta Engineering"
         assert erp_quote["total"] == 425.0
         assert erp_quote["status"] == "Submitted"
+
+    def test_incomplete_quote_does_not_create_zero_priced_erp_item(self):
+        quote = ProposedQuote(
+            quote_id="Q-ERP-INCOMPLETE",
+            case_id="RFQ-ERP-INCOMPLETE",
+            lines=[
+                QuoteLine(
+                    line_no=1,
+                    requested_mpn="LC1D09BD",
+                    quantity=Decimal("2"),
+                    unit_price=None,
+                )
+            ],
+        )
+
+        with pytest.raises(ValueError, match="authoritative unit price"):
+            map_proposed_quote_to_erpnext(quote)
+
+    def test_inventree_bom_mapping_requires_confirmed_quantity(self):
+        line = QuoteLine(
+            line_no=1,
+            requested_mpn="LC1D09BD",
+            quantity=None,
+        )
+
+        with pytest.raises(ValueError, match="confirmed quantity"):
+            map_quote_line_to_inventree_bom(line)
 
 
 class TestV1APIEndpoints:

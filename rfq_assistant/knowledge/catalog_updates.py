@@ -11,7 +11,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Protocol
+from typing import Any, Literal, Optional, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -457,7 +457,7 @@ class CatalogUpdateService:
                 if normalized_old != normalized_new:
                     changed_fields[key] = {"current": old, "proposed": value}
         if conflict:
-            kind = "conflict"
+            kind: Literal["new", "changed", "unchanged", "conflict"] = "conflict"
             blockers.append("More than one active catalog row has this identity.")
         elif current:
             kind = "changed" if changed_fields else "unchanged"
