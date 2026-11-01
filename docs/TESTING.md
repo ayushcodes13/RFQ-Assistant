@@ -10,6 +10,8 @@ Multipart ingress has a separate ASGI-level test matrix: reject an oversized dec
 
 The protected workspace browser flow also asserts that state-changing proxy requests with a foreign or missing `Origin` are rejected, while a same-origin authenticated request reaches the backend role check and authorized admin write.
 
+The browser suite checks baseline headers on the landing response: MIME sniffing is disabled, framing is denied, referrer data is restricted, DNS prefetch is off, and camera/microphone/geolocation are disabled. HSTS remains a TLS-edge responsibility.
+
 Storage path hardening includes adversarial traversal/symlink checks and an upgrade check that migrates pre-hash local case/file paths into the opaque hashed layout while preserving existing source bytes and logical metadata. This is a local storage compatibility test; it does not test a production migration across multiple application hosts.
 
 ## Golden fixture pack
