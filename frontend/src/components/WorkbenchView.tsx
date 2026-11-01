@@ -19,6 +19,7 @@ import { MotionWrapper } from "@/components/ui/MotionWrapper";
 import { SourcePreviewDialog } from "@/components/SourcePreviewDialog";
 import { PdfSourcePreviewDialog } from "@/components/PdfSourcePreviewDialog";
 import { ClarificationDraftDialog } from "@/components/ClarificationDraftDialog";
+import { AuditHistoryDialog } from "@/components/AuditHistoryDialog";
 import {
   approveRemainingValidatedLines,
   batchReviewLines,
@@ -144,6 +145,7 @@ export function WorkbenchView({
   const [showSourcePreview, setShowSourcePreview] = useState(false);
   const [showPdfSourcePreview, setShowPdfSourcePreview] = useState(false);
   const [showClarificationDraft, setShowClarificationDraft] = useState(false);
+  const [showAuditHistory, setShowAuditHistory] = useState(false);
   const closeSourcePreview = useCallback(() => setShowSourcePreview(false), []);
   const closePdfSourcePreview = useCallback(() => setShowPdfSourcePreview(false), []);
 
@@ -422,6 +424,12 @@ export function WorkbenchView({
               onClick={() => setShowClarificationDraft(true)}
             >
               Unsent clarification
+            </button>
+            <button
+              type="button" className="rfq-secondary self-start"
+              onClick={() => setShowAuditHistory(true)}
+            >
+              Activity history
             </button>
           <button
             onClick={onOpenExport}
@@ -1198,6 +1206,12 @@ export function WorkbenchView({
           rowNumber={selectedLine.source_locator.row_number}
           targetCells={Object.values(selectedLine.source_locator.field_source_cells ?? {})}
           onClose={closeSourcePreview}
+        />
+      )}
+      {showAuditHistory && (
+        <AuditHistoryDialog
+          caseId={caseData.case_id}
+          onClose={() => setShowAuditHistory(false)}
         />
       )}
       {showClarificationDraft && (
