@@ -73,6 +73,15 @@ def _number_appears(value: Decimal, text: str) -> bool:
     return False
 
 
+def source_excerpt_supports_price(text: str, amount: Decimal, currency: str | None) -> bool:
+    """An update can cite an authoritative price only when it states both price and currency."""
+    if not currency:
+        return False
+    return _number_appears(amount, text) and bool(
+        re.search(rf"(?<![A-Za-z]){re.escape(currency)}(?![A-Za-z])", text, flags=re.IGNORECASE)
+    )
+
+
 class GroundedQuoteProposalService:
     """Ask Luna to map already-retrieved evidence; code keeps all values authoritative."""
 
