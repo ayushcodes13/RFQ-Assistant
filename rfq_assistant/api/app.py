@@ -30,6 +30,7 @@ from fastapi.responses import JSONResponse, Response
 
 from rfq_assistant.agents.tools import ApprovalGateError, QuotationCommercialService
 from rfq_assistant.api.cors import configured_cors_origins
+from rfq_assistant.api.body_limit import MultipartBodyLimitMiddleware
 from rfq_assistant.api.intake_limit import IntakeRateLimiter
 from rfq_assistant.auth import (
     PilotUser,
@@ -96,6 +97,7 @@ DEFAULT_CATALOG_PATH = ROOT / "fixtures" / "catalogs" / "industrial_components_s
 MAX_CATALOG_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_RFQ_SOURCES_PER_CASE = 6
 MAX_RFQ_SOURCE_BYTES_PER_CASE = 25 * 1024 * 1024
+MAX_MULTIPART_BODY_BYTES = MAX_RFQ_SOURCE_BYTES_PER_CASE + 1024 * 1024
 
 
 class PNGResponse(Response):
@@ -199,6 +201,14 @@ app = FastAPI(
     version="0.2.0",
     description="Human-reviewed RFQ intake and quotation preparation assistant with OSS stack",
     lifespan=lifespan,
+)
+
+# Starlette parses and may spool multipart files before endpoint-level file
+# checks run. Cap the entire wire body first, with 1 MiB reserved for fields and
+# multipart framing beyond the 25 MiB source-content budget.
+app.add_middleware(
+    MultipartBodyLimitMiddleware,
+    max_bytes=MAX_MULTIPART_BODY_BYTES,
 )
 
 # This caps expensive admission in a single local API process. A real multi-host
