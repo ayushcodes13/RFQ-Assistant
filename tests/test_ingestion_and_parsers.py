@@ -712,6 +712,14 @@ class TestPDFParser:
 class TestTextAndEmailParser:
     """Verifies deterministic parsing of messy email bodies, vague references, and security inputs."""
 
+    def test_electrical_spec_token_parser_handles_long_digit_runs(self):
+        from rfq_assistant.ingestion.parsers.text_parser import (
+            _is_electrical_specification_token,
+        )
+
+        assert _is_electrical_specification_token("0" * 20_000 + "A" + "0" * 20_000)
+        assert not _is_electrical_specification_token("24VAC-not-a-part")
+
     def test_parse_messy_email_quote_request(self):
         file_path = SAMPLES_DIR / "messy_email_quote_request.txt"
         content = file_path.read_bytes()

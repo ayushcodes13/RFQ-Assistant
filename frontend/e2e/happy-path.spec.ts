@@ -165,7 +165,7 @@ test("open an extracted XLSX line at its source row and field cells", async ({ p
   await expect(page.getByRole("heading", { name: "Source navigation E2E" })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("row").nth(1)).toBeVisible();
   await page.getByRole("row").nth(1).click();
-  await page.getByRole("button", { name: "Open source row and cells" }).click();
+  await page.getByRole("button", { name: "View source evidence" }).click();
 
   const sourceDialog = page.getByRole("dialog", { name: /· row \d+/i });
   await expect(sourceDialog).toBeVisible();
@@ -190,9 +190,9 @@ test("open a PDF line at its original source page", async ({ page }) => {
   const lineItems = page.getByRole("region", { name: "Line items" });
   await expect(lineItems.getByRole("row").nth(1)).toBeVisible();
   await lineItems.getByRole("row").nth(1).click();
-  await page.getByRole("button", { name: "View original page" }).click();
+  await page.getByRole("button", { name: "View source evidence" }).click();
 
-  const sourceDialog = page.getByRole("dialog", { name: /Page \d+/i });
+  const sourceDialog = page.getByRole("dialog", { name: /formal_rfq_native\.pdf.*page \d+/i });
   await expect(sourceDialog).toBeVisible();
   const sourceImage = sourceDialog.locator('img[alt*="formal_rfq_native.pdf"]');
   await expect(sourceImage).toBeVisible();

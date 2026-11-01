@@ -27,28 +27,25 @@ test("catalog replacement flags old matches and supports reviewed rematching", a
   expect(beforeLine.catalog_rematch_required).toBe(false);
 
   await page.getByRole("button", { name: "Catalog" }).click();
-  const catalogFile = page.locator("#catalog-file-input");
-  await catalogFile.setInputFiles({
-    name: "synthetic-replacement-catalog.csv",
-    mimeType: "text/csv",
-    buffer: Buffer.from(
-      "internal_sku,manufacturer,manufacturer_part_number,description,list_price,stock_qty\n" +
-      "SKU-SCH-001,Schneider Electric,LC1D09BD,Updated synthetic contactor,43.00,12\n",
-    ),
-  });
-  await page.getByLabel(/This replaces the active catalog snapshot/).check();
-  const importResponse = page.waitForResponse((response) =>
-    response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/api/catalogs/import"),
-  );
-  await page.getByRole("button", { name: "Import catalog" }).click();
-  const imported = await (await importResponse).json();
-  expect(imported.summary.catalog_version).toMatch(/^sha256:/);
-  await expect(page.getByText("Import results")).toBeVisible();
+  await page.getByRole("button", { name: "Edit SKU-SCH-001" }).click();
+  const editDialog = page.getByRole("dialog", { name: "Edit item" });
+  await editDialog.getByLabel("Description").fill("Updated synthetic contactor description");
+  await editDialog.getByRole("button", { name: "Create change proposal" }).click();
+  await expect(editDialog).toBeHidden();
+
+  // Catalog edits are staged as proposals; accepting one versions the catalog
+  // and invalidates approval against the previous snapshot.
+  await page.locator("#main-content").getByRole("button", { name: "Update data" }).click();
+  await expect(page.getByRole("heading", { name: "Update distributor data" })).toBeVisible();
+  const proposal = page.getByRole("article").filter({ hasText: "SKU-SCH-001" });
+  await expect(proposal).toBeVisible();
+  const priorVersion = beforeLine.matched_catalog_version;
+  await proposal.getByRole("button", { name: /^Accept proposal/ }).click();
 
   const staleResponse = await page.request.get(`/api/proxy/api/rfqs/${createdCase.case_id}/lines`);
   const [staleLine] = await staleResponse.json();
   expect(staleLine.catalog_rematch_required).toBe(true);
-  expect(staleLine.matched_catalog_version).not.toBe(imported.summary.catalog_version);
+  expect(staleLine.matched_catalog_version).toBe(priorVersion);
   const blockedExport = await page.request.post(`/api/proxy/api/rfqs/${createdCase.case_id}/exports`, {
     data: { case_id: createdCase.case_id, allow_partial: false, format: "xlsx", actor: "E2E reviewer" },
   });
@@ -65,7 +62,7 @@ test("catalog replacement flags old matches and supports reviewed rematching", a
   const rematchedResponse = await page.request.get(`/api/proxy/api/rfqs/${createdCase.case_id}/lines`);
   const [rematchedLine] = await rematchedResponse.json();
   expect(rematchedLine.catalog_rematch_required).toBe(false);
-  expect(rematchedLine.matched_catalog_version).toBe(imported.summary.catalog_version);
+  expect(rematchedLine.matched_catalog_version).not.toBe(priorVersion);
   expect(rematchedLine.review_decision).toBe("PENDING");
   const auditResponse = await page.request.get(`/api/proxy/api/rfqs/${createdCase.case_id}/audit`);
   expect((await auditResponse.json()).some((event: { action: string }) => event.action === "CATALOG_REMATCHED")).toBe(true);

@@ -312,8 +312,6 @@ class ExportGenerator:
                     horizontal="center" if col_idx in (1, 9, 10) else "right" if col_idx in (11, 12) else "left",
                     vertical="center",
                 )
-                if col_idx in (11, 12) and isinstance(cell.value, (int, float)):
-                    cell.number_format = "$#,##0.00"
 
         # Auto-adjust column widths
         for col in ws.columns:

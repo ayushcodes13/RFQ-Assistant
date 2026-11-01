@@ -30,6 +30,33 @@ KNOWN_OEMS = [
 VAGUE_ITEM_REFERENCE = r"sensor from last time|same as previous|the one from last|custom bracket|same .{1,50} as last time"
 
 
+def _is_electrical_specification_token(value: str) -> bool:
+    """Recognize quantity-like electrical specs without backtracking regexes."""
+    token = value.upper()
+    index = 0
+    while index < len(token) and "0" <= token[index] <= "9":
+        index += 1
+    if index == 0:
+        return False
+
+    if index < len(token) and token[index] == ".":
+        index += 1
+        decimal_start = index
+        while index < len(token) and "0" <= token[index] <= "9":
+            index += 1
+        if index == decimal_start:
+            return False
+
+    units = ("VA", "HZ", "KW", "MA", "V", "W", "A")
+    suffix = next((unit for unit in units if token.startswith(unit, index)), None)
+    if suffix is None:
+        return False
+    index += len(suffix)
+    while index < len(token) and "0" <= token[index] <= "9":
+        index += 1
+    return index == len(token)
+
+
 class TextParser(BaseDocumentParser):
     """Parses plain text RFQs and email bodies deterministically."""
 
@@ -328,7 +355,7 @@ class TextParser(BaseDocumentParser):
                 if re.fullmatch(r"\d+-pole|spst|spdt|dpst|dpdt|spsc|npdt", cleaned, re.IGNORECASE):
                     continue
                 # Exclude decimal quantity+unit specification tokens (e.g., 9A, 100mA, 5VA, 24V)
-                if re.fullmatch(r"\d+(?:\.\d+)?(?:A|VA|V|W|HZ|KW|MA)\d*", cleaned, re.IGNORECASE):
+                if _is_electrical_specification_token(cleaned):
                     continue
                 return cleaned
             # Allow numeric-only MPNs (e.g., Phoenix Contact 2900364) when long enough
