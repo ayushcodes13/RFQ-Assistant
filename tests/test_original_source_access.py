@@ -113,6 +113,30 @@ def test_spreadsheet_preview_bounds_rows_and_rejects_unknown_sheets(tmp_path, mo
     ).status_code == 422
 
 
+def test_csv_source_preview_highlights_the_recorded_row(tmp_path, monkeypatch):
+    api = importlib.import_module("rfq_assistant.api.app")
+    manager = CaseManager(catalog=CatalogRepository(), storage=DocumentStorage(tmp_path / "source"))
+    monkeypatch.setattr(api, "case_manager", manager)
+    monkeypatch.delenv("REQUIRE_AUTH", raising=False)
+    case = manager.create_case_from_upload(
+        filename="source.csv",
+        content=b"Manufacturer,MPN,Quantity\nPhoenix Contact,2900364,2\nPhoenix Contact,2900365,4\n",
+    )
+
+    response = TestClient(api.app).get(
+        f"/api/rfqs/{case.case_id}/source/preview",
+        params={"sheet_name": "Default", "row_number": 2},
+    )
+    assert response.status_code == 200, response.text
+    preview = response.json()
+    assert preview["sheet_name"] == "CSV"
+    assert preview["target_row"] == 2
+    target = next(row for row in preview["rows"] if row["row_number"] == 2)
+    assert target["is_target"] is True
+    assert [cell["value"] for cell in target["cells"]] == ["Phoenix Contact", "2900364", "2"]
+    assert all(cell["selected"] for cell in target["cells"])
+
+
 def test_pdf_page_preview_renders_only_the_case_scoped_page(tmp_path, monkeypatch):
     api = importlib.import_module("rfq_assistant.api.app")
     manager = CaseManager(catalog=CatalogRepository(), storage=DocumentStorage(tmp_path / "source"))

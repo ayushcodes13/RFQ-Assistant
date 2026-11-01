@@ -54,6 +54,7 @@ export function InboxView({ cases, loading, error, onSelectCase, onRefresh, onOp
         <div>
           <h1 className="rfq-page-title">RFQ inbox</h1>
           <p className="rfq-subtitle">Find a request, open its source, and continue review.</p>
+          <p className="mt-2 text-[12px] text-[#52656b]">{cases.filter((item) => item.status === "NEEDS_REVIEW" || item.status === "FAILED").length} requests need attention</p>
         </div>
         <div className="flex items-center gap-2">
           <button type="button" className="rfq-secondary" onClick={onRefresh} disabled={loading}>
@@ -99,7 +100,7 @@ export function InboxView({ cases, loading, error, onSelectCase, onRefresh, onOp
               <button type="button" className="rfq-list-row w-full grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_minmax(110px,150px)_90px_132px]" key={item.case_id} onClick={() => onSelectCase(item.case_id)} aria-label={`Open ${item.title || item.case_id}`}>
                 <span className="min-w-0">
                   <span className="block truncate text-[14px] font-medium text-[#1d2b30]">{item.title || item.case_id}</span>
-                  <span className="mt-0.5 block truncate text-[12px] text-[#52656b]">{item.customer_label || "Customer not specified"}{item.source_file?.file_name ? ` · ${item.source_file.file_name}` : ""}</span>
+                  <span className="mt-0.5 block truncate text-[12px] text-[#52656b]">Case {item.case_id} · {item.customer_label || "Customer not specified"}{item.source_file?.file_name ? ` · ${item.source_file.file_name}` : ""}</span>
                   {item.status === "PROCESSING" && <span className="mt-1 block truncate text-[12px] font-medium text-[#1d465f]">{processingStageLabel(item.processing_stage)}</span>}
                 </span>
                 <span className="hidden justify-self-start sm:inline-flex"><StatusBadge status={item.status} size="sm" /></span>

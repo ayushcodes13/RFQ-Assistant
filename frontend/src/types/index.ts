@@ -12,6 +12,7 @@ export type AuditAction = Schemas["AuditAction"];
 export type SourceLocator = Schemas["SourceLocator"];
 export type ExtractionWarning = Schemas["ExtractionWarning"];
 export type CatalogItem = Schemas["CatalogItem"];
+export type CatalogUpdateProposal = Schemas["CatalogUpdateProposal"];
 export type MatchCandidate = Schemas["MatchCandidate"];
 export type SourceFileMetadata = Schemas["SourceFileMetadata"];
 export type RFQLineItem = Schemas["RFQLineItem"] & {
@@ -28,6 +29,7 @@ export type RFQCaseSummary = Schemas["RFQCaseSummary"] & {
 };
 export type AuditEvent = Schemas["AuditEvent"] & { recorded_at: string };
 export type ExportManifest = Schemas["ExportManifest"] & { generated_at: string };
+export type ExportDocumentSummary = Schemas["ExportDocumentSummary"];
 export type RFQLineItemUpdate = Schemas["RFQLineItemUpdateRequest"];
 export type BatchReviewRequest = Schemas["BatchReviewRequest"];
 export type ReviewPlan = Schemas["ReviewPlan"];

@@ -4,6 +4,8 @@ import csv
 import io
 import math
 import hashlib
+import json
+import re
 import threading
 from typing import Dict, List, Optional
 from pydantic import ValidationError
@@ -36,6 +38,27 @@ class CatalogRepository:
                 self.state_store.delete_catalog()
             self._items_by_sku.clear()
             self._items_by_normalized_mpn.clear()
+
+    def upsert_item(self, item: CatalogItem) -> str:
+        """Apply one human-approved item and version the complete active snapshot."""
+        with self._lock:
+            next_items = dict(self._items_by_sku)
+            next_items[item.internal_sku] = item
+            canonical = [
+                value.model_dump(mode="json", exclude={"catalog_version"})
+                for _, value in sorted(next_items.items())
+            ]
+            version = "sha256:" + hashlib.sha256(
+                json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            versioned = [
+                value.model_copy(update={"catalog_version": version})
+                for _, value in sorted(next_items.items())
+            ]
+            if self.state_store:
+                self.state_store.replace_catalog(versioned)
+            self._replace_indexes(versioned)
+            return version
 
     def add_item(self, item: CatalogItem):
         with self._lock:
@@ -156,6 +179,10 @@ class CatalogRepository:
                     )
                 stock_qty = int(stock)
 
+            currency = (row.get("currency") or "").strip().upper() or None
+            if currency and not re.fullmatch(r"[A-Z]{3}", currency):
+                raise CatalogImportError(f"Catalog row {row_num} has invalid currency.")
+
             try:
                 item = CatalogItem(
                     internal_sku=sku,
@@ -163,6 +190,7 @@ class CatalogRepository:
                     manufacturer_part_number=mpn,
                     description=desc,
                     list_price=list_price,
+                    currency=currency,
                     stock_qty=stock_qty,
                     catalog_version=version,
                 )

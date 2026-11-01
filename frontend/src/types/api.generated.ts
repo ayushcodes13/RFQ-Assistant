@@ -44,6 +44,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalogs/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Catalog Updates
+         * @description List staged and reviewed distributor-data proposals.
+         */
+        get: operations["list_catalog_updates_api_catalogs_updates_get"];
+        put?: never;
+        /**
+         * Stage Catalog Update
+         * @description Preserve a distributor source and stage grounded proposals without applying them.
+         */
+        post: operations["stage_catalog_update_api_catalogs_updates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogs/updates/{proposal_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept Catalog Update
+         * @description Apply one complete, grounded proposal and invalidate stale RFQ matches.
+         */
+        post: operations["accept_catalog_update_api_catalogs_updates__proposal_id__accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogs/updates/{proposal_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject Catalog Update
+         * @description Record rejection while leaving active distributor records untouched.
+         */
+        post: operations["reject_catalog_update_api_catalogs_updates__proposal_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/catalogs/updates/{proposal_id}/source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Catalog Update Source
+         * @description Return the retained original source for an authenticated reviewer.
+         */
+        get: operations["get_catalog_update_source_api_catalogs_updates__proposal_id__source_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -153,7 +237,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Rfq Exports
+         * @description List the generated worksheet files belonging to one RFQ case.
+         */
+        get: operations["list_rfq_exports_api_rfqs__case_id__exports_get"];
         put?: never;
         /**
          * Export Rfq Worksheet
@@ -581,6 +669,15 @@ export interface components {
              */
             file: string;
         };
+        /** Body_stage_catalog_update_api_catalogs_updates_post */
+        Body_stage_catalog_update_api_catalogs_updates_post: {
+            /** File */
+            file?: string | null;
+            /** Pasted Text */
+            pasted_text?: string | null;
+            /** Revision Of */
+            revision_of?: string | null;
+        };
         /** Body_v1_approve_quote_draft_v1_quote_drafts__quote_id__approve_post */
         Body_v1_approve_quote_draft_v1_quote_drafts__quote_id__approve_post: {
             /**
@@ -637,6 +734,8 @@ export interface components {
              * @default v1
              */
             catalog_version: string | null;
+            /** Currency */
+            currency?: string | null;
             /** Description */
             description: string;
             /** Internal Sku */
@@ -649,6 +748,126 @@ export interface components {
             manufacturer_part_number: string;
             /** Stock Qty */
             stock_qty?: number | null;
+        };
+        /**
+         * CatalogUpdateProposal
+         * @description Unapplied distributor-data change with source evidence and review history.
+         */
+        CatalogUpdateProposal: {
+            /** Batch Id */
+            batch_id: string;
+            /** Blocking Reasons */
+            blocking_reasons?: string[];
+            /**
+             * Change Type
+             * @enum {string}
+             */
+            change_type: "new" | "changed" | "unchanged" | "conflict";
+            /** Changed Fields */
+            changed_fields?: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at?: string;
+            /** Created By */
+            created_by: string;
+            current_item?: components["schemas"]["CatalogItem"] | null;
+            /** Evidence Quote */
+            evidence_quote: string;
+            /** Proposal Id */
+            proposal_id: string;
+            /** Proposed Values */
+            proposed_values?: {
+                [key: string]: unknown;
+            };
+            /** Review Note */
+            review_note?: string | null;
+            /**
+             * Review Status
+             * @default pending
+             * @enum {string}
+             */
+            review_status: "pending" | "accepted" | "rejected";
+            /** Reviewed At */
+            reviewed_at?: string | null;
+            /** Reviewed By */
+            reviewed_by?: string | null;
+            /** Revision Of */
+            revision_of?: string | null;
+            source_locator: components["schemas"]["SourceLocator"];
+            /** Source Name */
+            source_name: string;
+            /** Source Sha256 */
+            source_sha256: string;
+            /** Source Warnings */
+            source_warnings?: string[];
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+        };
+        /**
+         * CatalogUpdateReviewRequest
+         * @description Optional reviewer note for an explicit proposal decision.
+         */
+        CatalogUpdateReviewRequest: {
+            /** Note */
+            note?: string | null;
+        };
+        /**
+         * ExportDocumentSummary
+         * @description A locally generated RFQ document available in a case's document list.
+         */
+        ExportDocumentSummary: {
+            /**
+             * Approved Lines
+             * @default 0
+             */
+            approved_lines: number;
+            /** Download Url */
+            download_url: string;
+            /** Export Id */
+            export_id: string;
+            /**
+             * File Available
+             * @default true
+             */
+            file_available: boolean;
+            /** File Name */
+            file_name: string;
+            /**
+             * Format
+             * @enum {string}
+             */
+            format: "xlsx" | "csv";
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at?: string;
+            /**
+             * Is Draft
+             * @default true
+             */
+            is_draft: boolean;
+            /** Problem */
+            problem?: string | null;
+            /**
+             * Total Lines
+             * @default 0
+             */
+            total_lines: number;
+            /**
+             * Unresolved Lines Omitted
+             * @default 0
+             */
+            unresolved_lines_omitted: number;
         };
         /**
          * ExportManifest
@@ -1417,6 +1636,184 @@ export interface operations {
             };
         };
     };
+    list_catalog_updates_api_catalogs_updates_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-API-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogUpdateProposal"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stage_catalog_update_api_catalogs_updates_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-API-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_stage_catalog_update_api_catalogs_updates_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogUpdateProposal"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_catalog_update_api_catalogs_updates__proposal_id__accept_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-API-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CatalogUpdateReviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogUpdateProposal"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_catalog_update_api_catalogs_updates__proposal_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-API-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CatalogUpdateReviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogUpdateProposal"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_catalog_update_source_api_catalogs_updates__proposal_id__source_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-API-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     health_check_api_health_get: {
         parameters: {
             query?: never;
@@ -1628,6 +2025,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_rfq_exports_api_rfqs__case_id__exports_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-API-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportDocumentSummary"][];
                 };
             };
             /** @description Validation Error */

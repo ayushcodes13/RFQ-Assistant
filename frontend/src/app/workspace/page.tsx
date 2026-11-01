@@ -7,11 +7,13 @@ import { OverviewView } from "@/components/OverviewView";
 import { InboxView } from "@/components/InboxView";
 import { WorkbenchView } from "@/components/WorkbenchView";
 import { CatalogView } from "@/components/CatalogView";
+import { CatalogUpdatesView } from "@/components/CatalogUpdatesView";
 import { IngestModal } from "@/components/IngestModal";
 import { ExportModal } from "@/components/ExportModal";
 import { ShortcutsModal } from "@/components/ShortcutsModal";
 import { getCase, listCases } from "@/services/api";
 import { RFQCase } from "@/types";
+import { CatalogItem } from "@/types";
 
 export default function Home() {
   const router = useRouter();
@@ -27,6 +29,7 @@ export default function Home() {
   }, [router]);
 
   const [currentTab, setCurrentTab] = useState<AppTab>("overview");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [cases, setCases] = useState<RFQCase[]>([]);
   const [activeCase, setActiveCase] = useState<RFQCase | null>(null);
   const [loadingCases, setLoadingCases] = useState(true);
@@ -35,7 +38,12 @@ export default function Home() {
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [exportSession, setExportSession] = useState(0);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [documentsRefresh, setDocumentsRefresh] = useState(0);
+  const [aiCatalogItem, setAiCatalogItem] = useState<CatalogItem | null>(null);
   const hasLoadedRef = useRef(false);
+
+  const toggleSidebar = () => setSidebarCollapsed((collapsed) => !collapsed);
+  const clearAiCatalogItem = useCallback(() => setAiCatalogItem(null), []);
 
   const fetchCases = useCallback(async () => {
     setLoadingCases(!hasLoadedRef.current);
@@ -91,6 +99,8 @@ export default function Home() {
         onTabChange={setCurrentTab}
         onOpenShortcuts={() => setIsShortcutsOpen(true)}
         cases={cases}
+        sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={toggleSidebar}
       />
       <div className="rfq-sheet">
         <AppTopbar currentTab={currentTab} activeCaseTitle={activeCase?.title} />
@@ -124,9 +134,11 @@ export default function Home() {
                 setIsExportOpen(true);
               }}
               onCaseUpdated={fetchCases}
+              documentsRefreshToken={documentsRefresh}
             />
           )}
-          {currentTab === "catalog" && <CatalogView />}
+          {currentTab === "catalog" && <CatalogView onOpenUpdates={() => { setAiCatalogItem(null); setCurrentTab("updates"); }} onAskAI={(item) => { setAiCatalogItem(item); setCurrentTab("updates"); }} />}
+          {currentTab === "updates" && <CatalogUpdatesView initialItem={aiCatalogItem} onInitialItemHandled={clearAiCatalogItem} />}
         </main>
       </div>
 
@@ -138,6 +150,7 @@ export default function Home() {
           caseData={activeCase}
           onClose={() => {
             setIsExportOpen(false);
+            setDocumentsRefresh((token) => token + 1);
             void fetchCases();
           }}
         />

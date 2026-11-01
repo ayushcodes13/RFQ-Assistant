@@ -231,6 +231,46 @@
         "title": "Body_import_catalog_api_catalogs_import_post",
         "type": "object"
       },
+      "Body_stage_catalog_update_api_catalogs_updates_post": {
+        "properties": {
+          "file": {
+            "anyOf": [
+              {
+                "format": "binary",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          },
+          "pasted_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pasted Text"
+          },
+          "revision_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Of"
+          }
+        },
+        "title": "Body_stage_catalog_update_api_catalogs_updates_post",
+        "type": "object"
+      },
       "Body_v1_approve_quote_draft_v1_quote_drafts__quote_id__approve_post": {
         "properties": {
           "approver_name": {
@@ -363,6 +403,17 @@
             "default": "v1",
             "title": "Catalog Version"
           },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
           "description": {
             "title": "Description",
             "type": "string"
@@ -409,6 +460,255 @@
           "description"
         ],
         "title": "CatalogItem",
+        "type": "object"
+      },
+      "CatalogUpdateProposal": {
+        "description": "Unapplied distributor-data change with source evidence and review history.",
+        "properties": {
+          "batch_id": {
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "blocking_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocking Reasons",
+            "type": "array"
+          },
+          "change_type": {
+            "enum": [
+              "new",
+              "changed",
+              "unchanged",
+              "conflict"
+            ],
+            "title": "Change Type",
+            "type": "string"
+          },
+          "changed_fields": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Changed Fields",
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "current_item": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence_quote": {
+            "title": "Evidence Quote",
+            "type": "string"
+          },
+          "proposal_id": {
+            "title": "Proposal Id",
+            "type": "string"
+          },
+          "proposed_values": {
+            "additionalProperties": true,
+            "title": "Proposed Values",
+            "type": "object"
+          },
+          "review_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Note"
+          },
+          "review_status": {
+            "default": "pending",
+            "enum": [
+              "pending",
+              "accepted",
+              "rejected"
+            ],
+            "title": "Review Status",
+            "type": "string"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed By"
+          },
+          "revision_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Of"
+          },
+          "source_locator": {
+            "$ref": "#/components/schemas/SourceLocator"
+          },
+          "source_name": {
+            "title": "Source Name",
+            "type": "string"
+          },
+          "source_sha256": {
+            "title": "Source Sha256",
+            "type": "string"
+          },
+          "source_warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Warnings",
+            "type": "array"
+          },
+          "version": {
+            "default": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "proposal_id",
+          "batch_id",
+          "source_name",
+          "source_sha256",
+          "source_locator",
+          "evidence_quote",
+          "change_type",
+          "created_by"
+        ],
+        "title": "CatalogUpdateProposal",
+        "type": "object"
+      },
+      "CatalogUpdateReviewRequest": {
+        "description": "Optional reviewer note for an explicit proposal decision.",
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "title": "CatalogUpdateReviewRequest",
+        "type": "object"
+      },
+      "ExportDocumentSummary": {
+        "description": "A locally generated RFQ document available in a case's document list.",
+        "properties": {
+          "approved_lines": {
+            "default": 0,
+            "title": "Approved Lines",
+            "type": "integer"
+          },
+          "download_url": {
+            "title": "Download Url",
+            "type": "string"
+          },
+          "export_id": {
+            "title": "Export Id",
+            "type": "string"
+          },
+          "file_available": {
+            "default": true,
+            "title": "File Available",
+            "type": "boolean"
+          },
+          "file_name": {
+            "title": "File Name",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "xlsx",
+              "csv"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "is_draft": {
+            "default": true,
+            "title": "Is Draft",
+            "type": "boolean"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "total_lines": {
+            "default": 0,
+            "title": "Total Lines",
+            "type": "integer"
+          },
+          "unresolved_lines_omitted": {
+            "default": 0,
+            "title": "Unresolved Lines Omitted",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "export_id",
+          "file_name",
+          "format",
+          "download_url"
+        ],
+        "title": "ExportDocumentSummary",
         "type": "object"
       },
       "ExportManifest": {
@@ -2213,6 +2513,381 @@
         "summary": "Import Catalog"
       }
     },
+    "/api/catalogs/updates": {
+      "get": {
+        "description": "List staged and reviewed distributor-data proposals.",
+        "operationId": "list_catalog_updates_api_catalogs_updates_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CatalogUpdateProposal"
+                  },
+                  "title": "Response List Catalog Updates Api Catalogs Updates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Catalog Updates"
+      },
+      "post": {
+        "description": "Preserve a distributor source and stage grounded proposals without applying them.",
+        "operationId": "stage_catalog_update_api_catalogs_updates_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_stage_catalog_update_api_catalogs_updates_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CatalogUpdateProposal"
+                  },
+                  "title": "Response Stage Catalog Update Api Catalogs Updates Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stage Catalog Update"
+      }
+    },
+    "/api/catalogs/updates/{proposal_id}/accept": {
+      "post": {
+        "description": "Apply one complete, grounded proposal and invalidate stale RFQ matches.",
+        "operationId": "accept_catalog_update_api_catalogs_updates__proposal_id__accept_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogUpdateReviewRequest",
+                "default": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogUpdateProposal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Accept Catalog Update"
+      }
+    },
+    "/api/catalogs/updates/{proposal_id}/reject": {
+      "post": {
+        "description": "Record rejection while leaving active distributor records untouched.",
+        "operationId": "reject_catalog_update_api_catalogs_updates__proposal_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogUpdateReviewRequest",
+                "default": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogUpdateProposal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reject Catalog Update"
+      }
+    },
+    "/api/catalogs/updates/{proposal_id}/source": {
+      "get": {
+        "description": "Return the retained original source for an authenticated reviewer.",
+        "operationId": "get_catalog_update_source_api_catalogs_updates__proposal_id__source_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Catalog Update Source"
+      }
+    },
     "/api/health": {
       "get": {
         "description": "Public liveness probe; expose no catalog or customer activity counts.",
@@ -2654,6 +3329,80 @@
       }
     },
     "/api/rfqs/{case_id}/exports": {
+      "get": {
+        "description": "List the generated worksheet files belonging to one RFQ case.",
+        "operationId": "list_rfq_exports_api_rfqs__case_id__exports_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ExportDocumentSummary"
+                  },
+                  "title": "Response List Rfq Exports Api Rfqs  Case Id  Exports Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Rfq Exports"
+      },
       "post": {
         "description": "Generates deterministic XLSX/CSV quote worksheet and email draft.",
         "operationId": "export_rfq_worksheet_api_rfqs__case_id__exports_post",

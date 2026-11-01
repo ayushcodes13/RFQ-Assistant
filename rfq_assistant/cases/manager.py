@@ -33,7 +33,7 @@ from rfq_assistant.ingestion.parsers.spreadsheet_parser import identify_columns
 from rfq_assistant.ingestion.source_segments import source_segments
 from rfq_assistant.matching import CatalogRepository, ExactMatchEngine
 from rfq_assistant.matching.normalizer import normalize_manufacturer, normalize_mpn
-from rfq_assistant.quotation.line_rules import blocking_line_issues
+from rfq_assistant.quotation.line_rules import blocking_line_issues, stock_shortfall_issue
 from rfq_assistant.persistence import StateStore
 from rfq_assistant.schemas.enums import (
     AuditAction,
@@ -1139,6 +1139,12 @@ class CaseManager:
                 f"Stale state / conflict: Line item version is {line.version}, but client expected version {update.expected_version}. Please refresh."
             )
 
+        if update.review_decision == ReviewDecision.APPROVED:
+            candidate_line = line.model_copy(update={"quantity": update.quantity if update.quantity is not None else line.quantity})
+            stock_issue = stock_shortfall_issue(candidate_line, self.catalog)
+            if stock_issue:
+                raise ValueError(f"Cannot approve line: {stock_issue}. Confirm current stock and update the catalog first.")
+
         # A request that repeats the currently visible values is not a write.
         # In particular, it must not invalidate another reviewer's snapshot.
         editable_values = (
@@ -1458,6 +1464,8 @@ class CaseManager:
             line.catalog_rematch_required
             or line.matched_catalog_version != catalog_item.catalog_version
         ):
+            return False
+        if stock_shortfall_issue(line, catalog):
             return False
         if line.extraction_status != ExtractionStatus.EXTRACTED:
             return False

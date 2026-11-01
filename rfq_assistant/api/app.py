@@ -3,15 +3,31 @@
 import hashlib
 import json
 import logging
+import mimetypes
 import os
-from pathlib import Path
 import time
+from decimal import Decimal
+from pathlib import Path
 from typing import List, Optional
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
+
+from fastapi import (
+    Body,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-from decimal import Decimal
+
 from rfq_assistant.agents.tools import ApprovalGateError, QuotationCommercialService
+from rfq_assistant.api.cors import configured_cors_origins
+from rfq_assistant.api.intake_limit import IntakeRateLimiter
 from rfq_assistant.auth import (
     PilotUser,
     env_flag,
@@ -19,41 +35,56 @@ from rfq_assistant.auth import (
     initialize_authentication,
     require_role,
 )
-from rfq_assistant.api.cors import configured_cors_origins
-from rfq_assistant.api.intake_limit import IntakeRateLimiter
 from rfq_assistant.cases.manager import CaseManager
 from rfq_assistant.exports import ExportGenerator, ExportValidationError
+from rfq_assistant.ingestion.ai_extraction import GroundedLLMExtractor
 from rfq_assistant.ingestion.excel import ExcelBOMInspector
 from rfq_assistant.ingestion.excel_values import render_excel_cell
 from rfq_assistant.ingestion.malware import ClamAVScanner
-from rfq_assistant.ingestion.storage import DocumentStorage
-from rfq_assistant.ingestion.ai_extraction import GroundedLLMExtractor
-from rfq_assistant.ingestion.worker import RFQIngestionWorker
 from rfq_assistant.ingestion.parsers.base import DocumentParserError
+from rfq_assistant.ingestion.storage import DocumentStorage
 from rfq_assistant.ingestion.validator import UploadValidationError
+from rfq_assistant.ingestion.worker import RFQIngestionWorker
+from rfq_assistant.knowledge.catalog_updates import (
+    CatalogUpdateError,
+    CatalogUpdateService,
+)
 from rfq_assistant.matching.catalog import CatalogImportError, CatalogRepository
 from rfq_assistant.matching.fuzzy import RapidFuzzCandidateEngine
 from rfq_assistant.persistence import SQLiteStateStore
-from rfq_assistant.quotation.validate import ProposedQuote, QuoteLine, SourceRef, validate_proposed_quote
+from rfq_assistant.quotation.proposal import (
+    GroundedQuoteProposalService,
+    QuoteProposalError,
+)
+from rfq_assistant.quotation.validate import (
+    ProposedQuote,
+    QuoteLine,
+    SourceRef,
+    calculate_quote_total,
+    validate_proposed_quote,
+)
 from rfq_assistant.schemas.enums import AuditAction
 from rfq_assistant.schemas.models import (
-    AuditEvent,
     ApproveRemainingRequest,
+    AuditEvent,
     BatchReviewRequest,
     CatalogItem,
+    CatalogUpdateProposal,
+    CatalogUpdateReviewRequest,
+    ExportDocumentSummary,
     ExportManifest,
     ExportRequest,
     ExtractionWarning,
     HealthResponse,
+    RematchLineRequest,
+    ReviewPlan,
     RFQCase,
     RFQCaseSummary,
     RFQLineItem,
     RFQLineItemUpdateRequest,
-    RematchLineRequest,
-    ReviewPlan,
-    SpreadsheetSourcePreview,
     SourcePreviewCell,
     SourcePreviewRow,
+    SpreadsheetSourcePreview,
 )
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -77,6 +108,12 @@ case_manager = CaseManager(
     llm_extractor=GroundedLLMExtractor.from_environment(),
 )
 export_generator = ExportGenerator(catalog=catalog_repo, base_export_dir=_storage_root / "exports")
+catalog_update_service = CatalogUpdateService(
+    catalog=catalog_repo,
+    state_store=state_store,
+    client=case_manager.llm_extractor.client if case_manager.llm_extractor else None,
+)
+catalog_update_source_storage = DocumentStorage(base_dir=_storage_root / "distributor_sources")
 clamav_scanner = ClamAVScanner()
 rapidfuzz_engine = RapidFuzzCandidateEngine()
 commercial_service = QuotationCommercialService()
@@ -157,7 +194,7 @@ except ValueError as exc:
 @app.middleware("http")
 async def cap_expensive_intake(request: Request, call_next):
     if request.method == "POST" and request.url.path in {
-        "/api/rfqs", "/api/catalogs/import", "/v1/rfqs/extract",
+        "/api/rfqs", "/api/catalogs/import", "/api/catalogs/updates", "/v1/rfqs/extract",
     }:
         allowed, retry_after = request.app.state.intake_rate_limiter.allow()
         if not allowed:
@@ -242,6 +279,110 @@ async def import_catalog(
 def list_catalog(current_user: PilotUser = Depends(get_current_user)):
     """Lists all catalog items in item master."""
     return catalog_repo.list_all()
+
+
+@app.get("/api/catalogs/updates", response_model=List[CatalogUpdateProposal])
+def list_catalog_updates(current_user: PilotUser = Depends(get_current_user)):
+    """List staged and reviewed distributor-data proposals."""
+    return catalog_update_service.list_proposals()
+
+
+@app.get("/api/catalogs/updates/{proposal_id}/source")
+def get_catalog_update_source(
+    proposal_id: str,
+    current_user: PilotUser = Depends(get_current_user),
+):
+    """Return the retained original source for an authenticated reviewer."""
+    proposal = catalog_update_service.get_proposal(proposal_id)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Catalog update proposal not found.")
+    suffix = Path(proposal.source_name).suffix.lower() or ".txt"
+    source = catalog_update_source_storage.get_file("catalog-updates", f"{proposal.source_sha256}{suffix}")
+    if source is None:
+        raise HTTPException(status_code=404, detail="The original distributor source is unavailable.")
+    source_type = mimetypes.guess_type(f"source{suffix}")[0] or "application/octet-stream"
+    return Response(
+        content=source,
+        media_type=source_type,
+        headers={
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": f'inline; filename="{proposal.proposal_id}{suffix}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.post("/api/catalogs/updates", response_model=List[CatalogUpdateProposal])
+async def stage_catalog_update(
+    file: Optional[UploadFile] = File(None),
+    pasted_text: Optional[str] = Form(None),
+    revision_of: Optional[str] = Form(None),
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
+):
+    """Preserve a distributor source and stage grounded proposals without applying them."""
+    if file is None and not (pasted_text and pasted_text.strip()):
+        raise HTTPException(status_code=400, detail="Paste a distributor note or upload a source file.")
+    filename = Path(file.filename or "distributor-update.txt").name if file else "pasted-distributor-update.txt"
+    content = await file.read(10 * 1024 * 1024 + 1) if file else pasted_text.encode("utf-8")
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Distributor update source exceeds the 10 MB limit.")
+    source_warnings: List[str] = []
+    if file:
+        scan = clamav_scanner.scan_bytes(content, filename=filename)
+        if _scan_blocks_intake(scan):
+            raise HTTPException(
+                status_code=400,
+                detail=("Security scan unavailable. Processing is blocked in protected mode."
+                        if not scan.scanned and clamav_scanner.protected_mode
+                        else f"Security alert: Malicious attachment quarantined ({scan.threat_name}). Processing blocked."),
+            )
+        if not scan.scanned:
+            source_warnings.append("No antivirus engine scanned this source. Review the original before accepting any changes.")
+    digest = hashlib.sha256(content).hexdigest()
+    suffix = Path(filename).suffix.lower() or ".txt"
+    safe_source_name = f"{digest}{suffix}"
+    try:
+        catalog_update_source_storage.save_file("catalog-updates", safe_source_name, content)
+        proposals = catalog_update_service.stage(
+            content=content,
+            filename=filename,
+            actor=current_user.name,
+            pasted_text=pasted_text if file is None else None,
+            revision_of=revision_of,
+            source_warnings=source_warnings,
+        )
+        return proposals
+    except (CatalogUpdateError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/catalogs/updates/{proposal_id}/accept", response_model=CatalogUpdateProposal)
+def accept_catalog_update(
+    proposal_id: str,
+    request: CatalogUpdateReviewRequest = Body(default=CatalogUpdateReviewRequest()),
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
+):
+    """Apply one complete, grounded proposal and invalidate stale RFQ matches."""
+    try:
+        proposal = catalog_update_service.review(proposal_id, actor=current_user.name, accept=True, note=request.note)
+        if proposal.current_item and proposal.current_item.catalog_version:
+            case_manager.handle_catalog_replacement(current_user.name, proposal.current_item.catalog_version)
+        return proposal
+    except CatalogUpdateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/catalogs/updates/{proposal_id}/reject", response_model=CatalogUpdateProposal)
+def reject_catalog_update(
+    proposal_id: str,
+    request: CatalogUpdateReviewRequest = Body(default=CatalogUpdateReviewRequest()),
+    current_user: PilotUser = Depends(require_role(["admin", "reviewer"])),
+):
+    """Record rejection while leaving active distributor records untouched."""
+    try:
+        return catalog_update_service.review(proposal_id, actor=current_user.name, accept=False, note=request.note)
+    except CatalogUpdateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -424,6 +565,7 @@ def get_pdf_source_page(
 ):
     """Render one bounded PDF page as a safe image for source verification."""
     import math
+
     import pymupdf
     if page_number < 1:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Page number must be positive.")
@@ -476,8 +618,13 @@ def get_spreadsheet_source_preview(
 ):
     """Return a small read-only worksheet window centered on source evidence."""
     import re
+
     import openpyxl
-    from openpyxl.utils.cell import column_index_from_string, coordinate_from_string, get_column_letter
+    from openpyxl.utils.cell import (
+        column_index_from_string,
+        coordinate_from_string,
+        get_column_letter,
+    )
 
     if not 1 <= row_number <= 5000:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Source row is outside workbook limits.")
@@ -488,10 +635,10 @@ def get_spreadsheet_source_preview(
     source = case_manager.storage.uploads_dir / case.case_id / case.source_file.file_name
     if not source.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original source file is missing.")
-    if source.suffix.lower() != ".xlsx":
+    if source.suffix.lower() not in {".xlsx", ".csv"}:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Inline source preview is available for XLSX workbooks. Open the original file to inspect this source.",
+            detail="Inline source preview is available for CSV and XLSX files. Open the original file to inspect this source.",
         )
 
     selected_cells = []
@@ -502,6 +649,48 @@ def get_spreadsheet_source_preview(
         if len(column) > 3 or cell_row > 5000:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Source cell is outside workbook limits.")
         selected_cells.append(coordinate.upper())
+
+    if source.suffix.lower() == ".csv":
+        import csv
+
+        try:
+            with source.open("r", encoding="utf-8-sig", newline="") as stream:
+                reader = csv.reader(stream, strict=True)
+                all_rows = []
+                for index, values in enumerate(reader, start=1):
+                    if index > 5000 or len(values) > 100:
+                        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="CSV exceeds source preview limits.")
+                    all_rows.append(values)
+            if not 1 <= row_number <= len(all_rows):
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Source row is not present in this CSV.")
+            for coordinate in selected_cells:
+                column_letters, cell_row = coordinate_from_string(coordinate)
+                if cell_row > len(all_rows) or column_index_from_string(column_letters) > len(all_rows[cell_row - 1]):
+                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Source cell is not present in this CSV.")
+            rows = []
+            for target_row in range(max(1, row_number - radius), min(len(all_rows), row_number + radius) + 1):
+                values = all_rows[target_row - 1]
+                cells = [
+                    SourcePreviewCell(
+                        coordinate=f"{get_column_letter(column)}{target_row}",
+                        value=value,
+                        selected=target_row == row_number and (not selected_cells or f"{get_column_letter(column)}{target_row}".upper() in selected_cells),
+                    )
+                    for column, value in enumerate(values, start=1)
+                ]
+                rows.append(SourcePreviewRow(row_number=target_row, is_target=target_row == row_number, cells=cells))
+            return SpreadsheetSourcePreview(
+                file_name=case.source_file.file_name,
+                sheet_name="CSV",
+                target_row=row_number,
+                target_cells=selected_cells,
+                rows=rows,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            log.warning("[rfq_csv_source_preview] failed case=%s error=%s", case_id, type(exc).__name__)
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Source CSV could not be previewed safely.") from exc
 
     workbook = cached_workbook = None
     try:
@@ -674,6 +863,17 @@ def delete_rfq(
 # ---------------------------------------------------------------------------
 # Export Endpoints
 # ---------------------------------------------------------------------------
+
+@app.get("/api/rfqs/{case_id}/exports", response_model=List[ExportDocumentSummary])
+def list_rfq_exports(
+    case_id: str,
+    current_user: PilotUser = Depends(get_current_user),
+):
+    """List the generated worksheet files belonging to one RFQ case."""
+    if not case_manager.get_case(case_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RFQ case not found.")
+    return export_generator.list_exports(case_id)
+
 
 @app.post("/api/rfqs/{case_id}/exports", response_model=ExportManifest)
 def export_rfq_worksheet(
@@ -891,6 +1091,10 @@ def v1_draft_quote(
 
     lines = case_manager.get_lines(case_id)
     quote_lines: List[QuoteLine] = []
+    buyer_quote_inputs = []
+    distributor_quote_records = []
+    quote_lines_by_number = {}
+    accepted_updates = catalog_update_service.list_proposals()
 
     for idx, line in enumerate(lines, start=1):
         # Look up price and provenance from authoritative catalog if matched
@@ -924,8 +1128,7 @@ def v1_draft_quote(
 
         match_status_str = "exact" if line.match_status.value == "EXACT_MATCH" else "unmatched"
 
-        quote_lines.append(
-            QuoteLine(
+        quote_line = QuoteLine(
                 line_no=idx,
                 requested_mpn=line.requested_mpn or "UNKNOWN",
                 requested_manufacturer=line.requested_manufacturer,
@@ -934,22 +1137,103 @@ def v1_draft_quote(
                 quantity=Decimal(str(line.quantity)) if line.quantity is not None else Decimal("0"),
                 unit=line.unit or "EA",
                 unit_price=unit_price,
-                currency=currency,
+                currency=(catalog_item.currency if catalog_item and catalog_item.currency else currency),
                 source_price_id=source_price_id,
                 match_status=match_status_str,
                 requires_human_review=line.review_decision.value != "APPROVED",
                 sources=sources,
             )
-        )
+        quote_lines.append(quote_line)
+        quote_lines_by_number[idx] = quote_line
+
+        if (
+            catalog_item
+            and unit_price is not None
+            and line.quantity is not None
+            and Decimal(str(line.quantity)) > 0
+            and match_status_str == "exact"
+        ):
+            source_id = f"CAT-{catalog_item.catalog_version}-{catalog_item.internal_sku}"
+            evidence_text = (
+                f"Internal SKU {catalog_item.internal_sku}; manufacturer {catalog_item.manufacturer}; "
+                f"MPN {catalog_item.manufacturer_part_number}; description {catalog_item.description}; "
+                f"list price {unit_price} {catalog_item.currency or currency}; stock {catalog_item.stock_qty}"
+            )
+            source_locator = {}
+            for proposal in accepted_updates:
+                current = proposal.current_item
+                if (
+                    proposal.review_status == "accepted"
+                    and current
+                    and current.internal_sku == catalog_item.internal_sku
+                    and current.catalog_version == catalog_item.catalog_version
+                    and current.list_price is not None
+                    and Decimal(str(current.list_price)) == unit_price
+                    and proposal.evidence_quote
+                ):
+                    source_id = f"CATUP-{proposal.proposal_id}"
+                    evidence_text = proposal.evidence_quote
+                    source_locator = proposal.source_locator.model_dump(mode="json")
+                    break
+
+            buyer_source_id = case.source_file.file_id if case.source_file else f"RFQ-{case_id}"
+            buyer_text = line.raw_text or line.source_locator.text_snippet or ""
+            if buyer_text:
+                buyer_quote_inputs.append({
+                    "line_no": idx,
+                    "source_id": buyer_source_id,
+                    "text": buyer_text,
+                    "requested_mpn": line.requested_mpn or "UNKNOWN",
+                    "quantity": str(line.quantity),
+                    "locator": line.source_locator.model_dump(mode="json"),
+                })
+                distributor_quote_records.append({
+                    "line_no": idx,
+                    "source_id": source_id,
+                    "evidence_text": evidence_text,
+                    "unit_price": str(unit_price),
+                    "currency": catalog_item.currency or currency,
+                    "locator": source_locator,
+                })
+                quote_line.sources.append(SourceRef(
+                    file_id=source_id,
+                    page=source_locator.get("page_number"),
+                    sheet=source_locator.get("sheet_name"),
+                    cell_range=", ".join((line.source_locator.field_source_cells or {}).values()) or None,
+                    text_excerpt=evidence_text[:500],
+                ))
 
     quote_id = f"QUOTE-{case_id.replace('RFQ-', '')}"
+    proposal_status = "not_configured" if distributor_quote_records else "no_retrieved_prices"
+    proposal_warnings = []
+    extractor = case_manager.llm_extractor
+    if extractor and distributor_quote_records:
+        try:
+            grounded_sources = GroundedQuoteProposalService(extractor.client).propose(
+                buyer_lines=buyer_quote_inputs,
+                distributor_records=distributor_quote_records,
+            )
+            for line_no, refs in grounded_sources.items():
+                quote_lines_by_number[line_no].sources = refs
+            proposal_status = "grounded"
+        except QuoteProposalError as exc:
+            proposal_status = "failed"
+            proposal_warnings.append(str(exc))
+    elif distributor_quote_records:
+        proposal_warnings.append(
+            "GPT-6 Luna quote evidence mapping is not configured. Values were copied only from the active catalog; configure Luna before treating this as a model-prepared draft."
+        )
+
     draft = ProposedQuote(
         quote_id=quote_id,
         case_id=case_id,
         customer_name=case.customer_label or "Valued Customer",
         currency=currency,
         source_state_hash=_rfq_source_snapshot_hash(case_id),
+        total_amount=calculate_quote_total(quote_lines),
         lines=quote_lines,
+        quote_proposal_status=proposal_status,
+        quote_proposal_warnings=proposal_warnings,
     )
 
     registered = commercial_service.register_draft(draft)
