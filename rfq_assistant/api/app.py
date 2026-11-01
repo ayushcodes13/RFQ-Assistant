@@ -6,6 +6,8 @@ import logging
 import mimetypes
 import os
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from decimal import Decimal
 from pathlib import Path
 from typing import List, Optional
@@ -175,12 +177,26 @@ def _require_fresh_quote_source(quote_id: str) -> None:
         )
 
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    initialize_authentication()
+    if ingestion_worker:
+        ingestion_worker.start()
+    try:
+        yield
+    finally:
+        if ingestion_worker:
+            ingestion_worker.stop()
+        if case_manager.llm_extractor:
+            case_manager.llm_extractor.close()
+
+
 app = FastAPI(
     title="RFQ Assistant API",
     version="0.2.0",
     description="Human-reviewed RFQ intake and quotation preparation assistant with OSS stack",
+    lifespan=lifespan,
 )
-app.add_event_handler("startup", initialize_authentication)
 
 # This caps expensive admission in a single local API process. A real multi-host
 # distributor deployment also requires shared rate limits at the trusted edge.
@@ -193,7 +209,11 @@ except ValueError as exc:
 
 @app.middleware("http")
 async def cap_expensive_intake(request: Request, call_next):
-    if request.method == "POST" and request.url.path in {
+    # Use the ASGI router's raw path. Starlette versions affected by
+    # CVE-2026-48710 could let a malformed Host header rewrite request.url.path
+    # while the router still dispatched the original path.
+    request_path = request.scope.get("path", "")
+    if request.method == "POST" and request_path in {
         "/api/rfqs", "/api/catalogs/import", "/api/catalogs/updates", "/v1/rfqs/extract",
     }:
         allowed, retry_after = request.app.state.intake_rate_limiter.allow()
@@ -204,13 +224,6 @@ async def cap_expensive_intake(request: Request, call_next):
                 headers={"Retry-After": str(retry_after), "Cache-Control": "no-store"},
             )
     return await call_next(request)
-
-if case_manager.llm_extractor:
-    app.add_event_handler("shutdown", case_manager.llm_extractor.close)
-if ingestion_worker:
-    app.add_event_handler("startup", ingestion_worker.start)
-    app.add_event_handler("shutdown", ingestion_worker.stop)
-
 
 # Enable CORS for explicitly configured browser origins.
 _cors_origins = configured_cors_origins()
