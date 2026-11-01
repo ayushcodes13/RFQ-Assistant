@@ -1,7 +1,6 @@
-"""Server-only, signed single-operator workspace gate.
-
-This deliberately does NOT implement multi-user identity or tenant isolation.
-"""
+/** Server-only signed single-operator workspace gate.
+ * This deliberately does NOT implement multi-user identity or tenant isolation.
+ */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 export const WORKSPACE_COOKIE = "rfq_workspace_session";
