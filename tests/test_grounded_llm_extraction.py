@@ -798,3 +798,87 @@ def test_xlsx_unknown_header_sheet_is_retained_as_candidate_rows():
     assert len(result.lines) == 1
     assert [segment.locator.row_number for segment in result.candidate_segments] == [1, 2]
     assert all(segment.locator.sheet_name == "Other Items" for segment in result.candidate_segments)
+
+
+def test_failed_repair_retains_grounded_neighbor_and_blocks_invalid_source_row():
+    from rfq_assistant.ingestion.parsers.base import ParsedLineDraft
+
+    first = segment()
+    second = EvidenceSegment(
+        segment_id="row-2",
+        locator=SourceLocator(file_name="rfq.txt", row_number=2),
+        text="Siemens 6ES7134-6GD01-0BA1 4 EA module",
+    )
+    payload = json.dumps({"lines": [
+        {
+            "line_number": 1,
+            "requested_manufacturer": "Fabrikam Controls",
+            "requested_mpn": "ABC-123",
+            "description": "relay",
+            "quantity": 10,
+            "unit": "EA",
+            "segment_id": "row-1",
+            "source_quote": first.text,
+        },
+        {
+            "line_number": 2,
+            "requested_manufacturer": "Siemens",
+            "requested_mpn": "6ES7134-6GD01-0BA1",
+            "description": "module",
+            "quantity": 400,
+            "unit": "EA",
+            "segment_id": "row-2",
+            "source_quote": second.text,
+        },
+    ]})
+    second_review = json.dumps({"lines": [
+        {"line_number": 1, "verdict": "consistent"},
+        {"line_number": 2, "verdict": "uncertain"},
+    ]})
+    client = ScriptedClient([payload, payload, second_review])
+    result = GroundedLLMExtractor(client).extract([first, second])
+
+    assert len(result.lines) == 2
+    assert result.lines[0].requested_mpn == "ABC-123"
+    assert result.lines[0].quantity == 10
+    assert result.lines[1].source_locator.row_number == 2
+    assert result.lines[1].quantity is None
+    assert result.lines[1].requested_mpn is None
+    assert any(w.code == "LLM_PARTIAL_LINE_REJECTED" and w.severity == "error"
+               for w in result.lines[1].extraction_warnings)
+    assert any(w.code == "LLM_PARTIAL_RECOVERY" for w in result.warnings)
+    assert result.llm_repair_call_count == 1
+    assert result.llm_call_count == 3
+
+
+def test_multiple_model_items_in_one_source_span_do_not_collapse_to_one_row():
+    from rfq_assistant.ingestion.parsers.base import ParsedDocumentResult, ParsedLineDraft
+
+    source = SourceLocator(file_name="rfq.txt", row_number=1)
+    parsed = ParsedDocumentResult(lines=[
+        ParsedLineDraft(
+            line_number=1, raw_text="10 EA Fabrikam Controls ABC-123 relay",
+            source_locator=source, requested_manufacturer="Fabrikam Controls",
+            requested_mpn="ABC-123", quantity=10, source_segment_id="document-text",
+        ),
+    ])
+    llm = ParsedDocumentResult(lines=[
+        ParsedLineDraft(
+            line_number=1, raw_text="10 EA Fabrikam Controls ABC-123 relay",
+            source_locator=source, requested_manufacturer="Fabrikam Controls",
+            requested_mpn="ABC-123", quantity=10, source_segment_id="document-text",
+        ),
+        ParsedLineDraft(
+            line_number=2, raw_text="4 EA Siemens 6ES7134-6GD01-0BA1 module",
+            source_locator=source, requested_manufacturer="Siemens",
+            requested_mpn="6ES7134-6GD01-0BA1", quantity=4,
+            source_segment_id="document-text",
+        ),
+    ])
+
+    combined = CaseManager._merge_llm_proposals(parsed, llm)
+    assert len(combined.lines) == 2
+    assert {line.requested_mpn for line in combined.lines} == {
+        "ABC-123", "6ES7134-6GD01-0BA1",
+    }
+    assert {line.quantity for line in combined.lines} == {10, 4}
