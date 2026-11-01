@@ -16,8 +16,8 @@ html { scroll-behavior: smooth; }
 .landing-page :focus-visible { outline: 2px solid #fff; outline-offset: 3px; box-shadow: 0 0 0 5px rgba(239,104,61,.92); }
 .landing-nav { position: absolute; z-index: 20; top: 0; left: 0; width: 100%; height: 82px; display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: center; padding: 0 clamp(22px, 4vw, 64px); color: #fff; }
 .landing-wordmark { display: inline-flex; width: fit-content; align-items: center; gap: 11px; font-size: 15px; font-weight: 550; letter-spacing: -.02em; }
-.landing-mark { display: inline-grid; width: 39px; height: 39px; place-items: center; border: 1px solid rgba(255,255,255,.6); border-radius: 50%; color: #f8f8f4; }
-.landing-mark svg { width: 25px; height: 25px; }
+.landing-mark { display: inline-grid; width: 39px; height: 39px; place-items: center; }
+.landing-mark img { width: 100%; height: 100%; }
 .landing-nav nav { display: flex; justify-content: center; gap: clamp(20px, 3vw, 46px); font-size: 13px; color: rgba(255,255,255,.83); }
 .landing-nav nav a, .footer-app-link { transition: color 180ms ease; }
 .landing-nav nav a:hover, .footer-app-link:hover { color: var(--landing-orange); }
