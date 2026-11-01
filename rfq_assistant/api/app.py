@@ -59,6 +59,7 @@ from rfq_assistant.persistence import SQLiteStateStore
 from rfq_assistant.quotation.proposal import (
     GroundedQuoteProposalService,
     QuoteProposalError,
+    source_excerpt_supports_price,
 )
 from rfq_assistant.quotation.validate import (
     ProposedQuote,
@@ -1315,6 +1316,9 @@ def v1_draft_quote(
                     and current.list_price is not None
                     and Decimal(str(current.list_price)) == unit_price
                     and proposal.evidence_quote
+                    and source_excerpt_supports_price(
+                        proposal.evidence_quote, unit_price, catalog_item.currency or currency
+                    )
                 ):
                     source_id = f"CATUP-{proposal.proposal_id}"
                     evidence_text = proposal.evidence_quote
