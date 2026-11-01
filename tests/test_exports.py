@@ -1,13 +1,19 @@
 """Unit and API tests for quotation worksheet export, draft banners, and email generation."""
 
 import csv
+import json
 from pathlib import Path
 import openpyxl
 import pytest
 from fastapi.testclient import TestClient
 
 from rfq_assistant.api.app import app, catalog_repo, case_manager, export_generator
-from rfq_assistant.exports import ExportValidationError, generate_unsent_email_draft
+from rfq_assistant.exports import (
+    ExportGenerator,
+    ExportValidationError,
+    generate_unsent_email_draft,
+)
+from rfq_assistant.matching.catalog import CatalogRepository
 from rfq_assistant.schemas.enums import ReviewDecision
 from rfq_assistant.schemas.models import ExportRequest, RFQLineItemUpdate
 
@@ -198,3 +204,103 @@ class TestExportAPIEndpoints:
         draft_resp = client.get(f"/api/rfqs/{case_id}/email-draft")
         assert draft_resp.status_code == 200
         assert "UNSENT DRAFT" in draft_resp.json()["draft"]
+
+    def test_delete_case_removes_its_generated_export_and_blocks_download(self, client):
+        create_resp = client.post(
+            "/api/rfqs", data={"pasted_text": "10 pcs Schneider Electric LC1D09BD"}
+        )
+        assert create_resp.status_code == 200
+        case_id = create_resp.json()["case_id"]
+        export_resp = client.post(
+            f"/api/rfqs/{case_id}/exports",
+            json={"case_id": case_id, "allow_partial": True, "format": "csv"},
+        )
+        assert export_resp.status_code == 200
+        export_id = export_resp.json()["export_id"]
+        export_directory = export_generator.base_export_dir / export_id
+        assert export_directory.is_dir()
+
+        delete_resp = client.delete(f"/api/rfqs/{case_id}")
+
+        assert delete_resp.status_code == 200
+        assert not export_directory.exists()
+        assert client.get(f"/api/rfqs/{case_id}").status_code == 404
+        assert client.get(f"/api/rfqs/{case_id}/exports/{export_id}").status_code == 404
+
+    def test_delete_case_keeps_case_when_export_tree_is_unsafe(self, client, tmp_path):
+        create_resp = client.post(
+            "/api/rfqs", data={"pasted_text": "10 pcs Schneider Electric LC1D09BD"}
+        )
+        assert create_resp.status_code == 200
+        case_id = create_resp.json()["case_id"]
+        export_resp = client.post(
+            f"/api/rfqs/{case_id}/exports",
+            json={"case_id": case_id, "allow_partial": True, "format": "csv"},
+        )
+        assert export_resp.status_code == 200
+        export_id = export_resp.json()["export_id"]
+        export_directory = export_generator.base_export_dir / export_id
+        preserved = tmp_path / export_id
+        export_directory.rename(preserved)
+        export_directory.symlink_to(preserved, target_is_directory=True)
+
+        try:
+            delete_resp = client.delete(f"/api/rfqs/{case_id}")
+
+            assert delete_resp.status_code == 500
+            assert client.get(f"/api/rfqs/{case_id}").status_code == 200
+            assert (preserved / "manifest.json").exists()
+        finally:
+            export_directory.unlink(missing_ok=True)
+            case_manager.delete_case(case_id)
+
+
+def test_delete_case_exports_removes_only_manifest_owned_export_dirs(tmp_path):
+    root = tmp_path / "exports"
+    generator = ExportGenerator(CatalogRepository(), root)
+    for export_id, case_id in (
+        ("EXP-11111111", "RFQ-AAAAAAAA"),
+        ("EXP-22222222", "RFQ-BBBBBBBB"),
+    ):
+        directory = root / export_id
+        directory.mkdir()
+        (directory / "manifest.json").write_text(
+            json.dumps({"case_id": case_id}), encoding="utf-8"
+        )
+        (directory / "draft.csv").write_text("SYNTHETIC", encoding="utf-8")
+
+    removed = generator.delete_case_exports("RFQ-AAAAAAAA")
+
+    assert removed == 1
+    assert not (root / "EXP-11111111").exists()
+    assert (
+        root / "EXP-22222222" / "draft.csv"
+    ).read_text(encoding="utf-8") == "SYNTHETIC"
+
+
+def test_delete_case_exports_never_follows_export_directory_symlink(tmp_path):
+    root = tmp_path / "exports"
+    generator = ExportGenerator(CatalogRepository(), root)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    marker = outside / "manifest.json"
+    marker.write_text(json.dumps({"case_id": "RFQ-AAAAAAAA"}), encoding="utf-8")
+    (root / "EXP-AAAAAAAA").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(OSError, match="symbolic link"):
+        generator.delete_case_exports("RFQ-AAAAAAAA")
+    assert marker.exists()
+    assert (root / "EXP-AAAAAAAA").is_symlink()
+
+
+def test_delete_case_exports_fails_closed_on_unknown_manifest(tmp_path):
+    root = tmp_path / "exports"
+    generator = ExportGenerator(CatalogRepository(), root)
+    directory = root / "EXP-AAAAAAAA"
+    directory.mkdir()
+    (directory / "draft.csv").write_text("SYNTHETIC", encoding="utf-8")
+
+    with pytest.raises(OSError, match="ownership manifest"):
+        generator.delete_case_exports("RFQ-AAAAAAAA")
+
+    assert (directory / "draft.csv").exists()
