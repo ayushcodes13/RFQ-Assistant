@@ -44,7 +44,7 @@ class QuoteLine(BaseModel):
     sources: List[SourceRef] = Field(default_factory=list)
     line_notes: Optional[str] = None
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]  # Pydantic descriptor typing limitation
     @property
     def line_total(self) -> Optional[Decimal]:
         """Deterministic unrounded extension; never trust a model-supplied total."""
