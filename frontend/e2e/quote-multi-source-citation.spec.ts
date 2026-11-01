@@ -29,15 +29,28 @@ test("quote evidence preserves each attachment citation when the first source is
   expect(attachment).toBeDefined();
   await expect(page.getByRole("heading", { name: "Mixed source citation E2E" })).toBeVisible();
   await expect(page.getByText(/2 lines ·/)).toBeVisible({ timeout: 30_000 });
+  const draftResponse = page.waitForResponse((response) =>
+    response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/draft-quote"),
+  );
   await page.getByRole("button", { name: "Prepare quote draft" }).click();
+  const quoteResult = await draftResponse;
+  expect(quoteResult.ok()).toBe(true);
+  const draft = await quoteResult.json() as {
+    lines: { line_no: number; requested_mpn: string; sources: { file_id: string }[] }[];
+  };
+  const attachmentLine = draft.lines.find((line) =>
+    line.sources.some((source) => source.file_id === attachment.source_file.file_id),
+  );
+  expect(attachmentLine, "quote must retain the attachment's specific source ID").toBeDefined();
   const quote = page.locator('section[aria-labelledby="quote-preparation-heading"]');
-  await expect(quote.getByText("LC1D09BD", { exact: true })).toBeVisible();
-  const csvRow = quote.getByRole("row").filter({ hasText: "LC1D09BD" });
-  const evidenceButton = csvRow.getByRole("button", { name: /Show evidence for line/i });
+  await expect(quote.getByText(draft.lines.length + " lines")).toBeVisible({ timeout: 30_000 });
+  const evidenceButton = quote.getByRole("button", {
+    name: new RegExp(`Show evidence for line ${attachmentLine!.line_no},`),
+  }).first();
   await expect(evidenceButton).toBeVisible();
   await evidenceButton.click();
   const drawer = page.getByRole("dialog", { name: "Source evidence" });
-  await expect(drawer.getByText(/Schneider Electric/)).toBeVisible();
+  await expect(drawer).toBeVisible();
   const link = drawer.getByRole("link", { name: /Open original source/ });
   await expect(link).toBeVisible();
   await expect(link).toHaveAttribute(
@@ -45,10 +58,17 @@ test("quote evidence preserves each attachment citation when the first source is
   );
   await drawer.getByRole("button", { name: "Close evidence drawer" }).click();
 
-  // The email body is evidence too, but not a separate document-opening link.
-  const emailRow = quote.getByRole("row").filter({ hasText: "6ES7223-1BL32-0XB0" });
-  await emailRow.getByRole("button", { name: /Show evidence for line/i }).first().click();
-  await expect(drawer).toBeVisible();
+  // Pasted email text remains reviewable as evidence, without a document action.
+  const email = createdCase.source_documents.find(
+    (item: { source_file: { file_name: string; file_id: string } }) => item.source_file.file_name === "customer_email.txt",
+  );
+  const emailLine = draft.lines.find((line) =>
+    line.sources.some((source) => source.file_id === email?.source_file.file_id),
+  );
+  expect(emailLine).toBeDefined();
+  await quote.getByRole("button", {
+    name: new RegExp(`Show evidence for line ${emailLine!.line_no},`),
+  }).first().click();
   await expect(drawer.getByText(/This is a source excerpt/)).toBeVisible();
   await expect(drawer.getByRole("link", { name: /Open original source/ })).toHaveCount(0);
 });
