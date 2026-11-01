@@ -64,11 +64,14 @@ From repository root, run:
 python -m scripts.evaluate_synthetic_demo
 ```
 
-This prints a JSON comparison of the 20-line synthetic XLSX fixture against its
-checked-in ground-truth annotations, including extracted line coverage, MPN/OEM/
-quantity/unit agreement, exact catalog matches, source locator coverage,
-expected warning flags and unflagged critical discrepancies. The report has an
-explicit `synthetic_ground_truth_not_customer_metrics` evidence marker.
+This prints a JSON comparison of the 20-line synthetic XLSX fixture and the
+annotated synthetic email/collision cases. It reports line precision/recall, per-field
+MPN/manufacturer/quantity/unit accuracy, catalog-match agreement, false exact
+matches, source-locator coverage, expected warning flags, and unflagged critical
+discrepancies. It also runs synthetic duplicate-attachment and quantity,
+manufacturer, revision, and part-number conflict checks. Reports have explicit
+synthetic evidence markers and a `scorecard_passed` result for these labeled
+fixtures; these fixtures do not measure arbitrary customer inputs.
 Do **not** present these measurements as buyer performance or time saved.
 
 For an actual buyer evaluation, first obtain written authorization and
