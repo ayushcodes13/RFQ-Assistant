@@ -1,13 +1,14 @@
 """Durability, lease recovery, and local background processing tests."""
 
-import time
+import multiprocessing
 import threading
+import time
+from pathlib import Path
 
 import pytest
 import time_machine
 
-from rfq_assistant.cases.manager import CaseManager
-from rfq_assistant.cases.manager import IngestionLeaseLostError
+from rfq_assistant.cases.manager import CaseManager, IngestionLeaseLostError
 from rfq_assistant.ingestion.storage import DocumentStorage
 from rfq_assistant.ingestion.worker import RFQIngestionWorker
 from rfq_assistant.matching.catalog import CatalogRepository
@@ -22,6 +23,47 @@ def _services(tmp_path):
         catalog=catalog, storage=DocumentStorage(tmp_path / "files"), state_store=store
     )
     return manager, store
+
+
+def _run_worker_until_parser_blocks(database_path, files_path, parser_entered):
+    """Child-process target used to model an abrupt worker-host failure."""
+    import rfq_assistant.cases.manager as manager_module
+
+    store = SQLiteStateStore(database_path)
+    manager = CaseManager(
+        catalog=CatalogRepository(state_store=store),
+        storage=DocumentStorage(Path(files_path)),
+        state_store=store,
+    )
+    get_parser = manager_module.get_parser
+
+    class BlockingParser:
+        def __init__(self, delegate):
+            self.delegate = delegate
+            self.cache_profile = delegate.cache_profile
+            self.cache_dependencies = delegate.cache_dependencies
+
+        def parse(self, content, filename):
+            parser_entered.set()
+            while True:
+                time.sleep(1)
+
+    def blocked_parser(source_type):
+        parser = get_parser(source_type)
+        return BlockingParser(parser) if source_type == SourceType.CSV else parser
+
+    manager_module.get_parser = blocked_parser
+    worker = RFQIngestionWorker(
+        manager,
+        store,
+        poll_seconds=0.01,
+        lease_seconds=60,
+        heartbeat_seconds=3600,
+        max_concurrent_jobs=1,
+    )
+    worker.start()
+    while True:
+        time.sleep(1)
 
 
 def test_worker_processes_persisted_upload_without_api_request_waiting(tmp_path):
@@ -162,6 +204,78 @@ def test_startup_reconciles_case_saved_before_queue_insert(tmp_path):
     assert store.reconcile_processing_cases() == 1
     assert store.reconcile_processing_cases() == 0
     assert store.get_ingestion_job(case.case_id)["state"] == "queued"
+
+
+def test_killed_worker_process_restarts_and_reclaims_in_flight_case(tmp_path):
+    manager, store = _services(tmp_path)
+    case = manager.enqueue_case_from_upload(
+        "request.csv", b"MPN,Manufacturer,Qty\nLC1D09BD,Schneider Electric,2\n"
+    )
+    context = multiprocessing.get_context("spawn")
+    parser_entered = context.Event()
+    child = context.Process(
+        target=_run_worker_until_parser_blocks,
+        args=(str(store.database_path), str(manager.storage.base_dir), parser_entered),
+    )
+    child.start()
+    restarted_worker = None
+
+    try:
+        assert parser_entered.wait(timeout=10), "child worker did not reach extraction"
+        in_flight = store.get_ingestion_job(case.case_id)
+        assert in_flight["state"] == "processing"
+        assert in_flight["attempts"] == 1
+
+        child.kill()
+        child.join(timeout=5)
+        assert not child.is_alive(), "simulated worker process did not terminate"
+
+        # Expire the abandoned lease directly so recovery does not depend on a
+        # wall-clock sleep or a short production lease setting.
+        with store._connect() as connection:
+            connection.execute(
+                "UPDATE ingestion_jobs SET lease_expires_at = ? WHERE job_id = ?",
+                (time.time() - 1, in_flight["job_id"]),
+            )
+
+        recovered_store = SQLiteStateStore(store.database_path)
+        recovered_manager = CaseManager(
+            catalog=CatalogRepository(state_store=recovered_store),
+            storage=DocumentStorage(manager.storage.base_dir),
+            state_store=recovered_store,
+        )
+        restarted_worker = RFQIngestionWorker(
+            recovered_manager,
+            recovered_store,
+            poll_seconds=0.01,
+            lease_seconds=30,
+            heartbeat_seconds=0.1,
+            max_concurrent_jobs=1,
+        )
+        restarted_worker.start()
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            job = recovered_store.get_ingestion_job(case.case_id)
+            if job["state"] == "completed":
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail("restarted worker did not finish the reclaimed case")
+    finally:
+        if restarted_worker is not None:
+            restarted_worker.stop()
+        if child.is_alive():
+            child.kill()
+            child.join(timeout=5)
+
+    recovered = recovered_manager.get_case(case.case_id)
+    assert recovered.status == CaseStatus.NEEDS_REVIEW
+    assert recovered.processing_stage == ProcessingStage.READY_FOR_REVIEW
+    assert len(recovered_manager.get_lines(case.case_id)) == 1
+    finished = recovered_store.get_ingestion_job(case.case_id)
+    assert finished["state"] == "completed"
+    assert finished["attempts"] == 2
 
 
 def test_duplicate_enqueue_for_one_case_keeps_a_single_durable_job(tmp_path):
