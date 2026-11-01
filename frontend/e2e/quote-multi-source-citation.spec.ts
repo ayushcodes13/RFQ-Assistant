@@ -11,7 +11,7 @@ test("quote evidence preserves each attachment citation when the first source is
     name: "additional-parts.csv",
     mimeType: "text/csv",
     buffer: Buffer.from(
-      "Manufacturer,MPN,QTY,Description\\nSchneider Electric,LC1D09BD,10,TeSys D contactor\\n",
+      "Manufacturer,MPN,QTY,Description\nSchneider Electric,LC1D09BD,10,TeSys D contactor\n",
     ),
   }]);
   await intake.getByPlaceholder("Optional case title").fill("Mixed source citation E2E");
