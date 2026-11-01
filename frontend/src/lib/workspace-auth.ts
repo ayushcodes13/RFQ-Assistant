@@ -1,7 +1,7 @@
 /** Server-only signed single-operator workspace gate.
  * This deliberately does NOT implement multi-user identity or tenant isolation.
  */
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 
 export const WORKSPACE_COOKIE = "rfq_workspace_session";
 const SESSION_SECONDS = 8 * 60 * 60;
@@ -55,8 +55,12 @@ function verifySession(token: string, secret: string): boolean {
 export function verifyWorkspacePassword(candidate: string): boolean {
   const pair = config();
   if (!pair || !enabled() || typeof candidate !== "string") return false;
-  const supplied = createHash("sha256").update(candidate).digest();
-  const actual = createHash("sha256").update(pair.password).digest();
+  if (candidate.length > 1024) return false;
+  // Passwords are not general-purpose SHA-256 hashes. Use a memory-hard KDF
+  // and a deployment-unique secret as its salt before constant-time comparison.
+  const salt = Buffer.from(pair.secret, "utf8");
+  const supplied = scryptSync(candidate, salt, 32);
+  const actual = scryptSync(pair.password, salt, 32);
   return timingSafeEqual(supplied, actual);
 }
 
