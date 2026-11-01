@@ -6,6 +6,8 @@ The current 10-shape human-input matrix passed locally on 2026-11-01: `pytest -q
 
 The new second-stage quote evidence mapper passed with synthetic clients: `pytest -q tests/test_quote_proposal.py tests/test_stale_quote_snapshots.py tests/test_oss_stack_and_ai_pipeline.py` → **23 passed**. It exercises the endpoint call, exact catalog retrieval, citation mapping, deterministic price/Decimal total, and rejection of non-verbatim buyer evidence. It is not a live provider run.
 
+Storage path hardening includes adversarial traversal/symlink checks and an upgrade check that migrates pre-hash local case/file paths into the opaque hashed layout while preserving existing source bytes and logical metadata. This is a local storage compatibility test; it does not test a production migration across multiple application hosts.
+
 ## Golden fixture pack
 
 Maintain a synthetic annotated corpus covering:
