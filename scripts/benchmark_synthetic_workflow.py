@@ -361,6 +361,7 @@ def run_benchmark(repetitions: int) -> dict[str, Any]:
         "measurement_notes": [
             "Three repetitions per cell make p95 a nearest-rank estimate equal to the maximum; treat it as descriptive, not a stable tail-latency SLO.",
             "Peak memory is Python allocation peak from tracemalloc; it excludes native allocations and total process RSS.",
+            "Input files are generated before tracemalloc starts, so the peak excludes pre-existing request buffers and service/database/catalog startup allocations.",
             "PDF cases are generated native-text PDFs. Scanned PDF/OCR and Luna latency/token use are not measured.",
             "Each trial uses a fresh temporary SQLite database, local source storage, catalog, and export directory.",
             "Review timing measures the plan and synthetic approval services, not human reading or correction time; remaining exceptions are recorded and the draft export explicitly allows partial output.",
