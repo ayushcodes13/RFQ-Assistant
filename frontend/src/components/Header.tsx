@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { BookOpen, ChartNoAxesCombined, Inbox, Keyboard, Menu, X } from "lucide-react";
 import { RFQCase } from "@/types";
 
@@ -20,14 +21,7 @@ const navigation = [
 ];
 
 function ProductMark({ size = 34 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 34 34" fill="none" aria-hidden="true">
-      <rect x="1" y="1" width="32" height="32" rx="8" fill="#142126" />
-      <path d="M10 9.5h9.5l5 5v10H10v-15Z" stroke="#F9FBFC" strokeWidth="1.7" strokeLinejoin="round" />
-      <path d="M19.5 9.8v5h4.8M13.5 18h7M13.5 21.5h4" stroke="#F9FBFC" strokeWidth="1.5" strokeLinecap="round" />
-      <path d="m20.2 22 1.7 1.7 3.6-4" stroke="#F27643" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+  return <Image src="/rfq-assistant-mark.svg" alt="" width={size} height={size} aria-hidden="true" />;
 }
 
 function NavItems({

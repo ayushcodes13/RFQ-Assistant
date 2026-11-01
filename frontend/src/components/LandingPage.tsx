@@ -30,11 +30,7 @@ const stageOrder: FlowStage[] = ["request", "review", "draft"];
 function BrandMark() {
   return (
     <span className="landing-mark" aria-hidden="true">
-      <svg viewBox="0 0 40 40" fill="none">
-        <path d="M10 6h13l8 8v20H10V6Z" stroke="currentColor" strokeWidth="1.7" />
-        <path d="M23 6v9h8M15 21h11M15 26h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        <path d="m24 29 3 3 6-7" stroke="var(--landing-orange)" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
+      <Image src="/rfq-assistant-mark.svg" alt="" width={39} height={39} />
     </span>
   );
 }

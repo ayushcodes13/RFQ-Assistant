@@ -1,8 +1,29 @@
 # RFQ Assistant
 
-**Human-reviewed RFQ intake and quotation preparation for independent industrial component distributors.**
+<p align="center">
+  <img src="frontend/public/rfq-assistant-mark.svg" width="54" height="54" alt="RFQ Assistant document-and-check logo" />
+  <br /><strong>Human-reviewed quotation preparation</strong>
+</p>
 
-An early-stage, validation-first product project. This repository is a **product blueprint**, not a shipped application and not evidence of paying customers.
+<p align="center">
+  <a href="https://github.com/ayushcodes13/RFQ-Assistant/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/ayushcodes13/RFQ-Assistant/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/ayushcodes13/RFQ-Assistant/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/ayushcodes13/RFQ-Assistant/actions/workflows/codeql.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/ayushcodes13/RFQ-Assistant/actions/workflows/secret-scan.yml"><img alt="Secret scan" src="https://github.com/ayushcodes13/RFQ-Assistant/actions/workflows/secret-scan.yml/badge.svg?branch=main"></a>
+  <img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white">
+  <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-black?logo=next.js">
+</p>
+
+RFQ Assistant is a working local prototype for independent industrial component distributors. It turns pasted email, PDF, XLSX, and CSV requests into source-linked line items for human review and draft worksheet export.
+
+It is not a production-ready multi-tenant service and does not prove customer demand, extraction accuracy, time savings, or ROI. The local workspace is single-user. Do not upload real customer RFQs without an approved data-handling plan.
+
+## Product screenshots
+
+Screenshots show the local app with synthetic inputs. Landing imagery is illustrative.
+
+| Landing page | Working review workspace |
+| --- | --- |
+| ![RFQ Assistant landing page](docs/screenshots/readme-landing.png) | ![RFQ Assistant workbench with synthetic rows and review warnings](docs/screenshots/readme-workbench.png) |
 
 ## The problem we are testing
 
@@ -31,6 +52,59 @@ A distributor receives an RFQ through an email, PDF bill of materials, spreadshe
        Human sends through normal tools
 
 **Never auto-send a quote. Never invent part numbers, prices, technical equivalence, inventory, or lead time.**
+
+## Architecture
+
+```mermaid
+flowchart TD
+    Browser[Browser: landing page and workspace] --> Web[Next.js + React + TypeScript]
+    Web --> Proxy[Same-origin API proxy]
+    Proxy --> API[FastAPI endpoints + Pydantic schemas]
+    API --> Guard[File validation, malware status, size and format limits]
+    Guard --> Original[Retain original bytes and SHA-256 provenance]
+    Guard --> Case[Case manager]
+    Case --> Mode{Async ingestion enabled?}
+    Mode -->|Yes| Queue[SQLite job queue]
+    Queue --> Worker[Worker leases, heartbeat, bounded retries]
+    Mode -->|No| Parse[Run parser synchronously]
+    Worker --> Parse
+    Parse --> Tables[CSV and XLSX: structured rows]
+    Parse --> Docs[PDF and text: source regions]
+    Docs --> OCR[Image-heavy PDF pages: bounded local OCR when available]
+    Tables --> Candidates[Parsed values, source locators, coverage receipt]
+    OCR --> Candidates
+    Candidates --> Unclear{Unresolved fields or regions?}
+    Unclear -->|Yes| Luna[Optional GPT-6 Luna extraction proposal]
+    Unclear -->|No| Evidence[Deterministic schema, numeric and source-evidence checks]
+    Luna --> Evidence
+    Evidence --> Exact[Exact manufacturer + MPN catalog lookup]
+    Exact --> Review[Reviewer edits, exceptions, sample review and audit trail]
+    Review --> Gate[Export blockers and approval checks]
+    Gate --> Draft[Draft XLSX/CSV and unsent email text]
+    Gate -->|Failure| Manual[Retain source and show a reviewer task]
+```
+
+Parsing, matching, review state, and export checks stay separate. Luna may propose missing or unclear fields; it cannot certify a line, approve a quote, or send anything.
+
+### Libraries and why
+
+| Area | Library or tool | Why it is used |
+| --- | --- | --- |
+| Browser app | Next.js 16, React 19, TypeScript 5 | Page routing, server-side same-origin API proxy, typed UI. |
+| UI styling and interaction | Tailwind CSS 4, CSS, Framer Motion, Lucide React | Layout and restrained landing motion; consistent interface icons. |
+| API | FastAPI, Starlette, Pydantic 2 | HTTP endpoints, CORS middleware, strict request/response schemas, OpenAPI generation. |
+| CSV | Python standard-library `csv` | Parse rows without adding a dependency. |
+| XLSX | `openpyxl`, `defusedxml` | Read workbook cells, formulas, sheets, and source coordinates; defend XML parsing. |
+| PDF | `pypdf`, PyMuPDF | Read native PDF text; inspect and render selected image-heavy pages. |
+| OCR | Local Tesseract (optional executable) | OCR only selected sparse image-heavy pages; no external OCR call by default. |
+| Legacy XLS | LibreOffice (optional executable) | Convert legacy workbooks in a bounded, isolated subprocess when available. |
+| Optional LLM fallback | `httpx` to configured GPT-6 Luna endpoint | Propose unresolved fields; strict schema, numeric grounding, verbatim evidence, and a second consistency pass remain in Python. |
+| Matching | Project exact matcher; RapidFuzz for candidate search | Exact manufacturer and MPN controls the match. Fuzzy similarity only helps locate candidates. |
+| Persistence and jobs | Python `sqlite3`, SQLite state store | Durable local cases, audit events, catalog snapshot, and single-host ingestion queue. |
+| API contract | `openapi-typescript` | Generate frontend request/response types from the checked-in backend OpenAPI schema. |
+| Tests | pytest, Hypothesis, Playwright | Backend and property tests, plus browser-level workflow checks. |
+
+SQLite and its worker are local, single-host prototype infrastructure. A customer pilot needs authenticated tenant isolation, private storage, retention rules, and supervised deployment before real RFQ data is used. See [the detailed architecture](docs/ARCHITECTURE.md).
 
 ## First product slice
 
@@ -73,14 +147,37 @@ Small independent US/UK industrial electrical, automation, or electronic compone
 - [x] Independent realistic end-to-end demo *(All 7 scenarios verified in PR #7)*
 - [ ] One opt-in customer pilot with measured baseline *(Phase 6 pilot readiness)*
 
+### Current synthetic verification
+
+Latest local run on Python 3.12 and Node.js: **468 backend tests passed**; the
+synthetic 20-line scorecard detected all 20 lines and passed 80/80 critical
+field checks plus 20/20 exact catalog checks; the 30-document corpus passed
+all 180 critical field checks across CSV, PDF, text, and XLSX; the 128-request
+concurrency check created 128 unique cases; and all 12 Playwright workflows
+passed. Frontend lint, generated API type check, production build, and backend
+Ruff syntax checks passed. The backend suite emitted deprecation warnings from
+dependencies and existing `datetime.utcnow()` calls. These are local synthetic
+checks, not customer accuracy, production reliability, or performance claims.
+
 ## Running locally
 
-### 1. Backend (FastAPI + Python 3.10+)
+For a clean local demo, install dependencies once, then use the isolated launcher:
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
-pytest -v   # Run the unit, integration, contract, and scenario tests
+pip install -e '.[test]'
+cd frontend && npm ci && cd ..
+./scripts/demo.sh
+```
+
+The landing page opens at `http://localhost:3010/`; the review workspace opens at
+`http://localhost:3010/workspace`. Stop the demo with `./scripts/demo.sh stop`.
+
+### 1. Backend (FastAPI + Python 3.10+)
+```bash
+source .venv/bin/activate
+pytest -q
 
 # Start backend server on port 8000 (preloads synthetic catalog automatically)
 uvicorn rfq_assistant.api.app:app --host 127.0.0.1 --port 8000
@@ -89,7 +186,7 @@ uvicorn rfq_assistant.api.app:app --host 127.0.0.1 --port 8000
 ### 2. Frontend (Next.js + TypeScript)
 ```bash
 cd frontend
-npm install
+npm ci
 npm run check:types  # Fail if generated OpenAPI types are stale
 npm run build        # Verify typecheck and production build
 npm run e2e          # Full-stack Playwright happy path (starts backend + Next)
@@ -153,8 +250,8 @@ storage under `.demo-runtime/`. This reset does not delete or change `storage/`
 or its existing RFQs. The launcher refuses to use occupied ports; choose
 alternates with `RFQ_DEMO_BACKEND_PORT` and `RFQ_DEMO_FRONTEND_PORT`. Stop only
 the processes started by this script with `./scripts/demo.sh stop`. Synthetic
-drag-and-drop examples are in `demo-data/` (email text, PDF, XLSX, and catalog
-CSV). The catalog is preloaded automatically in a fresh demo database.
+drag-and-drop examples are in `demo-data/` (email text, PDF, and XLSX). The
+catalog is preloaded from `fixtures/catalogs/` in a fresh demo database.
 
 ### Local persistence
 
