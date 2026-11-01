@@ -71,14 +71,17 @@ def main() -> int:
                 and line.selected_catalog_sku == "SYN-FC-4821"
             )
             review_plan = manager.get_review_plan(case.case_id)
-            sample_selected = line.line_id in review_plan.sample_line_ids
-            if not exact_match or not sample_selected:
+            individual_review_required = (
+                line.line_id in review_plan.exception_line_ids
+                and line.line_id not in review_plan.sample_line_ids
+            )
+            if not exact_match or not individual_review_required:
                 warning_codes = sorted(
                     {warning.code for warning in line.extraction_warnings}
                 )
                 print(
                     "e2e=review_required "
-                    f"exact_match={exact_match} sample={sample_selected} "
+                    f"exact_match={exact_match} individual_review={individual_review_required} "
                     f"warning_codes={','.join(warning_codes) or 'none'}"
                 )
                 return 1
@@ -108,13 +111,14 @@ def main() -> int:
             passed = (
                 reviewed_lines[0].review_decision == ReviewDecision.APPROVED
                 and manifest.is_draft
+                and individual_review_required
                 and case.llm_call_count >= 1
                 and case.llm_review_call_count >= 1
             )
             print(
                 f"e2e={'pass' if passed else 'failed'} "
                 f"line_count={len(reviewed_lines)} exact_catalog_match={exact_match} "
-                f"human_sample={sample_selected} reviewer_approved="
+                f"individual_review={individual_review_required} reviewer_approved="
                 f"{reviewed_lines[0].review_decision == ReviewDecision.APPROVED} "
                 f"draft_export={manifest.is_draft} "
                 f"llm_calls={case.llm_call_count} "
