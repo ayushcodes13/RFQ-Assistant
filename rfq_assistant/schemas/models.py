@@ -173,6 +173,24 @@ class CatalogUpdateReviewRequest(BaseModel):
     note: Optional[str] = Field(default=None, max_length=2000)
 
 
+class CatalogUpdateDecision(BaseModel):
+    proposal_id: str = Field(min_length=1)
+    expected_version: int = Field(ge=1)
+    decision: Literal["accept", "reject"]
+
+
+class CatalogBatchReviewRequest(BaseModel):
+    decisions: List[CatalogUpdateDecision] = Field(min_length=1)
+    note: Optional[str] = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def unique_proposals(self):
+        ids = [item.proposal_id for item in self.decisions]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Each catalog proposal can appear only once.")
+        return self
+
+
 class MatchCandidate(BaseModel):
     """Proposed catalog match backed by exact OEM and MPN evidence."""
     catalog_item: CatalogItem
@@ -223,6 +241,30 @@ class RFQLineItemUpdate(BaseModel):
     review_decision: Optional[ReviewDecision] = None
     reviewer_notes: Optional[str] = None
     actor: str = "Inside Sales"
+
+
+class ManualRFQLineCreateRequest(BaseModel):
+    """Reviewer-entered line for recovering an item the parser could not resolve."""
+
+    source_text: str = Field(min_length=1, max_length=4000)
+    requested_manufacturer: Optional[str] = Field(default=None, max_length=200)
+    requested_mpn: Optional[str] = Field(default=None, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    quantity: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    unit: Optional[str] = Field(default="EA", max_length=40)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("source_text", "requested_manufacturer", "requested_mpn", "description", "unit", "notes")
+    @classmethod
+    def trim_manual_text(cls, value):
+        return value.strip() if value is not None else value
+
+    @field_validator("source_text")
+    @classmethod
+    def require_manual_source_text(cls, value):
+        if not value.strip():
+            raise ValueError("Enter the request text used to create this line.")
+        return value
 
 
 class RFQLineItemUpdateRequest(RFQLineItemUpdate):

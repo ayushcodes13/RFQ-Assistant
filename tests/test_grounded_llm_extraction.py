@@ -138,6 +138,33 @@ def test_part_number_digits_cannot_ground_a_quantity_without_unit_or_quantity_la
     assert result.warnings[0].code == "LLM_EXTRACTION_BLOCKED"
 
 
+@pytest.mark.parametrize(
+    ("quote", "quantity"),
+    [
+        ("hey can u quote 4 of the phoenix 2900364 power thing? need it next month", 4),
+        ("need 3 of Siemens 6ES7134-6GD01-0BA1", 3),
+        ("order 2 × Phoenix Contact 2900364", 2),
+    ],
+)
+def test_conversational_count_phrases_ground_quantity_without_inventing_unit(quote, quantity):
+    proposal = json.dumps({"lines": [{
+        "line_number": 1,
+        "requested_manufacturer": None,
+        "requested_mpn": "2900364" if "2900364" in quote else "6ES7134-6GD01-0BA1",
+        "description": None,
+        "quantity": quantity,
+        "unit": None,
+        "segment_id": "row-1",
+        "source_quote": quote,
+    }]})
+    source = segment().model_copy(update={"text": quote})
+    result = GroundedLLMExtractor(ScriptedClient([proposal, review_response()])).extract([source])
+
+    assert len(result.lines) == 1
+    assert result.lines[0].quantity == quantity
+    assert result.lines[0].unit is None
+
+
 def test_string_quantity_is_rejected_even_if_it_looks_numeric():
     bad = json.loads(response())
     bad["lines"][0]["quantity"] = "10"
@@ -197,7 +224,7 @@ def test_model_cannot_invent_noncontiguous_line_number_ordinals():
 
 def test_llm_fills_missing_manufacturer_but_keeps_human_review_warning(tmp_path):
     text = "Fabrikam Controls ABC-123 10 EA relay"
-    client = ScriptedClient([response(quote=text, segment_id="draft-line-1"), review_response()])
+    client = ScriptedClient([response(quote=text, segment_id="document-text"), review_response()])
     manager = CaseManager(
         catalog=CatalogRepository(),
         storage=DocumentStorage(base_dir=tmp_path),
@@ -228,7 +255,7 @@ def test_grounded_llm_rows_require_individual_review_even_after_exact_matching(t
         manufacturer_part_number="ABC-123",
         description="Synthetic relay",
     ))
-    client = ScriptedClient([response(quote=text, segment_id="draft-line-1"), review_response()])
+    client = ScriptedClient([response(quote=text, segment_id="document-text"), review_response()])
     manager = CaseManager(
         catalog=catalog,
         storage=DocumentStorage(base_dir=tmp_path),
@@ -256,7 +283,7 @@ def test_repaired_llm_output_is_routed_as_an_exception_not_a_clean_sample(tmp_pa
         description="Synthetic relay",
     ))
     client = ScriptedClient([
-        "not-json", response(quote=text, segment_id="draft-line-1"), review_response()
+        "not-json", response(quote=text, segment_id="document-text"), review_response()
     ])
     manager = CaseManager(
         catalog=catalog,
@@ -283,7 +310,7 @@ def test_llm_validation_conflict_routes_row_to_exception(tmp_path):
         description="Synthetic relay",
     ))
     client = ScriptedClient([
-        response(quote=text, segment_id="draft-line-1"), review_response("conflict")
+        response(quote=text, segment_id="document-text"), review_response("conflict")
     ])
     manager = CaseManager(catalog=catalog, storage=DocumentStorage(base_dir=tmp_path),
                           llm_extractor=GroundedLLMExtractor(client))
@@ -299,7 +326,7 @@ def test_llm_validation_conflict_routes_row_to_exception(tmp_path):
 
 def test_unavailable_llm_validation_routes_row_to_exception(tmp_path):
     text = "Fabrikam Controls ABC-123 10 EA relay"
-    client = ScriptedClient([response(quote=text, segment_id="draft-line-1")])
+    client = ScriptedClient([response(quote=text, segment_id="document-text")])
     manager = CaseManager(catalog=CatalogRepository(), storage=DocumentStorage(base_dir=tmp_path),
                           llm_extractor=GroundedLLMExtractor(client))
 
@@ -376,7 +403,7 @@ def test_pinned_llm_result_is_reused_after_worker_interruption(tmp_path, monkeyp
 
     parser = FakeParser()
     monkeypatch.setattr(manager_module, "get_parser", lambda *_args, **_kwargs: parser)
-    client = ScriptedClient([response(quote=quote), review_response()])
+    client = ScriptedClient([response(quote=quote, segment_id="document-text"), review_response()])
     client.deployment_version = "immutable-test-deployment-v1"
     store = SQLiteStateStore(tmp_path / "state" / "rfq.sqlite3")
     manager = CaseManager(
@@ -660,10 +687,12 @@ def test_llm_fallback_recovers_candidate_region_missed_beside_structured_rows(tm
 
     assert len(lines) == 2
     recovered = next(line for line in lines if line.requested_mpn == "AB 1234")
+    retained = next(line for line in lines if line.requested_mpn == "LC1D09BD")
     assert recovered.line_number == 2
     assert recovered.quantity == 3
-    assert recovered.source_locator.row_number == 2
     assert any(w.code == "LLM_PROPOSED_EXTRACTION" for w in recovered.extraction_warnings)
+    assert retained.line_number == 1
+    assert any(w.code == "UNSTRUCTURED_MODEL_OMITTED_DETERMINISTIC_ROW" for w in retained.extraction_warnings)
     assert len(client.calls) == 2
 
 
@@ -689,7 +718,7 @@ def test_unfamiliar_text_is_sent_to_grounded_fallback_and_can_be_recovered(tmp_p
         manufacturer="Fabrikam Controls",
         description="bespoke panel component",
         quote=quote,
-        segment_id="draft-line-1",
+        segment_id="document-text",
     )
     client = ScriptedClient([proposal, review_response()])
     manager = CaseManager(

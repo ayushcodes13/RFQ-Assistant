@@ -38,6 +38,8 @@ class ERPNextQuotation(BaseModel):
 
 def map_proposed_quote_to_erpnext(quote: ProposedQuote) -> Dict[str, Any]:
     """Maps an approved ProposedQuote into an ERPNext Quotation DocType payload."""
+    if not quote.currency:
+        raise ValueError("An ERPNext quotation requires a confirmed currency.")
     items: List[ERPNextQuotationItem] = []
     total = 0.0
 

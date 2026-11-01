@@ -332,7 +332,7 @@ def _quantity_is_grounded(quantity: Optional[Decimal], unit: Optional[str], quot
     normalized_unit = unit.upper() if unit else ""
 
     unit_aliases = {
-        "EA": {"EA", "EACH", "UNIT", "UNITS"},
+        "EA": {"EA", "EACH", "UNIT", "UNITS", "PCS", "PIECE", "PIECES"},
         "PCS": {"PCS", "PIECE", "PIECES"},
         "M": {"M", "METRE", "METRES", "METER", "METERS"},
         "FT": {"FT", "FEET"},
@@ -355,12 +355,25 @@ def _quantity_is_grounded(quantity: Optional[Decimal], unit: Optional[str], quot
             # Bare numbers are accepted only when explicitly labelled. A bare
             # trailing number can be a numeric-only MPN, so position alone is
             # never enough evidence for a quantity.
-            if not unit_pattern and not re.search(
-                rf"(?:\bqty\b|\bquantity\b|\bneed\b)\s*[:=]?\s*{re.escape(token)}\b",
-                quote,
-                re.IGNORECASE,
-            ):
-                continue
+            if not unit_pattern:
+                quantity_token = re.escape(token)
+                explicit_label = re.search(
+                    rf"(?:\bqty\b|\bquantity\b|\bneed\b)\s*[:=]?\s*{quantity_token}\b",
+                    quote,
+                    re.IGNORECASE,
+                )
+                conversational_count = re.search(
+                    rf"\b(?:quote|order|buy|request|need|want|send)\s+{quantity_token}\s+of\b",
+                    quote,
+                    re.IGNORECASE,
+                )
+                multiplication_count = re.search(
+                    rf"\b{quantity_token}\s*[x×](?![A-Za-z0-9])",
+                    quote,
+                    re.IGNORECASE,
+                )
+                if not (explicit_label or conversational_count or multiplication_count):
+                    continue
             if unit_pattern:
                 if observed_unit is None or observed_unit.upper() not in unit_aliases.get(
                     normalized_unit, {normalized_unit}

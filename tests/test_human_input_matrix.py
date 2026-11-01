@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from rfq_assistant.cases.manager import CaseManager
+from rfq_assistant.ingestion.ai_extraction import GroundedLLMExtractor
 from rfq_assistant.ingestion.parsers.base import DocumentParserError
 from rfq_assistant.ingestion.parsers.pdf_parser import PDFParser
 from rfq_assistant.ingestion.parsers.spreadsheet_parser import SpreadsheetParser
@@ -60,7 +61,9 @@ def test_conversational_inputs_keep_source_regions_visible(case_id, text):
         assert result.lines[0].requested_mpn == "2900364"
         assert result.lines[0].quantity == 4
     elif case_id == "H02-chat-shorthand-with-implicit-item":
-        assert not result.lines
+        assert len(result.lines) == 1
+        assert result.lines[0].requested_mpn == "6ES7134-6GD01-0BA1"
+        assert result.lines[0].quantity == 2
         assert len(result.candidate_segments) == 1
         assert "same relay as last time" in result.candidate_segments[0].text
     elif case_id == "H03-forwarded-correction-thread":
@@ -89,6 +92,42 @@ def test_alternate_header_csv_is_source_linked():
     assert len(result.lines) == 3
     assert all(line.source_locator.row_number is not None for line in result.lines)
     assert result.source_coverage
+
+
+def test_single_paragraph_email_greeting_does_not_hide_item_clues(tmp_path):
+    text = (
+        "Hi, this is Aria Chen from Northstar Controls. Need 5 pcs of "
+        "Siemens 6ES7214-1AG40-0XB0 by next Friday."
+    )
+    parsed = TextParser().parse(text.encode(), "wrapped-email.txt")
+    assert len(parsed.lines) == 1
+    assert parsed.lines[0].requested_mpn == "6ES7214-1AG40-0XB0"
+    assert parsed.lines[0].quantity == 5
+    assert parsed.source_coverage[0].structured_regions == 1
+
+    manager = CaseManager(
+        catalog=CatalogRepository(),
+        storage=DocumentStorage(tmp_path / "sources"),
+    )
+    case = manager.create_case_from_text(text, title="Synthetic wrapped email")
+    rows = manager.get_lines(case.case_id)
+    assert case.status.value != "FAILED"
+    assert len(rows) == 1
+    assert rows[0].review_decision.value == "PENDING"
+    assert "Siemens 6ES7214-1AG40-0XB0" in rows[0].raw_text
+
+
+def test_common_manufacturer_part_number_csv_header_is_recognized():
+    result = SpreadsheetParser().parse(
+        b"Manufacturer,manufacturer_part_number,Requested Qty,Unit\n"
+        b"Siemens,6ES7214-1AG40-0XB0,2,EA\n",
+        "common_manufacturer_part_header.csv",
+    )
+    assert len(result.lines) == 1
+    assert result.lines[0].requested_manufacturer == "Siemens"
+    assert result.lines[0].requested_mpn == "6ES7214-1AG40-0XB0"
+    assert result.lines[0].quantity == 2
+    assert not any(w.code == "HEADERLESS_CSV_LAYOUT_GUESSED" for w in result.warnings)
 
 
 def test_workbook_with_title_before_headers_is_source_linked():
@@ -172,3 +211,85 @@ def test_ten_human_input_shapes_complete_case_intake_without_silent_loss(tmp_pat
             assert case.document_warnings or case.source_coverage
         else:
             assert case.status.value != "FAILED", case_id
+
+
+class MessyEmailLuna:
+    model = "gpt-6-luna"
+
+    def __init__(self):
+        self.calls = 0
+
+    def complete(self, *, system, user):
+        import json
+
+        self.calls += 1
+        if "Extract only RFQ line items" in system:
+            payload = json.loads(user)
+            lines = []
+            for segment in payload:
+                if "Siemens" in segment["text"]:
+                    lines.append({
+                    "line_number": 1,
+                    "requested_manufacturer": "Siemens",
+                    "requested_mpn": "6ES7214-1AG40-0XB0",
+                    "description": None,
+                    "quantity": 2,
+                    "unit": "pcs",
+                    "segment_id": segment["segment_id"],
+                    "source_quote": "2 pcs Siemens 6ES7214-1AG40-0XB0",
+                    })
+                elif "Phoenix Contact" in segment["text"]:
+                    lines.append({
+                    "line_number": 2,
+                    "requested_manufacturer": "Phoenix Contact",
+                    "requested_mpn": "2900364",
+                    "description": None,
+                    "quantity": 3,
+                    "unit": "ea",
+                    "segment_id": segment["segment_id"],
+                    "source_quote": "Phoenix Contact 2900364 qty 3 ea",
+                    })
+            return json.dumps({"lines": lines})
+        payload = json.loads(user)
+        return json.dumps({"lines": [
+            {"line_number": line["line_number"], "verdict": "consistent"}
+            for line in payload["proposals"]
+        ]})
+
+
+def test_messy_multi_item_email_uses_full_source_luna_proposal(tmp_path):
+    """The model, not a plausible-looking heuristic row, shapes unstructured email lines."""
+    from rfq_assistant.schemas.models import CatalogItem
+
+    provider = MessyEmailLuna()
+    catalog = CatalogRepository()
+    for sku, manufacturer, mpn in (
+        ("SYN-SIE-1", "Siemens", "6ES7214-1AG40-0XB0"),
+        ("SYN-PHX-1", "Phoenix Contact", "2900364"),
+    ):
+        catalog.add_item(CatalogItem(
+            internal_sku=sku,
+            manufacturer=manufacturer,
+            manufacturer_part_number=mpn,
+            description="Synthetic component",
+        ))
+    manager = CaseManager(
+        catalog=catalog,
+        storage=DocumentStorage(tmp_path / "sources"),
+        llm_extractor=GroundedLLMExtractor(provider),
+    )
+
+    source = "hey can u quote 2 pcs Siemens 6ES7214-1AG40-0XB0 and Phoenix Contact 2900364 qty 3 ea thx"
+    case = manager.create_case_from_text(source, title="Synthetic messy email")
+    lines = manager.get_lines(case.case_id)
+
+    assert provider.calls == 2  # Full-source JSON proposal and independent consistency pass.
+    assert [(line.requested_manufacturer, line.requested_mpn, line.quantity) for line in lines] == [
+        ("Siemens", "6ES7214-1AG40-0XB0", 2.0),
+        ("Phoenix Contact", "2900364", 3.0),
+    ]
+    assert all(line.review_decision.value == "PENDING" for line in lines)
+    assert all(any(w.code == "LLM_PROPOSED_EXTRACTION" for w in line.extraction_warnings) for line in lines)
+    assert all(any(w.code == "UNSTRUCTURED_COMPLETENESS_REQUIRES_REVIEW" for w in line.extraction_warnings) for line in lines)
+    assert case.llm_call_count == 2
+    assert case.llm_review_call_count == 1

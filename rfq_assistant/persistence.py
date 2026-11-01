@@ -69,6 +69,7 @@ class StateStore(Protocol):
     def load_catalog_update_proposals(self) -> List[Dict[str, Any]]: ...
     def load_catalog_update_proposal(self, proposal_id: str) -> Optional[Dict[str, Any]]: ...
     def save_catalog_update_proposal(self, payload: Dict[str, Any]) -> None: ...
+    def commit_catalog_update_batch(self, items: List[Any], proposals: List[Dict[str, Any]], expected_versions: Dict[str, int]) -> None: ...
     def load_quote_drafts(self) -> List[Dict[str, Any]]: ...
     def save_quote_draft(self, payload: Dict[str, Any]) -> None: ...
 
@@ -484,6 +485,36 @@ class SQLiteStateStore:
                     payload["proposal_id"], payload["batch_id"], payload["review_status"],
                     payload["created_at"], json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
                 ),
+            )
+
+    def commit_catalog_update_batch(
+        self, items: List[Any], proposals: List[Dict[str, Any]], expected_versions: Dict[str, int]
+    ) -> None:
+        """Commit active catalog and reviewed proposals in one SQLite transaction."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = {}
+            for proposal_id in expected_versions:
+                row = connection.execute(
+                    "SELECT proposal_id, payload FROM catalog_update_proposals WHERE proposal_id = ?",
+                    (proposal_id,),
+                ).fetchone()
+                if row:
+                    current[row["proposal_id"]] = json.loads(row["payload"])
+            if set(current) != set(expected_versions):
+                raise ValueError("One or more catalog proposals no longer exist.")
+            for proposal_id, expected_version in expected_versions.items():
+                payload = current[proposal_id]
+                if payload.get("review_status") != "pending" or payload.get("version") != expected_version:
+                    raise ValueError("A catalog proposal changed while it was being reviewed. Refresh and review again.")
+            connection.execute("DELETE FROM catalog_items")
+            connection.executemany(
+                "INSERT INTO catalog_items(internal_sku, payload) VALUES(?, ?)",
+                [(item.internal_sku, self._dump(item)) for item in items],
+            )
+            connection.executemany(
+                "UPDATE catalog_update_proposals SET review_status=?, payload=? WHERE proposal_id=?",
+                [(p["review_status"], json.dumps(p, ensure_ascii=False, separators=(",", ":")), p["proposal_id"]) for p in proposals],
             )
 
     def load_quote_drafts(self) -> List[Dict[str, Any]]:

@@ -53,6 +53,29 @@ def canonical_csv(*rows):
     ).encode()
 
 
+class EchoGroundedTextClient:
+    model = "gpt-6-luna"
+    deployment_version = "test-fixture"
+
+    def complete(self, *, system: str, user: str) -> str:
+        import json
+
+        payload = json.loads(user)
+        excerpt = payload["source_excerpts"][0]
+        text = excerpt["text"]
+        return json.dumps({"proposals": [{
+            "internal_sku": None,
+            "manufacturer": "WAGO",
+            "manufacturer_part_number": "2002-1201",
+            "description": "feed-through terminal block",
+            "list_price": 1.80,
+            "currency": "USD",
+            "stock_qty": 42,
+            "segment_id": excerpt["segment_id"],
+            "evidence_quote": text,
+        }]})
+
+
 def test_new_catalog_row_is_staged_then_explicitly_accepted(tmp_path):
     service, catalog, store = isolated_service(tmp_path)
     proposals = service.stage(
@@ -69,7 +92,7 @@ def test_new_catalog_row_is_staged_then_explicitly_accepted(tmp_path):
     assert proposal.proposed_values["list_price"] == "17.25"
     assert catalog.get_by_sku("SKU-NEW") is None
 
-    accepted = service.review(proposal.proposal_id, actor="Distributor", accept=True)
+    accepted = service.review_batch([{"proposal_id": proposal.proposal_id, "expected_version": proposal.version, "decision": "accept"}], actor="Distributor")[0]
     assert accepted.review_status == "accepted"
     assert accepted.reviewed_by == "Distributor"
     assert catalog.get_by_sku("SKU-NEW").list_price == 17.25
@@ -85,6 +108,87 @@ def test_new_catalog_row_is_staged_then_explicitly_accepted(tmp_path):
     )
 
 
+
+def test_review_done_requires_every_pending_decision_and_commits_accepts_together(tmp_path):
+    service, catalog, store = isolated_service(tmp_path)
+    proposals = service.stage(
+        content=canonical_csv(
+            "SKU-NEW,Phoenix Contact,2900364,Power supply,17.25,USD,4",
+            "SKU-EXISTING,Siemens,6ES7134-6GD01-0BA1,Analog input module,42.50,USD,18",
+        ),
+        filename="two-record-update.csv",
+        actor="Distributor",
+    )
+    assert len(proposals) == 2
+    assert catalog.get_by_sku("SKU-NEW") is None
+    assert catalog.get_by_sku("SKU-EXISTING").stock_qty == 8
+
+    partial = [{"proposal_id": proposals[0].proposal_id, "expected_version": proposals[0].version, "decision": "accept"}]
+    try:
+        service.review_batch(partial, actor="Distributor")
+    except CatalogUpdateError as exc:
+        assert "Review every pending change" in str(exc)
+    else:
+        raise AssertionError("Partial review must not commit")
+    assert catalog.get_by_sku("SKU-NEW") is None
+    assert catalog.get_by_sku("SKU-EXISTING").stock_qty == 8
+    assert all(store.load_catalog_update_proposal(p.proposal_id)["review_status"] == "pending" for p in proposals)
+
+    reviewed = service.review_batch([
+        {"proposal_id": proposals[0].proposal_id, "expected_version": proposals[0].version, "decision": "accept"},
+        {"proposal_id": proposals[1].proposal_id, "expected_version": proposals[1].version, "decision": "reject"},
+    ], actor="Distributor")
+    status_by_id = {p.proposal_id: p.review_status for p in reviewed}
+    assert status_by_id[proposals[0].proposal_id] == "accepted"
+    assert status_by_id[proposals[1].proposal_id] == "rejected"
+    assert catalog.get_by_sku("SKU-NEW").manufacturer_part_number == "2900364"
+    assert catalog.get_by_sku("SKU-EXISTING").stock_qty == 8
+    assert all(store.load_catalog_update_proposal(p.proposal_id)["review_status"] != "pending" for p in proposals)
+
+
+
+def test_review_done_refuses_proposal_if_active_catalog_changed_after_staging(tmp_path):
+    service, catalog, store = isolated_service(tmp_path)
+    proposal = service.stage(
+        content=canonical_csv(
+            "SKU-EXISTING,Siemens,6ES7134-6GD01-0BA1,Analog input module,42.50,USD,18"
+        ),
+        filename="stock-update.csv",
+        actor="Distributor",
+    )[0]
+    active = catalog.get_by_sku("SKU-EXISTING").model_copy(update={"description": "Live row changed"})
+    catalog.upsert_item(active)
+    current = catalog.get_by_sku("SKU-EXISTING")
+    try:
+        service.review_batch([{"proposal_id": proposal.proposal_id, "expected_version": proposal.version, "decision": "accept"}], actor="Distributor")
+    except CatalogUpdateError as exc:
+        assert "catalog changed after these proposals" in str(exc)
+    else:
+        raise AssertionError("Stale catalog proposal must not apply")
+    assert catalog.get_by_sku("SKU-EXISTING").description == "Live row changed"
+    assert catalog.get_by_sku("SKU-EXISTING").stock_qty == 8
+    assert store.load_catalog_update_proposal(proposal.proposal_id)["review_status"] == "pending"
+
+
+def test_freeform_update_keeps_greeting_paragraph_as_groundable_source(tmp_path):
+    service, catalog, _ = isolated_service(tmp_path, client=EchoGroundedTextClient())
+    source = (
+        "Hi, this is the distributor update. Add WAGO 2002-1201, feed-through terminal block, "
+        "price 1.80 USD, stock 42."
+    )
+    proposal = service.stage(
+        content=source.encode(),
+        filename="pasted-distributor-update.txt",
+        actor="Distributor",
+    )[0]
+
+    assert proposal.change_type == "new"
+    assert proposal.review_status == "pending"
+    assert proposal.evidence_quote == source
+    assert proposal.source_locator.row_number == 1
+    assert not any(item.manufacturer == "WAGO" for item in catalog.list_all())
+
+
 def test_rejected_change_does_not_mutate_catalog_and_can_be_revised(tmp_path):
     service, catalog, _ = isolated_service(tmp_path)
     proposal = service.stage(
@@ -98,9 +202,7 @@ def test_rejected_change_does_not_mutate_catalog_and_can_be_revised(tmp_path):
     assert proposal.changed_fields["stock_qty"] == {"current": 8, "proposed": 18}
     before = catalog.get_by_sku("SKU-EXISTING").model_dump()
 
-    rejected = service.review(
-        proposal.proposal_id, actor="Distributor", accept=False, note="Wrong branch"
-    )
+    rejected = service.review_batch([{"proposal_id": proposal.proposal_id, "expected_version": proposal.version, "decision": "reject"}], actor="Distributor", note="Wrong branch")[0]
     assert rejected.review_status == "rejected"
     assert catalog.get_by_sku("SKU-EXISTING").model_dump() == before
 
@@ -139,7 +241,7 @@ def test_nullable_catalog_values_can_be_cleared_only_after_explicit_acceptance(
     assert catalog.get_by_sku("SKU-EXISTING").currency == "USD"
     assert catalog.get_by_sku("SKU-EXISTING").stock_qty == 8
 
-    accepted = service.review(proposal.proposal_id, actor="Distributor", accept=True)
+    accepted = service.review_batch([{"proposal_id": proposal.proposal_id, "expected_version": proposal.version, "decision": "accept"}], actor="Distributor")[0]
 
     active = catalog.get_by_sku("SKU-EXISTING")
     assert accepted.review_status == "accepted"
@@ -290,9 +392,10 @@ def test_catalog_update_api_stages_an_explicit_clear_without_applying_it(
         assert catalog.get_by_sku("SKU-CLEAR").list_price == 42.5
 
         accepted = client.post(
-            f"/api/catalogs/updates/{proposal['proposal_id']}/accept", json={}
+            "/api/catalogs/updates/review", json={"decisions": [{"proposal_id": proposal["proposal_id"], "expected_version": proposal["version"], "decision": "accept"}]}
         )
         assert accepted.status_code == 200, accepted.text
+        assert accepted.json()[0]["review_status"] == "accepted"
         active = catalog.get_by_sku("SKU-CLEAR")
         assert active.list_price is None
         assert active.currency is None
@@ -308,7 +411,7 @@ def test_incomplete_proposal_cannot_be_accepted(tmp_path):
     )[0]
     assert proposal.blocking_reasons
     try:
-        service.review(proposal.proposal_id, actor="Distributor", accept=True)
+        service.review_batch([{"proposal_id": proposal.proposal_id, "expected_version": proposal.version, "decision": "accept"}], actor="Distributor")[0]
     except CatalogUpdateError as exc:
         assert "needs clarification" in str(exc)
     else:
@@ -417,10 +520,10 @@ def test_catalog_update_api_retains_source_and_rejection_is_audited(
         assert source.content == csv_bytes
 
         rejected = client.post(
-            f"/api/catalogs/updates/{proposal['proposal_id']}/reject",
-            json={"note": "Wrong warehouse"},
+            "/api/catalogs/updates/review",
+            json={"note": "Wrong warehouse", "decisions": [{"proposal_id": proposal["proposal_id"], "expected_version": proposal["version"], "decision": "reject"}]},
         )
         assert rejected.status_code == 200, rejected.text
-        assert rejected.json()["review_status"] == "rejected"
-        assert rejected.json()["reviewed_by"]
+        assert rejected.json()[0]["review_status"] == "rejected"
+        assert rejected.json()[0]["reviewed_by"]
         assert catalog.get_by_sku("SKU-EXISTING").stock_qty == 8

@@ -364,6 +364,7 @@ class TestDomainIntegrations:
             quote_id="Q-ERP-1",
             case_id="RFQ-ERP-1",
             customer_name="Delta Engineering",
+            currency="USD",
             lines=[line],
             is_approved=True,
             approved_at="2026-10-27T01:00:00Z",
@@ -378,6 +379,7 @@ class TestDomainIntegrations:
         quote = ProposedQuote(
             quote_id="Q-ERP-INCOMPLETE",
             case_id="RFQ-ERP-INCOMPLETE",
+            currency="USD",
             lines=[
                 QuoteLine(
                     line_no=1,
@@ -389,6 +391,16 @@ class TestDomainIntegrations:
         )
 
         with pytest.raises(ValueError, match="authoritative unit price"):
+            map_proposed_quote_to_erpnext(quote)
+
+    def test_erpnext_quote_requires_confirmed_currency(self):
+        quote = ProposedQuote(
+            quote_id="Q-ERP-NO-CURRENCY",
+            case_id="RFQ-ERP-NO-CURRENCY",
+            lines=[],
+        )
+
+        with pytest.raises(ValueError, match="confirmed currency"):
             map_proposed_quote_to_erpnext(quote)
 
     def test_inventree_bom_mapping_requires_confirmed_quantity(self):

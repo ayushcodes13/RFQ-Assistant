@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import { BookOpen, ChartNoAxesCombined, Database, Inbox, Keyboard, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { BookOpen, Database, Inbox, Keyboard, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { RFQCase } from "@/types";
 
-export type AppTab = "overview" | "inbox" | "workbench" | "catalog" | "updates";
+export type AppTab = "inbox" | "workbench" | "catalog" | "updates";
 
 interface HeaderProps {
   currentTab: AppTab;
@@ -17,7 +17,6 @@ interface HeaderProps {
 }
 
 const navigation = [
-  { id: "overview" as const, label: "Overview", icon: ChartNoAxesCombined },
   { id: "inbox" as const, label: "RFQ inbox", icon: Inbox },
   { id: "catalog" as const, label: "Catalog", icon: BookOpen },
   { id: "updates" as const, label: "Update data", icon: Database },
@@ -145,7 +144,7 @@ export function Header({ currentTab, onTabChange, onOpenShortcuts, cases, sideba
 }
 
 export function AppTopbar({ currentTab, activeCaseTitle }: { currentTab: AppTab; activeCaseTitle?: string }) {
-  const pageLabel = currentTab === "workbench" ? activeCaseTitle || "RFQ review" : currentTab === "inbox" ? "RFQ inbox" : currentTab === "catalog" ? "Catalog" : currentTab === "updates" ? "Update data" : "Overview";
+  const pageLabel = currentTab === "workbench" ? activeCaseTitle || "RFQ review" : currentTab === "inbox" ? "RFQ inbox" : currentTab === "catalog" ? "Catalog" : "Update data";
   return (
     <div className="rfq-topbar">
       <div className="flex min-w-0 items-center gap-2 text-[13px]">

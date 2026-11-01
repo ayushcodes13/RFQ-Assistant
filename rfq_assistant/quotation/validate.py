@@ -35,9 +35,10 @@ class QuoteLine(BaseModel):
     # Keep unresolved quantities visible in a draft instead of fabricating a
     # value or raising a schema error while building the review artifact.
     quantity: Optional[Decimal] = Field(default=None, gt=0)
+    stock_qty: Optional[int] = Field(default=None, ge=0)
     unit: str = "EA"
     unit_price: Optional[Decimal] = None
-    currency: Optional[str] = "USD"
+    currency: Optional[str] = None
     source_price_id: Optional[str] = None
     match_status: str = "unmatched"  # exact, candidate, unmatched
     requires_human_review: bool = True
@@ -48,7 +49,7 @@ class QuoteLine(BaseModel):
     @property
     def line_total(self) -> Optional[Decimal]:
         """Deterministic unrounded extension; never trust a model-supplied total."""
-        if self.unit_price is None or self.quantity is None:
+        if self.unit_price is None or self.quantity is None or not self.currency:
             return None
         return self.quantity * self.unit_price
 
@@ -59,7 +60,7 @@ class ProposedQuote(BaseModel):
     case_id: str
     customer_name: Optional[str] = None
     customer_reference: Optional[str] = None
-    currency: str = "USD"
+    currency: Optional[str] = None
     lines: List[QuoteLine] = Field(default_factory=list)
     total_amount: Optional[Decimal] = None
     source_state_hash: Optional[str] = None  # Snapshot of RFQ rows and catalog at draft creation
@@ -76,12 +77,7 @@ class ProposedQuote(BaseModel):
     def calculate_total_when_all_prices_are_present(self):
         """Fill a missing grand total from Decimal line extensions; retain supplied totals for checking."""
         if self.total_amount is None and self.lines:
-            total = Decimal("0")
-            for line in self.lines:
-                if line.unit_price is None or line.quantity is None:
-                    return self
-                total += line.quantity * line.unit_price
-            self.total_amount = total
+            self.total_amount = calculate_quote_total(self.lines)
         return self
 
     def compute_draft_hash(self) -> str:
@@ -105,6 +101,7 @@ class ProposedQuote(BaseModel):
                     "cat_id": l.catalogue_part_id,
                     "description": l.description,
                     "qty": str(l.quantity),
+                    "stock_qty": l.stock_qty,
                     "unit": l.unit,
                     "price": str(l.unit_price) if l.unit_price is not None else None,
                     "currency": l.currency,
@@ -155,6 +152,10 @@ def validate_quote_line(line: QuoteLine) -> List[str]:
             errors.append(f"Line {line.line_no}: Quantity cannot be NaN or Infinite.")
         elif line.quantity <= Decimal("0"):
             errors.append(f"Line {line.line_no}: Quantity must be greater than zero.")
+        elif line.stock_qty is not None and line.quantity > Decimal(line.stock_qty):
+            errors.append(
+                f"Line {line.line_no}: Requested quantity {line.quantity} exceeds catalog stock {line.stock_qty}; confirm availability before preparing a quote."
+            )
     except (ValueError, TypeError):
         errors.append(f"Line {line.line_no}: Malformed quantity '{line.quantity}'.")
 
@@ -197,8 +198,11 @@ def validate_proposed_quote(quote: ProposedQuote) -> List[str]:
 
 
 def calculate_quote_total(lines: List[QuoteLine]) -> Optional[Decimal]:
-    """Return a Decimal total only when every line has quantity and authoritative price."""
+    """Return a total only when every line has a price, quantity, and one known currency."""
     if not lines:
+        return None
+    currencies = {line.currency for line in lines}
+    if None in currencies or "" in currencies or len(currencies) != 1:
         return None
     total = Decimal("0")
     for line in lines:

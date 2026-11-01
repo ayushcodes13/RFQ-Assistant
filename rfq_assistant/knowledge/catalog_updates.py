@@ -302,6 +302,21 @@ class CatalogUpdateService:
                     text=line.raw_text,
                 )
             )
+        if not segments and source_type == SourceType.EMAIL_TEXT:
+            # Preserve the complete pasted note when deterministic email
+            # heuristics classify a wrapped paragraph as a greeting/metadata.
+            # The note remains untrusted and still requires grounded review.
+            raw_text = content.decode("utf-8", errors="replace").strip()
+            if raw_text:
+                segments.append(EvidenceSegment(
+                    segment_id="source-text-1",
+                    locator=SourceLocator(
+                        file_name=filename,
+                        row_number=1,
+                        text_snippet=raw_text[:120],
+                    ),
+                    text=raw_text,
+                ))
         if not segments:
             raise CatalogUpdateError(
                 "No readable source text was found. Keep the original and enter the facts manually."
@@ -559,46 +574,55 @@ class CatalogUpdateService:
         self.state_store.save_catalog_update_proposal(proposal.model_dump(mode="json"))
         return proposal
 
-    def review(
-        self, proposal_id: str, *, actor: str, accept: bool, note: str | None = None
-    ) -> CatalogUpdateProposal:
+    def review_batch(self, decisions: list[dict[str, Any]], *, actor: str, note: str | None = None) -> list[CatalogUpdateProposal]:
+        """Apply one complete human review as a single catalog transaction."""
         with self._lock:
-            proposal = self.get_proposal(proposal_id)
-            if proposal is None:
-                raise CatalogUpdateError("Catalog update proposal was not found.")
-            if proposal.review_status != "pending":
-                raise CatalogUpdateError(
-                    "Only a pending proposal can be accepted or rejected. Reopen it to make a revision."
-                )
-            if accept:
-                if proposal.blocking_reasons:
-                    raise CatalogUpdateError(
-                        "This proposal needs clarification before it can be accepted."
+            pending = [p for p in self.list_proposals() if p.review_status == "pending" and p.change_type != "unchanged"]
+            expected_ids = {p.proposal_id for p in pending}
+            received = {d["proposal_id"] for d in decisions}
+            if len(received) != len(decisions):
+                raise CatalogUpdateError("Each pending change must have exactly one decision.")
+            if received != expected_ids:
+                raise CatalogUpdateError("Review every pending change before clicking Review done. Refresh if the list changed.")
+            by_id = {p.proposal_id: p for p in pending}
+            expected_versions: dict[str, int] = {}
+            decision_by_id = {d["proposal_id"]: d for d in decisions}
+            accepted_items: list[CatalogItem] = []
+            expected_catalog_versions: dict[str, str | None] = {}
+            now = datetime.now(timezone.utc)
+            staged_payloads: list[dict[str, Any]] = []
+            for proposal_id in sorted(expected_ids):
+                proposal = by_id[proposal_id]
+                decision = decision_by_id[proposal_id]
+                if decision["expected_version"] != proposal.version:
+                    raise CatalogUpdateError("A proposal changed while you were reviewing it. Refresh and review again.")
+                accept = decision["decision"] == "accept"
+                if accept:
+                    if proposal.blocking_reasons:
+                        raise CatalogUpdateError("A selected change needs clarification before it can be accepted.")
+                    merged = proposal.current_item.model_dump() if proposal.current_item else {}
+                    merged.update(proposal.proposed_values)
+                    merged.pop("catalog_version", None)
+                    try:
+                        item = CatalogItem.model_validate(merged)
+                    except ValidationError as exc:
+                        raise CatalogUpdateError("A selected catalog record is incomplete or invalid.") from exc
+                    expected_catalog_versions[item.internal_sku] = (
+                        proposal.current_item.catalog_version if proposal.current_item else None
                     )
-                merged = (
-                    proposal.current_item.model_dump() if proposal.current_item else {}
+                    accepted_items.append(item)
+                    proposal.current_item = item
+                proposal.review_status = "accepted" if accept else "rejected"
+                proposal.reviewed_by = actor
+                proposal.reviewed_at = now
+                proposal.review_note = note
+                proposal.version += 1
+                expected_versions[proposal_id] = decision["expected_version"]
+                staged_payloads.append(proposal.model_dump(mode="json"))
+            try:
+                self.catalog.commit_reviewed_batch(
+                    accepted_items, staged_payloads, expected_versions, expected_catalog_versions
                 )
-                merged.update(proposal.proposed_values)
-                merged.pop("catalog_version", None)
-                try:
-                    item = CatalogItem.model_validate(merged)
-                except ValidationError as exc:
-                    raise CatalogUpdateError(
-                        "The proposed catalog record is incomplete or invalid."
-                    ) from exc
-                version = self.catalog.upsert_item(item)
-                active = self.catalog.get_by_sku(item.internal_sku)
-                if active is None or active.catalog_version != version:
-                    raise CatalogUpdateError(
-                        "The active catalog update could not be verified after writing."
-                    )
-                proposal.current_item = active
-            proposal.review_status = "accepted" if accept else "rejected"
-            proposal.reviewed_by = actor
-            proposal.reviewed_at = datetime.now(timezone.utc)
-            proposal.review_note = note
-            proposal.version += 1
-            self.state_store.save_catalog_update_proposal(
-                proposal.model_dump(mode="json")
-            )
-            return proposal
+            except ValueError as exc:
+                raise CatalogUpdateError(str(exc)) from exc
+            return [CatalogUpdateProposal.model_validate(payload) for payload in staged_payloads]

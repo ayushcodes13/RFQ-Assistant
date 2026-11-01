@@ -3,9 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, FileUp, LoaderCircle, RefreshCw, Send, X, Sparkles } from "lucide-react";
 import {
-  acceptCatalogUpdate,
   listCatalogUpdateProposals,
-  rejectCatalogUpdate,
+  reviewCatalogUpdates,
   stageCatalogUpdate,
 } from "@/services/api";
 import { CatalogItem, CatalogUpdateProposal } from "@/types";
@@ -26,10 +25,12 @@ function CatalogChange({
   proposal,
   onReview,
   onRevise,
+  selectedDecision,
   busy,
 }: {
   proposal: CatalogUpdateProposal;
   onReview: (proposalId: string, decision: "accept" | "reject") => void;
+  selectedDecision?: "accept" | "reject";
   onRevise: (proposalId: string, text: string) => void;
   busy: boolean;
 }) {
@@ -60,14 +61,14 @@ function CatalogChange({
         </div>
         {proposal.review_status === "pending" && !unchanged && (
           <div className="flex shrink-0 items-center gap-2">
-            <button type="button" className="rfq-secondary" disabled={busy} onClick={() => onReview(proposal.proposal_id, "reject")} aria-label={`Reject proposal ${proposal.proposal_id}`}><X size={15} aria-hidden="true" />Reject</button>
-            <button type="button" className="rfq-primary" disabled={!canAccept || busy} onClick={() => onReview(proposal.proposal_id, "accept")} aria-label={`Accept proposal ${proposal.proposal_id}`}><Check size={15} aria-hidden="true" />Accept change</button>
+            <button type="button" className={selectedDecision === "reject" ? "rfq-primary" : "rfq-secondary"} disabled={busy} aria-pressed={selectedDecision === "reject"} onClick={() => onReview(proposal.proposal_id, "reject")} aria-label={`Mark proposal ${proposal.proposal_id} rejected`}><X size={15} aria-hidden="true" />{selectedDecision === "reject" ? "Marked to reject" : "Reject"}</button>
+            <button type="button" className={selectedDecision === "accept" ? "rfq-primary" : "rfq-secondary"} disabled={!canAccept || busy} aria-pressed={selectedDecision === "accept"} onClick={() => onReview(proposal.proposal_id, "accept")} aria-label={`Mark proposal ${proposal.proposal_id} accepted`}><Check size={15} aria-hidden="true" />{selectedDecision === "accept" ? "Marked to accept" : "Accept change"}</button>
           </div>
         )}
       </div>
 
       {unchanged && <p className="mt-3 text-[13px] text-[#52656b]">This source matches the active catalog. No update is needed.</p>}
-      {(proposal.clear_fields?.length ?? 0) > 0 && <p className="mt-3 rounded-md border border-[#ead8c6] bg-[#fbf5ee] px-3 py-2 text-[13px] text-[#6f452c]">This proposal clears the stored {proposal.clear_fields?.map((field) => field.replaceAll("_", " ")).join(" and ")}. The catalog changes only if you accept it.</p>}
+      {(proposal.clear_fields?.length ?? 0) > 0 && <p className="mt-3 rounded-md border border-[#ead8c6] bg-[#fbf5ee] px-3 py-2 text-[13px] text-[#6f452c]">This proposal clears the stored {proposal.clear_fields?.map((field) => field.replaceAll("_", " ")).join(" and ")}. The catalog changes only if you mark this to accept and click Review done.</p>}
       {rows.length > 0 && <div className="mt-4 overflow-x-auto">
         <table className="w-full min-w-[430px] border-collapse text-left text-[13px]">
           <thead><tr className="text-[12px] font-medium text-[#52656b]"><th className="pb-2 pr-4">Field</th><th className="pb-2 pr-4">Current data</th><th className="pb-2">Proposed value</th></tr></thead>
@@ -81,13 +82,13 @@ function CatalogChange({
       </div>}
       {sourceWarnings.map((warning) => <p key={warning} className="mt-2 text-[12px] text-[#815408]">{warning}</p>)}
       <blockquote className="mt-3 border-l-2 border-[#cbd6d9] pl-3 text-[13px] leading-5 text-[#52656b]">“{proposal.evidence_quote}”</blockquote>
-      {proposal.review_status === "rejected" && <div className="mt-4 rounded-md bg-[#f3f7f8] p-3">
-        <p className="text-[13px] font-medium text-[#26373d]">Want to revise this information?</p>
-        <p className="mt-1 text-[12px] text-[#52656b]">Describe the correction in ordinary words. The existing catalog entry stays as it is until you accept a new proposal.</p>
+      {proposal.review_status === "rejected" && <div className="mt-4 max-w-[760px] rounded-md border border-[#dfe7e9] bg-[#f7f9f9] p-4">
+        <p className="text-[13px] font-medium text-[#26373d]">You rejected this proposal. What should change?</p>
+        <p className="mt-1 text-[12px] leading-5 text-[#52656b]">Tell GPT-6 Luna what was wrong, or add a corrected source above. It will prepare a new proposal for review. The active catalog stays unchanged until you mark the corrected proposal to accept and click Review done.</p>
         <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-          <label className="sr-only" htmlFor={`revision-${proposal.proposal_id}`}>Describe a correction</label>
-          <input id={`revision-${proposal.proposal_id}`} className="h-9 min-w-0 flex-1 rounded-md border border-[#cbd6d9] bg-white px-3 text-[13px]" value={revision} onChange={(event) => setRevision(event.target.value)} placeholder="For example: the stock figure should be 18, not 8" />
-          <button type="button" className="rfq-secondary" disabled={!revision.trim() || busy} onClick={() => onRevise(proposal.proposal_id, revision.trim())}><RefreshCw size={14} aria-hidden="true" />Create revised proposal</button>
+          <label className="sr-only" htmlFor={`revision-${proposal.proposal_id}`}>Explain the correction for this catalog proposal</label>
+          <textarea id={`revision-${proposal.proposal_id}`} className="min-h-[76px] min-w-0 flex-1 resize-y rounded-md border border-[#cbd6d9] bg-white px-3 py-2 text-[13px] leading-5" value={revision} onChange={(event) => setRevision(event.target.value)} placeholder="For example: the stock is 18, not 8. Keep the current price." />
+          <button type="button" className="rfq-secondary self-end" disabled={!revision.trim() || busy} onClick={() => onRevise(proposal.proposal_id, revision.trim())}><Send size={14} aria-hidden="true" />Ask Luna to revise</button>
         </div>
       </div>}
     </article>
@@ -100,6 +101,7 @@ export function CatalogUpdatesView({ initialItem, onInitialItemHandled }: { init
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [decisions, setDecisions] = useState<Record<string, "accept" | "reject">>({});
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -171,15 +173,28 @@ export function CatalogUpdatesView({ initialItem, onInitialItemHandled }: { init
     }
   };
 
-  const review = async (proposalId: string, decision: "accept" | "reject") => {
-    setBusyId(proposalId);
+  const chooseDecision = (proposalId: string, decision: "accept" | "reject") => {
+    setDecisions((current) => { const next = { ...current }; if (next[proposalId] === decision) delete next[proposalId]; else next[proposalId] = decision; return next; });
+  };
+
+  const reviewDone = async () => {
+    if (!pending.length || pending.some((proposal) => !decisions[proposal.proposal_id])) return;
+    setBusyId("batch");
     setError(null);
     try {
-      const changed = decision === "accept" ? await acceptCatalogUpdate(proposalId) : await rejectCatalogUpdate(proposalId);
-      setProposals((items) => items.map((item) => item.proposal_id === proposalId ? changed : item));
-      setNotice(decision === "accept" ? "Change accepted. The active catalog was updated and this change was recorded." : "Change rejected. The active catalog was left unchanged.");
+      const reviewed = await reviewCatalogUpdates(pending.map((proposal) => ({
+        proposal_id: proposal.proposal_id,
+        expected_version: proposal.version,
+        decision: decisions[proposal.proposal_id],
+      })));
+      const byId = new Map(reviewed.map((proposal) => [proposal.proposal_id, proposal]));
+      setProposals((items) => items.map((item) => byId.get(item.proposal_id) || item));
+      setDecisions({});
+      const accepted = reviewed.filter((proposal) => proposal.review_status === "accepted").length;
+      const rejected = reviewed.length - accepted;
+      setNotice(`Review complete. ${accepted} ${accepted === 1 ? "change was" : "changes were"} applied${rejected ? `; ${rejected} ${rejected === 1 ? "was" : "were"} rejected and left out of active data` : ""}.`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The proposal could not be reviewed.");
+      setError(cause instanceof Error ? cause.message : "The catalog review could not be committed.");
     } finally {
       setBusyId(null);
     }
@@ -197,8 +212,8 @@ export function CatalogUpdatesView({ initialItem, onInitialItemHandled }: { init
       </div>
 
       <section className="mt-6 max-w-[1000px]" aria-labelledby="update-source-heading">
-        <h2 id="update-source-heading" className="text-[15px] font-semibold text-[#142126]">What would you like to add or change?</h2>
-        <p className="mt-1 text-[13px] text-[#52656b]">Paste a distributor note to ask the configured GPT-6 Luna model for a reviewable proposal, or upload a structured catalog file for deterministic extraction. Each source is reviewed separately.</p>
+        <h2 id="update-source-heading" className="text-[15px] font-semibold text-[#142126]">Add distributor data</h2>
+        <p className="mt-1 text-[13px] text-[#52656b]">Upload a distributor document to process it without writing a prompt, or paste a note if that is what you received. Each source becomes proposals; mark each one, then click Review done to apply accepted records together.</p>
         <label className="sr-only" htmlFor="catalog-update-text">Paste distributor information</label>
         <textarea ref={textAreaRef} id="catalog-update-text" className="mt-4 min-h-[132px] w-full resize-y rounded-md border border-[#cbd6d9] bg-white p-3 text-[14px] leading-6 text-[#1d2b30] placeholder:text-[#667980] focus:border-[#a83e1c] focus:outline-none" value={text} onChange={(event) => setText(event.target.value)} placeholder={'Example: We received 18 more Siemens 6ES7134-6GD01-0XB0 modules. Stock is now 18.'} />
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -207,7 +222,7 @@ export function CatalogUpdatesView({ initialItem, onInitialItemHandled }: { init
           {file && <button type="button" className="text-[13px] text-[#52656b] underline" onClick={() => { setFile(null); if (fileInput.current) fileInput.current.value = ""; }}>Remove file</button>}
           <button type="button" className="rfq-primary ml-auto" disabled={loading || (!file && !text.trim())} onClick={() => void stage()}>{loading ? <><LoaderCircle size={15} className="animate-spin" aria-hidden="true" />Reading source…</> : file ? <><Send size={14} aria-hidden="true" />Review file changes</> : <><Sparkles size={14} aria-hidden="true" />Ask GPT-6 Luna</>}</button>
         </div>
-        <p className="mt-2 text-[12px] text-[#667980]">Supported files: text/email, CSV, Excel, and readable PDF. The original source is retained locally. If GPT-6 Luna is not configured, note proposals cannot be processed. AI output is only a proposal; accepting it is a separate action that updates the catalog.</p>
+        <p className="mt-2 text-[12px] text-[#667980]">Supported files: text/email, CSV, Excel, and readable PDF. The original source is retained locally. Free-form notes use GPT-6 Luna; structured sheets are read deterministically. Model output is a proposal, not a database change.</p>
       </section>
 
       {error && <div className="mt-5 max-w-[1000px] rounded-md border border-[#f0c7c1] bg-[#fff7f5] px-4 py-3 text-[13px] text-[#84241f]" role="alert">{error}</div>}
@@ -215,15 +230,22 @@ export function CatalogUpdatesView({ initialItem, onInitialItemHandled }: { init
 
       <section className="mt-8 max-w-[1000px]" aria-labelledby="pending-heading">
         <div className="flex items-baseline justify-between gap-3 border-b border-[#dfe7e9] pb-2"><h2 id="pending-heading" className="rfq-section-title">Changes to review</h2><span className="rfq-mono text-[12px] text-[#52656b]">{pending.length} pending</span></div>
-        {pending.length === 0 ? <p className="py-5 text-[13px] text-[#52656b]">No distributor changes are waiting for a decision.</p> : pending.map((proposal) => <CatalogChange key={proposal.proposal_id} proposal={proposal} busy={busyId === proposal.proposal_id} onReview={review} onRevise={(id, revisionText) => void stage(id, revisionText)} />)}
+        {pending.length === 0 ? <p className="py-5 text-[13px] text-[#52656b]">No distributor changes are waiting for a decision.</p> : <>
+          <p className="py-3 text-[13px] text-[#52656b]">Mark each proposed record to accept or reject. Nothing changes in active distributor data until you finish this review.</p>
+          {pending.map((proposal) => <CatalogChange key={proposal.proposal_id} proposal={proposal} busy={busyId === "batch"} onReview={chooseDecision} selectedDecision={decisions[proposal.proposal_id]} onRevise={(id, revisionText) => void stage(id, revisionText)} />)}
+          <div className="sticky bottom-3 z-10 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#cbd6d9] bg-white/95 p-4 shadow-lg backdrop-blur">
+            <span className="text-[13px] text-[#35484e]">{Object.keys(decisions).length} of {pending.length} decisions marked</span>
+            <button type="button" className="rfq-primary" disabled={busyId === "batch" || pending.some((proposal) => !decisions[proposal.proposal_id])} onClick={() => void reviewDone()}>{busyId === "batch" ? <><LoaderCircle size={15} className="animate-spin" aria-hidden="true" />Saving review…</> : "Review done"}</button>
+          </div>
+        </>}
       </section>
 
       {unchanged.length > 0 && <details className="mt-6 max-w-[1000px]" aria-label="Rows that already match the catalog">
         <summary className="cursor-pointer border-b border-[#dfe7e9] pb-2 text-[13px] font-medium text-[#52656b]">{unchanged.length} {unchanged.length === 1 ? "row already matches" : "rows already match"} · no decision needed</summary>
-        {unchanged.map((proposal) => <CatalogChange key={proposal.proposal_id} proposal={proposal} busy={false} onReview={review} onRevise={(id, revisionText) => void stage(id, revisionText)} />)}
+        {unchanged.map((proposal) => <CatalogChange key={proposal.proposal_id} proposal={proposal} busy={false} onReview={chooseDecision} selectedDecision={decisions[proposal.proposal_id]} onRevise={(id, revisionText) => void stage(id, revisionText)} />)}
       </details>}
 
-      {history.length > 0 && <section className="mt-8 max-w-[1000px]" aria-labelledby="history-heading"><h2 id="history-heading" className="rfq-section-title border-b border-[#dfe7e9] pb-2">Decision history</h2>{history.map((proposal) => <CatalogChange key={proposal.proposal_id} proposal={proposal} busy={busyId === proposal.proposal_id} onReview={review} onRevise={(id, revisionText) => void stage(id, revisionText)} />)}</section>}
+      {history.length > 0 && <section className="mt-8 max-w-[1000px]" aria-labelledby="history-heading"><h2 id="history-heading" className="rfq-section-title border-b border-[#dfe7e9] pb-2">Decision history</h2>{history.map((proposal) => <CatalogChange key={proposal.proposal_id} proposal={proposal} busy={busyId === proposal.proposal_id} onReview={chooseDecision} selectedDecision={decisions[proposal.proposal_id]} onRevise={(id, revisionText) => void stage(id, revisionText)} />)}</section>}
     </div>
   );
 }

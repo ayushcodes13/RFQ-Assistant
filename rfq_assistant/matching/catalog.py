@@ -60,6 +60,43 @@ class CatalogRepository:
             self._replace_indexes(versioned)
             return version
 
+    def commit_reviewed_batch(
+        self,
+        accepted_items: List[CatalogItem],
+        proposals: List[dict],
+        expected_versions: dict[str, int],
+        expected_catalog_versions: dict[str, str | None],
+    ) -> List[CatalogItem]:
+        """Atomically publish accepted items and proposal decisions to durable state."""
+        with self._lock:
+            for sku, expected_version in expected_catalog_versions.items():
+                current = self._items_by_sku.get(sku)
+                if (current.catalog_version if current else None) != expected_version:
+                    raise ValueError(
+                        "The active catalog changed after these proposals were prepared. Re-upload the source to compare it again."
+                    )
+            by_sku = dict(self._items_by_sku)
+            for item in accepted_items:
+                by_sku[item.internal_sku] = item
+            has_acceptance = bool(accepted_items)
+            if has_acceptance:
+                canonical = [value.model_dump(mode="json", exclude={"catalog_version"}) for _, value in sorted(by_sku.items())]
+                version = "sha256:" + hashlib.sha256(json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+                versioned = [value.model_copy(update={"catalog_version": version}) for _, value in sorted(by_sku.items())]
+            else:
+                versioned = list(by_sku.values())
+            versioned_by_sku = {item.internal_sku: item for item in versioned}
+            for proposal in proposals:
+                if proposal.get("review_status") == "accepted":
+                    current_item = proposal.get("current_item")
+                    sku_value = current_item.get("internal_sku") if isinstance(current_item, dict) else None
+                    if isinstance(sku_value, str) and sku_value in versioned_by_sku:
+                        proposal["current_item"] = versioned_by_sku[sku_value].model_dump(mode="json")
+            if self.state_store:
+                self.state_store.commit_catalog_update_batch(versioned, proposals, expected_versions)
+            self._replace_indexes(versioned)
+            return versioned
+
     def add_item(self, item: CatalogItem):
         with self._lock:
             self._items_by_sku[item.internal_sku] = item

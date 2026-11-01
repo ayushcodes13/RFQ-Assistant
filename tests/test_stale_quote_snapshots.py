@@ -52,7 +52,7 @@ def create_approved_source(manager):
 
 
 def create_draft(client, case):
-    response = client.post(f"/v1/rfqs/{case.case_id}/draft-quote")
+    response = client.post(f"/v1/rfqs/{case.case_id}/draft-quote", params={"currency": "USD"})
     assert response.status_code == 200, response.text
     return response.json()
 

@@ -68,7 +68,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/catalogs/updates/{proposal_id}/accept": {
+    "/api/catalogs/updates/review": {
         parameters: {
             query?: never;
             header?: never;
@@ -78,30 +78,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Accept Catalog Update
-         * @description Apply one complete, grounded proposal and invalidate stale RFQ matches.
+         * Review Catalog Updates
+         * @description Commit all staged decisions and active catalog updates atomically.
          */
-        post: operations["accept_catalog_update_api_catalogs_updates__proposal_id__accept_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/catalogs/updates/{proposal_id}/reject": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reject Catalog Update
-         * @description Record rejection while leaving active distributor records untouched.
-         */
-        post: operations["reject_catalog_update_api_catalogs_updates__proposal_id__reject_post"];
+        post: operations["review_catalog_updates_api_catalogs_updates_review_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -284,7 +264,11 @@ export interface paths {
         /** Get Rfq Lines */
         get: operations["get_rfq_lines_api_rfqs__case_id__lines_get"];
         put?: never;
-        post?: never;
+        /**
+         * Add Manual Rfq Line
+         * @description Let an operator recover a source item extraction could not turn into a row.
+         */
+        post: operations["add_manual_rfq_line_api_rfqs__case_id__lines_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -661,7 +645,7 @@ export interface components {
          * AuditAction
          * @enum {string}
          */
-        AuditAction: "CASE_CREATED" | "PARSED" | "LINE_EDITED" | "LINE_APPROVED" | "LINE_REJECTED" | "LINE_FLAGGED" | "CATALOG_IMPORTED" | "CATALOG_REMATCHED" | "EXPORTED";
+        AuditAction: "CASE_CREATED" | "PARSED" | "LINE_EDITED" | "LINE_ADDED_MANUALLY" | "LINE_APPROVED" | "LINE_REJECTED" | "LINE_FLAGGED" | "CATALOG_IMPORTED" | "CATALOG_REMATCHED" | "EXPORTED";
         /**
          * AuditEvent
          * @description Immutable audit entry for traceability.
@@ -788,6 +772,13 @@ export interface components {
          * @enum {string}
          */
         CaseStatus: "NEW" | "PROCESSING" | "NEEDS_REVIEW" | "READY_TO_EXPORT" | "EXPORTED" | "FAILED";
+        /** CatalogBatchReviewRequest */
+        CatalogBatchReviewRequest: {
+            /** Decisions */
+            decisions: components["schemas"]["CatalogUpdateDecision"][];
+            /** Note */
+            note?: string | null;
+        };
         /**
          * CatalogItem
          * @description An approved record from the distributor's item master.
@@ -812,6 +803,18 @@ export interface components {
             manufacturer_part_number: string;
             /** Stock Qty */
             stock_qty?: number | null;
+        };
+        /** CatalogUpdateDecision */
+        CatalogUpdateDecision: {
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "accept" | "reject";
+            /** Expected Version */
+            expected_version: number;
+            /** Proposal Id */
+            proposal_id: string;
         };
         /**
          * CatalogUpdateProposal
@@ -877,14 +880,6 @@ export interface components {
              * @default 1
              */
             version: number;
-        };
-        /**
-         * CatalogUpdateReviewRequest
-         * @description Optional reviewer note for an explicit proposal decision.
-         */
-        CatalogUpdateReviewRequest: {
-            /** Note */
-            note?: string | null;
         };
         /**
          * ExportDocumentSummary
@@ -1064,6 +1059,29 @@ export interface components {
              * @constant
              */
             status: "healthy";
+        };
+        /**
+         * ManualRFQLineCreateRequest
+         * @description Reviewer-entered line for recovering an item the parser could not resolve.
+         */
+        ManualRFQLineCreateRequest: {
+            /** Description */
+            description?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Quantity */
+            quantity?: number | null;
+            /** Requested Manufacturer */
+            requested_manufacturer?: string | null;
+            /** Requested Mpn */
+            requested_mpn?: string | null;
+            /** Source Text */
+            source_text: string;
+            /**
+             * Unit
+             * @default EA
+             */
+            unit: string | null;
         };
         /**
          * MatchCandidate
@@ -1798,21 +1816,19 @@ export interface operations {
             };
         };
     };
-    accept_catalog_update_api_catalogs_updates__proposal_id__accept_post: {
+    review_catalog_updates_api_catalogs_updates_review_post: {
         parameters: {
             query?: never;
             header?: {
                 "X-API-Key"?: string | null;
                 authorization?: string | null;
             };
-            path: {
-                proposal_id: string;
-            };
+            path?: never;
             cookie?: never;
         };
-        requestBody?: {
+        requestBody: {
             content: {
-                "application/json": components["schemas"]["CatalogUpdateReviewRequest"];
+                "application/json": components["schemas"]["CatalogBatchReviewRequest"];
             };
         };
         responses: {
@@ -1822,45 +1838,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CatalogUpdateProposal"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    reject_catalog_update_api_catalogs_updates__proposal_id__reject_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-API-Key"?: string | null;
-                authorization?: string | null;
-            };
-            path: {
-                proposal_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["CatalogUpdateReviewRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogUpdateProposal"];
+                    "application/json": components["schemas"]["CatalogUpdateProposal"][];
                 };
             };
             /** @description Validation Error */
@@ -2260,6 +2238,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RFQLineItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_manual_rfq_line_api_rfqs__case_id__lines_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-API-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualRFQLineCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RFQLineItem"];
                 };
             };
             /** @description Validation Error */
@@ -2830,7 +2846,7 @@ export interface operations {
     v1_draft_quote_v1_rfqs__case_id__draft_quote_post: {
         parameters: {
             query?: {
-                currency?: string;
+                currency?: string | null;
             };
             header?: {
                 "X-API-Key"?: string | null;

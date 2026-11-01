@@ -75,11 +75,12 @@ class ParsedDocumentResult(BaseModel):
         nonempty = sum(unit.nonempty_regions for unit in self.source_coverage)
         filtered = sum(unit.filtered_regions for unit in self.source_coverage)
 
-        if structured != len(self.lines):
-            raise ValueError(
-                "Source coverage mismatch: "
-                f"{structured} structured regions for {len(self.lines)} parsed lines"
-            )
+        # A source region and an extracted line are different units. A single
+        # email paragraph or PDF page may contain several request lines, and a
+        # model can split those lines while preserving the original region
+        # accounting. Structured row parsers still normally produce one line
+        # per structured region, but coverage must not force that assumption
+        # onto unstructured sources.
         if review != len(self.candidate_segments):
             raise ValueError(
                 "Source coverage mismatch: "

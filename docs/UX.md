@@ -26,13 +26,13 @@
 - The initial screen answers: **which RFQs need a person now?**
 - Summary values and status bars come directly from saved cases and unresolved-line counts. Do not show sales, revenue, price, availability, lead-time or accuracy figures unless their source is authorized and current.
 - Show a short actionable attention queue and a breakdown by actual workflow state. Link to the full RFQ inbox for search and filtering.
-- The persistent sidebar exposes Overview, RFQ inbox, Catalog, and Update data. Line review is a case-specific view, not a second global destination. The sidebar has an accessible desktop collapse control and a mobile menu; every icon-only control has a name and tooltip.
+- The persistent, collapsible sidebar exposes RFQ inbox, Catalog, and Update data. New RFQ is the primary action inside the inbox; line review is a case-specific workspace, not a second global destination. The sidebar has an accessible desktop collapse control and a mobile menu; every icon-only control has a name and tooltip.
 - The logo is a custom RFQ document/check mark; do not use emoji or a generic AI symbol.
 - A single primary action appears per screen: New RFQ, Export draft, or Import catalog, depending on context.
 
 ## Information architecture
 
-**Navigation:** Overview | RFQ inbox | Catalog | Update data. Exports are generated from a reviewed RFQ; they are not a separate global destination in this slice. Settings are outside the local prototype.
+**Navigation:** RFQ inbox | Catalog | Update data. These are the three work areas: buyer requests, the distributor's active item data, and proposed changes to that data. New RFQ starts the buyer request flow from the inbox. Exports are generated from a reviewed RFQ; they are not a separate global destination in this slice. Settings are outside the local prototype.
 
 **Top bar:** Current workspace and page context. Product identity and keyboard shortcuts live in the navigation; the local demo and storage notice stays visible in the sidebar.
 
@@ -62,6 +62,8 @@ Before upload, provide a clear notice about local storage and how third-party pr
 
 Pasted email and attachments can be submitted together as one parent RFQ. List each chosen attachment before submission, show per-source status and line count in the Documents area, and provide an individual original-source link. A failed source gets its own retry action and error code; successful attachment results remain in the consolidated review. Duplicate, quantity, manufacturer, revision, and possible part-number conflicts remain visible review tasks. Never imply that distinct part numbers are interchangeable.
 
+If extraction fails or leaves an item unrepresented, keep the original source and expose **Add line manually** in the case workspace. The reviewer enters the source wording and any known manufacturer, MPN, description, quantity, and unit. Mark those values as human-entered and unverified, show no fabricated document citation, run the same exact catalog match and stock blockers, and require individual approval. The source accounting labels count source regions, not product rows; explain that one prose region may produce multiple candidate rows. Hide the sample filter when the server review plan contains no sample rows.
+
 ### Screen 3 — Review workbench (core product)
 
     +---------------------------------------------------------------------+
@@ -85,8 +87,8 @@ Pasted email and attachments can be submitted together as one parent RFQ. List e
 **Review behavior:** Clicking a grid row scrolls source to its exact page/sheet/line; clicking source locators focuses the row. Edits are staged and audited. Bulk approve may be offered only for deterministic exact matches after the reviewer explicitly checks the visible set. Missing quantity/manufacturer and all substitution candidates must not be silently bulk approved.
 
 - Keep a Documents area visible in the workbench. List the original request and every generated draft worksheet, with a way to open/download each. Show extraction warnings and missing generated files beside the list. Refresh after a draft export completes.
-- Make quote preparation an explicit operator action in the case workbench. Show each requested line, catalog price if present, exact-match/review state, blockers, deterministic totals, and buyer/catalog source references. Open document evidence in a right-side drawer with excerpt and source location; link to the original document when available. For pasted text, show its origin without a citation drawer. Never label a prepared quote approved or sent.
-- If a requested quantity exceeds the matched catalog row's recorded stock quantity, state both quantities beside the line and require the operator to resolve availability before a validated export. Treat catalog stock as a recorded figure, not live availability.
+- Make quote preparation an explicit operator action in the case workbench. Show each requested line, requested quantity, recorded catalog stock, catalog price if present, exact-match/review state, blockers, deterministic totals, and buyer/catalog source references. Open document evidence in a right-side drawer with excerpt and source location; link to the original document when available. For pasted text, show its origin without a citation drawer. Never label a prepared quote approved or sent.
+- If a requested quantity exceeds the matched catalog row's recorded stock quantity, state both quantities beside the line and again in quote preparation, and require the operator to resolve availability before quote approval or validated export. Treat catalog stock as a recorded figure, not live availability.
 
 ### Screen 4 — Export preview
 
@@ -101,7 +103,7 @@ Pasted email and attachments can be submitted together as one parent RFQ. List e
 - Show validation counts: valid, duplicates, collision, invalid, missing manufacturer.
 - Never automatically treat descriptions as equivalent when parts differ.
 - The catalog is one distributor's product data. Keep the manufacturer field per catalog item because a distributor may carry multiple manufacturers; do not add manufacturer administration/configuration screens.
-- Each item offers Edit and Ask AI. Manual edits and AI suggestions both create a source-backed proposal. The active catalog changes only after the user accepts the proposal in Update data.
+- Each item offers Edit and Ask AI. Manual edits and AI suggestions both create a source-backed proposal. The active catalog changes only after the user marks every pending proposal to accept or reject and clicks Review done.
 - If an uploaded catalog row is identical to active data, show it as informational “no change needed” evidence, not as a decision in the pending queue.
 
 ### Screen 6 — Update distributor data
