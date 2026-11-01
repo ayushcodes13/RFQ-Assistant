@@ -253,6 +253,15 @@ the processes started by this script with `./scripts/demo.sh stop`. Synthetic
 drag-and-drop examples are in `demo-data/` (email text, PDF, and XLSX). The
 catalog is preloaded from `fixtures/catalogs/` in a fresh demo database.
 
+### Legacy workbook security boundary
+
+For local synthetic work, legacy `.xls` may be converted with bounded
+LibreOffice. When `REQUIRE_AUTH` or `REQUIRE_ANTIVIRUS` is enabled, the
+application rejects `.xls` conversion: a timeout and reduced subprocess
+environment are not an OS/container sandbox. Ask the distributor to convert
+the workbook in its own isolated office environment and upload `.xlsx`.
+Supporting protected legacy conversion requires a separately isolated worker.
+
 ### Local intake protection
 
 The FastAPI process admits up to `RFQ_MAX_INTAKES_PER_MINUTE` (default 240)
