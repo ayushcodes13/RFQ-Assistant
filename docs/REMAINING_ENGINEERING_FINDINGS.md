@@ -17,7 +17,7 @@ This is a delivery ledger for the remaining production-engineering work. Passing
 
 | Priority | Finding | Current evidence | State |
 |---|---|---|---|
-| P0 | User identity and role attribution | PR #70: backend-issued identity, separate keys/roles, encrypted short-lived browser session; protected E2E covers viewer denial/admin write/logout/tamper | Implemented for one workspace; merged |
+| P0 | User identity and role attribution | PR #70: backend-issued identity, separate keys/roles, encrypted short-lived browser session; this follow-up binds each key/session to one workspace ID and rejects mixed-workspace configuration; protected E2E covers viewer denial/admin write/logout/tamper | Implemented for one workspace; identity binding does not scope persisted resources |
 | P0 | Tenant/workspace data isolation | Global tables and singleton service objects; no organization scope on cases, catalog, objects, jobs, exports, or audit | Open; do not claim multi-tenant readiness |
 | P0 | Multiple email attachments in one RFQ | One `source_file`, one intake upload field, one source digest/job | Open |
 | P0 | Production security and operations | Existing controls include role gates, upload limits/scanning, path defenses, formula escaping and case-scoped exports. Shared edge throttling, production storage/retention/deletion, conversion isolation, deployment headers/CSRF review and complete threat-driven access tests still need evidence | Partially implemented; adversarial review required |

@@ -5,10 +5,10 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 
 export const WORKSPACE_COOKIE = "rfq_workspace_session";
 const SESSION_SECONDS = 8 * 60 * 60;
-const COOKIE_VERSION = "v2";
+const COOKIE_VERSION = "v3";
 const VALID_ROLES = new Set(["admin", "reviewer", "viewer"]);
 
-export type WorkspaceUser = { user_id: string; name: string; role: string };
+export type WorkspaceUser = { user_id: string; name: string; role: string; workspace_id: string };
 export type WorkspaceSession = WorkspaceUser & { apiKey: string; expiresAt: number };
 
 function enabled(): boolean {
@@ -26,7 +26,7 @@ function sessionSecret(): string | null {
 
 function encryptionKey(secret: string): Buffer {
   return createHash("sha256")
-    .update("rfq-assistant-workspace-session-v2\0", "utf8")
+    .update("rfq-assistant-workspace-session-v3\0", "utf8")
     .update(secret, "utf8")
     .digest();
 }
@@ -40,7 +40,8 @@ export function workspaceAuthStatus(cookie?: string): "open" | "misconfigured" |
 export function createWorkspaceSession(apiKey: string, user: WorkspaceUser): string | null {
   const secret = sessionSecret();
   if (!secret || apiKey.length < 16 || apiKey.length > 1024) return null;
-  if (!user.user_id || user.user_id.length > 128 || !user.name || user.name.length > 128 || !VALID_ROLES.has(user.role)) return null;
+  if (!user.user_id || user.user_id.length > 128 || !user.name || user.name.length > 128 || !VALID_ROLES.has(user.role)
+    || !/^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$/.test(user.workspace_id)) return null;
 
   const expiresAt = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
   const session: WorkspaceSession = { ...user, apiKey, expiresAt };
@@ -94,6 +95,8 @@ function isWorkspaceSession(value: unknown): value is WorkspaceSession {
     && session.name.length <= 128
     && typeof session.role === "string"
     && VALID_ROLES.has(session.role)
+    && typeof session.workspace_id === "string"
+    && /^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$/.test(session.workspace_id)
     && Number.isSafeInteger(session.expiresAt);
 }
 

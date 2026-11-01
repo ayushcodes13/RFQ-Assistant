@@ -22,6 +22,7 @@ test("protected proxy preserves each user's identity and role", async ({ page })
     user_id: "demo-viewer",
     name: "Read-Only Auditor",
     role: "viewer",
+    workspace_id: process.env.RFQ_WORKSPACE_TEST_ID || "ws-default",
   });
   const cookie = (await page.context().cookies()).find((item) => item.name === "rfq_workspace_session");
   expect(cookie).toBeDefined();

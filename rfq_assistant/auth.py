@@ -24,6 +24,7 @@ class PilotUser:
     user_id: str
     name: str
     role: str  # "admin", "reviewer", "viewer"
+    workspace_id: str
 
 
 log = logging.getLogger(__name__)
@@ -60,37 +61,48 @@ def _parse_configured_keys(env_keys: str) -> Dict[str, PilotUser]:
     users: Dict[str, PilotUser] = {}
     user_ids = set()
     for entry in env_keys.split(","):
-        parts = [p.strip() for p in entry.strip().split(":", 3)]
-        if len(parts) not in {3, 4}:
+        parts = [p.strip() for p in entry.strip().split(":", 4)]
+        if len(parts) not in {3, 4, 5}:
             raise ValueError("Malformed PILOT_API_KEYS entry.")
         if len(parts) == 3:
             key, role, name = parts
             slug = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-")
             user_id = f"usr-{slug}"
-        else:
+            workspace_id = "ws-default"
+        elif len(parts) == 4:
             key, role, user_id, name = parts
+            workspace_id = "ws-default"
+        else:
+            key, role, user_id, workspace_id, name = parts
         if (
             len(key) < 16
             or not key.isascii()
             or role not in {"admin", "reviewer", "viewer"}
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,127}", user_id)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,62}", workspace_id)
             or not name
             or key in users
         ):
-            raise ValueError("Invalid PILOT_API_KEYS entry: use unique keys of at least 16 characters, a valid role, user ID, and name.")
+            raise ValueError("Invalid PILOT_API_KEYS entry: use unique keys of at least 16 characters, a valid role, user ID, workspace ID, and name.")
         if user_id in user_ids:
             raise ValueError("Invalid PILOT_API_KEYS entry: user IDs must be unique.")
         user_ids.add(user_id)
-        users[key] = PilotUser(user_id=user_id, name=name, role=role)
+        users[key] = PilotUser(
+            user_id=user_id, name=name, role=role, workspace_id=workspace_id
+        )
+    if len({user.workspace_id for user in users.values()}) > 1:
+        raise ValueError(
+            "This deployment supports one workspace only. Configure one isolated deployment and database per workspace."
+        )
     return users
 
 
 def load_configured_keys() -> Dict[str, PilotUser]:
     """Load configured pilot credentials from the cached startup environment.
 
-    PILOT_API_KEYS consists of comma-separated key:role:user_id:display_name entries.
-    The older key:role:display_name format remains accepted and derives a stable
-    user ID from the configured display name for single-workspace compatibility.
+    PILOT_API_KEYS consists of comma-separated key:role:user_id:workspace_id:display_name entries.
+    The older key:role:user_id:display_name and key:role:display_name formats
+    remain accepted and map to the one-workspace compatibility ID `ws-default`.
     An invalid configuration is rejected in full rather than being partially applied.
     """
     env_keys = os.environ.get("PILOT_API_KEYS", "").strip()
@@ -171,6 +183,7 @@ def get_current_user(
         user_id="usr-local-demo",
         name="Local Pilot Operator",
         role="admin",
+        workspace_id="ws-local-demo",
     )
 
 

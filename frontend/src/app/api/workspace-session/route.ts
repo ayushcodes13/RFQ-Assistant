@@ -51,7 +51,8 @@ function isWorkspaceUser(value: unknown): value is WorkspaceUser {
   const user = value as Partial<WorkspaceUser>;
   return typeof user.user_id === "string" && user.user_id.length > 0
     && typeof user.name === "string" && user.name.length > 0
-    && typeof user.role === "string" && ["admin", "reviewer", "viewer"].includes(user.role);
+    && typeof user.role === "string" && ["admin", "reviewer", "viewer"].includes(user.role)
+    && typeof user.workspace_id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$/.test(user.workspace_id);
 }
 
 export async function GET(request: NextRequest) {
@@ -62,7 +63,7 @@ export async function GET(request: NextRequest) {
   }
   const session = cookie ? readWorkspaceSession(cookie) : null;
   return NextResponse.json(
-    { authenticated: status === "open" || status === "authenticated", configured: status !== "open", user: session ? { user_id: session.user_id, name: session.name, role: session.role } : null },
+    { authenticated: status === "open" || status === "authenticated", configured: status !== "open", user: session ? { user_id: session.user_id, name: session.name, role: session.role, workspace_id: session.workspace_id } : null },
     { status: 200, headers: { "Cache-Control": "no-store" } },
   );
 }

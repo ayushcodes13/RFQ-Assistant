@@ -49,6 +49,50 @@ def test_configured_keys_are_parsed_once_for_the_startup_value(monkeypatch):
     assert after_requests.hits == startup_cache.hits + 2
 
 
+def test_workspace_identity_is_bound_to_each_configured_key(monkeypatch):
+    monkeypatch.setenv("REQUIRE_AUTH", "true")
+    monkeypatch.setenv(
+        "PILOT_API_KEYS",
+        "workspace-admin-secret-0001:admin:usr-admin:ws-north:North Admin,"
+        "workspace-reviewer-secret-0001:reviewer:usr-reviewer:ws-north:North Reviewer",
+    )
+
+    users = auth.load_configured_keys()
+
+    assert users["workspace-admin-secret-0001"].workspace_id == "ws-north"
+    assert users["workspace-reviewer-secret-0001"].workspace_id == "ws-north"
+    response = TestClient(app).get(
+        "/api/session", headers={"X-API-Key": "workspace-admin-secret-0001"}
+    )
+    assert response.json()["workspace_id"] == "ws-north"
+
+
+def test_legacy_key_formats_use_the_single_workspace_compatibility_id(monkeypatch):
+    monkeypatch.setenv(
+        "PILOT_API_KEYS", "legacy-key-secret-000001:admin:Legacy Operator"
+    )
+
+    user = next(iter(auth.load_configured_keys().values()))
+
+    assert user.workspace_id == "ws-default"
+
+
+def test_multiple_workspace_credentials_are_rejected_until_isolation_is_implemented(
+    monkeypatch,
+):
+    monkeypatch.setenv("REQUIRE_AUTH", "true")
+    monkeypatch.setenv(
+        "PILOT_API_KEYS",
+        "workspace-a-secret-000001:admin:usr-admin-a:ws-alpha:Alpha Admin,"
+        "workspace-b-secret-000001:admin:usr-admin-b:ws-bravo:Bravo Admin",
+    )
+
+    with pytest.raises(ValueError, match="supports one workspace only"):
+        auth.load_configured_keys()
+    response = TestClient(app).get("/api/rfqs")
+    assert response.status_code == 503
+
+
 def test_key_validation_uses_constant_time_comparison_for_every_key(
     monkeypatch,
 ):

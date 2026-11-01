@@ -307,18 +307,24 @@ and the backend has authentication enabled with individual operator keys:
 ```bash
 # Backend only
 REQUIRE_AUTH=true
-PILOT_API_KEYS='<random-key>:admin:usr-admin:Workspace Admin,<random-key>:reviewer:usr-reviewer:Sales Reviewer,<random-key>:viewer:usr-reader:Read Only'
+PILOT_API_KEYS='<random-key>:admin:usr-admin:ws-north:Workspace Admin,<random-key>:reviewer:usr-reviewer:ws-north:Sales Reviewer,<random-key>:viewer:usr-reader:ws-north:Read Only'
 
 # Next.js server only
 RFQ_ASSISTANT_API_URL=https://private-api.example
 RFQ_WORKSPACE_SESSION_SECRET=<an-independent-random-secret-at-least-32-characters>
 ```
 
+The five-part key format binds each operator to a deployment workspace. All
+configured keys must use the same workspace ID: the current database and API
+still support one workspace only, and startup rejects mixed-workspace keys.
+Older three- and four-part key entries remain supported and map to `ws-default`.
 Each operator enters their own API key at `/login`. The Next.js server validates
 the key against the backend, then stores it only inside an encrypted, eight-hour,
 HTTP-only, same-site cookie. Every proxied API request uses that operator's key,
 so backend role checks and audit attribution remain per user. In production,
-the cookie requires HTTPS. The login endpoint has a local ten-attempts-per-minute
+the cookie requires HTTPS. Workspace binding updates the encrypted session
+format; existing sessions are invalidated on upgrade and users sign in again.
+The login endpoint has a local ten-attempts-per-minute
 guard. Remove a key from backend configuration to revoke it; subsequent API
 requests fail authentication.
 

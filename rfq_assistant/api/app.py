@@ -255,6 +255,7 @@ def get_authenticated_session(current_user: PilotUser = Depends(get_current_user
         "user_id": current_user.user_id,
         "name": current_user.name,
         "role": current_user.role,
+        "workspace_id": current_user.workspace_id,
     }
 
 
@@ -267,7 +268,7 @@ async def import_catalog(
     file: UploadFile = File(...),
     current_user: PilotUser = Depends(require_role(["admin"])),
 ):
-    """Imports tenant-authorized catalog CSV (admin only)."""
+    """Imports this deployment's single-workspace catalog CSV (admin only)."""
     content = await file.read(MAX_CATALOG_UPLOAD_BYTES + 1)
     if len(content) > MAX_CATALOG_UPLOAD_BYTES:
         raise HTTPException(
