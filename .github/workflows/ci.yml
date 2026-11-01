@@ -180,11 +180,7 @@ jobs:
           pip install -e .[test]
 
       - name: Audit Python dependencies
-        # Report the current dependency inventory without making a known
-        # vulnerable transitive baseline a false-green/false-red release gate.
-        # Ratchet this to blocking after the dependency upgrade PR resolves it.
-        continue-on-error: true
-        run: pip-audit
+        run: pip-audit --skip-editable
 
       - name: Scan Python source
         run: bandit -r rfq_assistant -ll
