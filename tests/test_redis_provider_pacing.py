@@ -188,8 +188,10 @@ def test_initial_redis_outage_logs_even_before_first_minute(caplog):
             raise OSError("private-synthetic-redis-address")
 
     pacer = RedisSharedPacer(
-        BrokenRedis(), requests_per_minute=60,
-        clock=lambda: 1.0, sleeper=lambda _seconds: None,
+        BrokenRedis(),
+        requests_per_minute=60,
+        clock=lambda: 1.0,
+        sleeper=lambda _seconds: None,
     )
     with caplog.at_level("WARNING"):
         assert pacer.acquire(0.01) is False
