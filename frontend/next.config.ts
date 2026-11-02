@@ -8,6 +8,15 @@ const nextConfig: NextConfig = {
   // Next 16 blocks dev HMR/hydration from non-localhost origins; allow the
   // 127.0.0.1 spelling used by the API and Playwright when localhost is not.
   allowedDevOrigins: ["127.0.0.1"],
+  async rewrites() {
+    const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000";
+    return [
+      {
+        source: "/api/proxy/:path*",
+        destination: `${apiBase}/:path*`,
+      },
+    ];
+  },
   async headers() {
     return [
       {
