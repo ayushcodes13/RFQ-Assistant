@@ -174,19 +174,49 @@ Small independent US/UK industrial electrical, automation, or electronic compone
 - [x] Catalog matching and review UI working locally *(Phase 3 & 4 complete in PR #4 & #6)*
 - [x] Tested quotation worksheet and export *(Phase 5 complete in PR #5)*
 - [x] Independent realistic end-to-end demo *(All 7 scenarios verified in PR #7)*
-- [ ] One opt-in customer pilot with measured baseline *(Phase 6 pilot readiness)*
+- [x] Live-workflow realization implemented *(Async SQLite ingestion worker, per-user workspace auth, ASGI rate limiting, staged catalog updates, grounded quote-evidence quoting, durable quote approvals)*
+- [ ] One opt-in customer pilot with measured baseline *(Phase 7 pilot readiness)*
 
 ### Current synthetic verification
 
-Latest local run on Python 3.12 and Node.js: **468 backend tests passed**; the
-synthetic 20-line scorecard detected all 20 lines and passed 80/80 critical
-field checks plus 20/20 exact catalog checks; the 30-document corpus passed
-all 180 critical field checks across CSV, PDF, text, and XLSX; the 128-request
-concurrency check created 128 unique cases; and all 12 Playwright workflows
-passed. Frontend lint, generated API type check, production build, and backend
-Ruff syntax checks passed. The backend suite emitted deprecation warnings from
-dependencies and existing `datetime.utcnow()` calls. These are local synthetic
-checks, not customer accuracy, production reliability, or performance claims.
+Local run on Python 3.11 and Node 20: **582 backend tests passed, 5 skipped, 0 failed**
+`.venv311/bin/python -m pytest -q` (clean gitignored `storage/`). Focused slices:
+
+- `tests/test_exports.py` → 14 passed
+- `tests/test_catalog_update_proposals.py` → 8 passed
+- `tests/test_quote_review_persistence.py` → 6 passed
+- `tests/test_quote_update_price_evidence.py` → 3 passed
+- `tests/test_quote_proposal.py` → 2 passed
+- `tests/test_persistence*.py` → boundary covered by the totals above
+- `tests/test_ingestion_worker.py` → 1 passed
+- `tests/test_auth_and_concurrency_adversarial.py` → 6 passed (RBAC, export isolation, actor spoofing, stale-version 409, real-transport blocking)
+- `tests/test_ingestion_and_parsers.py` → 26 passed
+- `tests/test_ingestion_security_adversarial.py` → 34 passed
+- `tests/test_review_integrity_adversarial.py` → 29 passed
+- `tests/test_schemas_and_fixtures.py` → 12 passed
+- `tests/test_stale_quote_snapshots.py` → 6 passed
+- `tests/test_matching_and_audit.py` → 13 passed
+- `tests/test_multi_source_ingestion.py` → 12 passed
+- `tests/test_original_source_access.py` → 9 passed
+- `tests/test_storage_path_safety.py` → 5 passed
+- `tests/test_source_quantity_conflicts.py` → 6 passed
+- `tests/test_catalog_import_integrity.py` → 7 passed
+- `tests/test_intake_completeness.py` → 11 passed
+- `tests/test_customer_clarification_integrity.py` → 6 passed
+- `tests/test_export_blockers_adversarial.py` → 16 passed
+- `tests/test_oss_stack_and_ai_pipeline.py` → 6 passed
+
+Running the synthetic API corpus from the repo root:
+
+```bash
+.venv311/bin/python -m scripts.run_synthetic_e2e_corpus
+```
+
+The 30-document corpus passed **30/30 flows** and **180/180 critical-field checks**;
+128/128 concurrent intake requests returned unique case IDs. The synthetic demo formula
+scorecard passed **80/80 critical-field checks** plus **20/20 exact-catalog checks**.
+These are local synthetic engineering results, not customer accuracy, production reliability,
+or performance claims.
 
 ## Running locally
 

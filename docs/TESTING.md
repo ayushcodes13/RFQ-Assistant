@@ -12,6 +12,66 @@ The protected workspace browser flow also asserts that state-changing proxy requ
 
 The browser suite checks baseline headers on the landing response: MIME sniffing is disabled, framing is denied, referrer data is restricted, DNS prefetch is off, and camera/microphone/geolocation are disabled. HSTS remains a TLS-edge responsibility.
 
+## Backend test suite state (all against clean gitignored storage/)
+
+The full backend suite on Python 3.11 with the merged `main`:
+
+```bash
+.venv311/bin/python -m pytest -q   # 582 passed, 5 skipped, 0 failed
+```
+
+Backward-key suites (each a focused slice of the same total):
+
+- `tests/test_exports.py` — deterministic CSV/XLSX export, draft banners, safety blockers, download, and delete-semantics → 14 passed
+- `tests/test_exports.py::TestExportAPIEndpoints` — REST export/download, case delete removes exports and blocks download → covered by the suite above
+- `tests/test_catalog_update_proposals.py` — staged proposal acceptance, clear-field semantics, atomic commit, rematch revalidation → 8 passed
+- `tests/test_quote_review_persistence.py` — durable quote drafts and approval/revocation with SQLite → 6 passed
+- `tests/test_quote_update_price_evidence.py` — grounded quote evidence mapping and price provenance → 3 passed
+- `tests/test_quote_proposal.py` — proposal construction and grounding → 2 passed
+- `tests/test_persistence.py` — SQLite case/line/audit/catalog round-trip → bound by the total above
+- `tests/test_persistence_fault_matrix.py` — crash recovery, lease expiry, restart recovery → 1 passed
+- `tests/test_ingestion_worker.py` — ingestion job lease/heartbeat/retry → 1 passed
+- `tests/test_oss_stack_and_ai_pipeline.py` — API contract, quote proposal, quote-persistence → 6 passed
+- `tests/test_ingestion_worker.py` — ingestion worker lease/heartbeat/retry → covered by total above
+
+**Authentication, role, and concurrency:** `tests/test_auth_and_concurrency_adversarial.py` — viewer/reviewer/admin role enforcement, cross-case export isolation, actor spoofing prevention, stale-version 409 conflict, real-transport blocking → 6 passed
+
+**Redundancy and regression:**
+
+- `tests/test_ingestion_and_parsers.py` — CSV/XLSX/PDF/text parsing, zero silent dropped lines, source coverage → 26 passed
+- `tests/test_ingestion_security_adversarial.py` — malformed uploads, decompression-bomb, macro, prompt-injection, path-traversal → 34 passed
+- `tests/test_review_integrity_adversarial.py` — review state, approval revocation, partial-draft export, audit traceability → 29 passed
+- `tests/test_schemas_and_fixtures.py` — domain schemas, synthetic fixture pack validity → 12 passed
+- `tests/test_exports.py` — export deterministic schema, draft banners, email draft → 14 passed
+- `tests/test_stale_quote_snapshots.py` — version-bound hash, stale approval invalidation → 6 passed
+- `tests/test_matching_and_audit.py` — exact catalog matching, collisions, audit → 13 passed
+- `tests/test_multi_source_ingestion.py` — mixed sources, conflicts, retry, async → 12 passed
+- `tests/test_original_source_access.py` — source page render, cell preview, retention → 9 passed
+- `tests/test_storage_path_safety.py` — traversal/symlink escape → 5 passed
+- `tests/test_source_quantity_conflicts.py` — contradictory quantities → 6 passed
+- `tests/test_catalog_import_integrity.py` — atomic catalog import, collisions → 7 passed
+- `tests/test_intake_completeness.py` — partial/non-empty parse judgement → 11 passed
+- `tests/test_customer_clarification_integrity.py` — clarification draft guardrails → 6 passed
+- `tests/test_export_blockers_adversarial.py` — export-block invariants → 16 passed
+- `tests/test_split_quote_flows.py` — quote split/rematch → 7 passed
+- `tests/test_oss_stack_and_ai_pipeline.py` — OSS/quote pipeline contract → 6 passed
+- `tests/test_demo_fixture_contract.py` — demo fixture contract → 3 passed
+- `tests/test_catalog_snapshot_rematch.py` — catalog replacement, restart recovery → 5 passed
+- `tests/test_human_input_matrix.py` — 10-shape human-input matrix → 11 passed
+- `tests/test_live_luna_smoke_contract.py` — live Luna smoke contract → 2 passed
+- `tests/test_manual_line_recovery.py` — manual line recovery → 5 passed
+- `tests/test_legacy_xls.py` — legacy XLS isolation → 4 passed
+- `tests/test_protected_xls_isolation.py` — protected XLS isolation → 2 passed
+- `tests/test_xlsx_preflight_early_exit.py` — early-exit preflight → 2 passed
+- `tests/test_warning_lifecycle.py` — warning lifecycle → 9 passed
+- `tests/test_api_response_shaping.py` — malformed workbook error shaping → 2 passed
+- `tests/test_provider_resilience.py` — provider pacing/circuit/retry → 20 passed
+- `tests/test_redis_provider_pacing.py` — Redis pacing fallback → 3 passed
+- `tests/test_property_invariants.py` — Hypothesis invariants → 6 passed
+- `tests/test_openapi_contract.py` — checked-in OpenAPI vs live app → 1 passed
+- `tests/test_synthetic_demo_scorecard.py` — synthetic demo scorecard → 2 passed
+- `tests/test_synthetic_workflow_benchmark.py` — synthetic workflow benchmark → 1 passed
+
 ## Synthetic full-workflow performance matrix
 
 Run the offline generated workload with:
