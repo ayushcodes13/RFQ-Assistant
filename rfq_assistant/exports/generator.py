@@ -143,6 +143,8 @@ class ExportGenerator:
                     raise OSError("An export directory escaped the configured export root.")
                 manifest_path = export_dir / "manifest.json"
                 if manifest_path.is_symlink() or not manifest_path.is_file():
+                    # Fail closed: an export directory whose ownership cannot
+                    # be verified must never be silently skipped during deletion.
                     raise OSError("An export ownership manifest is missing or unsafe.")
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
