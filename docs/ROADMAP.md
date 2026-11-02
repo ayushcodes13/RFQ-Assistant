@@ -65,10 +65,22 @@
 
 **Exit:** Full workflow operates on synthetic sample RFQs without unsafe claims. (Verified via pytest suite in tests/test_exports.py)
 
-## Phase 6 — Pilot readiness (not required for initial demo)
+## Phase 6 — Live-workflow realization (implemented, not yet in pilot scope)
+
+- [x] Durable asynchronous ingestion with SQLite job queue (leases, heartbeats, bounded retries, startup reconciliation). *(Implemented in rfq_assistant/cases/manager.py, rfq_assistant/persistence.py, rfq_assistant/ingestion/worker.py)*
+- [x] Per-user single-workspace authentication with encrypted session cookies and per-operator API keys. *(Implemented in rfq_assistant/auth.py; API returns the authenticated identity without the credential)*
+- [x] Ingestion rate limiting at the ASGI level before the multipart parser. *(Implemented in rfq_assistant/api/intake_limit.py, rfq_assistant/api/body_limit.py)*
+- [x] Staged distributor catalog updates: proposals persisted separately from active data; explicit human accept/reject with one-transaction atomic commit. *(Implemented in rfq_assistant/knowledge/catalog_updates.py)*
+- [x] Second-stage grounded quote-evidence mapper and deterministic total recalculation. *(Implemented in rfq_assistant/quotation/proposal.py, rfq_assistant/quotation/validate.py, rfq_assistant/agents/tools.py)*
+- [x] Durable quote draft approval/approval-revocation state stored in SQLite. *(Implemented in rfq_assistant/persistence.py, rfq_assistant/agents/tools.py)*
+- [x] PDF page render preview, spreadsheet cell preview, and source-retention endpoints. *(Implemented in rfq_assistant/api/app.py)*
+- [x] Local prototype still single-host: no tenant-scoped database, shared queue, or multi-tenant production deployment. *(Documented in docs/ARCHITECTURE.md security & scaling policy)*
+
+**Exit:** Operator verifies staged catalog updates and draft quote preparation on synthetic data end to end; nothing in pilot scope is automatic, and no live model call is claimed by the prototype UI.
+
+## Phase 7 — Pilot readiness (not required for initial demo)
 
 - [ ] Obtain consent and review data retention, processors, deletion and permissions.
-- [x] Isolate customer files and users with authentication. *(Implemented pilot API key & RBAC in rfq_assistant/auth.py, cross-case export boundary isolation, and optimistic concurrency in rfq_assistant/cases/manager.py)*
 - [ ] Benchmark on historical RFQs with human-reviewed ground truth.
 - [ ] Measure end-to-end reviewer time against manual baseline.
 - [ ] Agree paid pilot success criteria, refund conditions only if feasible and documented.
