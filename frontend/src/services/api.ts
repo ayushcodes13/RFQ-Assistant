@@ -16,7 +16,15 @@ import {
   SpreadsheetSourcePreview,
 } from "@/types";
 
-const API_BASE = "/api/proxy";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "";
+const USE_PROXY = !API_BASE; // If no explicit base, use Next.js rewrite proxy
+
+function buildUrl(path: string): string {
+  if (USE_PROXY) {
+    return `/api/proxy${path}`;
+  }
+  return `${API_BASE}${path}`;
+}
 
 async function readError(res: Response, fallback: string): Promise<string> {
   const body = await res.json().catch(() => null);
@@ -28,7 +36,7 @@ async function readError(res: Response, fallback: string): Promise<string> {
 }
 
 async function getJson<T>(path: string, fallback: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(buildUrl(path), {
     headers: {},
     cache: "no-store",
   });
@@ -42,7 +50,7 @@ async function sendJson<T>(
   body: unknown,
   fallback: string
 ): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(buildUrl(path), {
     method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -182,7 +190,7 @@ export async function createCaseFromUpload(
   if (title) formData.append("title", title);
   if (customer) formData.append("customer_label", customer);
 
-  const res = await fetch(`${API_BASE}/api/rfqs`, {
+  const res = await fetch(buildUrl("/api/rfqs"), {
     method: "POST",
     headers: {},
     body: formData,
@@ -201,7 +209,7 @@ export async function createCaseFromText(
   if (title) formData.append("title", title);
   if (customer) formData.append("customer_label", customer);
 
-  const res = await fetch(`${API_BASE}/api/rfqs`, {
+  const res = await fetch(buildUrl("/api/rfqs"), {
     method: "POST",
     headers: {},
     body: formData,
@@ -221,13 +229,13 @@ export async function createCaseFromSources(
   if (pastedText.trim()) formData.append("pasted_text", pastedText);
   if (title) formData.append("title", title);
   if (customer) formData.append("customer_label", customer);
-  const res = await fetch(`${API_BASE}/api/rfqs`, { method: "POST", body: formData });
+  const res = await fetch(buildUrl("/api/rfqs"), { method: "POST", body: formData });
   if (!res.ok) throw new Error(await readError(res, "RFQ intake failed"));
   return res.json();
 }
 
 export async function retrySourceDocument(caseId: string, sourceFileId: string): Promise<RFQCase> {
-  const res = await fetch(`${API_BASE}/api/rfqs/${encodeURIComponent(caseId)}/sources/${encodeURIComponent(sourceFileId)}/retry`, { method: "POST" });
+  const res = await fetch(buildUrl(`/api/rfqs/${encodeURIComponent(caseId)}/sources/${encodeURIComponent(sourceFileId)}/retry`), { method: "POST" });
   if (!res.ok) throw new Error(await readError(res, "Attachment retry failed"));
   return res.json();
 }
@@ -240,7 +248,7 @@ export async function getAuditTrail(caseId: string): Promise<AuditEvent[]> {
 }
 
 export async function deleteCase(caseId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/rfqs/${caseId}`, {
+  const res = await fetch(buildUrl(`/api/rfqs/${caseId}`), {
     method: "DELETE",
     headers: {},
   });
@@ -261,7 +269,7 @@ export async function stageCatalogUpdate(input: { text?: string; file?: File; re
   if (input.file) formData.append("file", input.file);
   if (input.revisionOf) formData.append("revision_of", input.revisionOf);
   if (input.clearFields?.length) formData.append("clear_fields", input.clearFields.join(","));
-  const res = await fetch(`${API_BASE}/api/catalogs/updates`, { method: "POST", body: formData });
+  const res = await fetch(buildUrl("/api/catalogs/updates"), { method: "POST", body: formData });
   if (!res.ok) throw new Error(await readError(res, "Distributor data could not be processed"));
   return res.json();
 }
@@ -278,7 +286,7 @@ export async function reviewCatalogUpdates(decisions: { proposal_id: string; exp
 export async function importCatalogCSV(file: File): Promise<CatalogImportResponse> {
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch(`${API_BASE}/api/catalogs/import`, {
+  const res = await fetch(buildUrl("/api/catalogs/import"), {
     method: "POST",
     headers: {},
     body: formData,
@@ -315,9 +323,17 @@ export async function getEmailDraft(caseId: string): Promise<{ draft: string }> 
 export function resolveDownloadUrl(downloadUrl: string): string {
   if (/^https?:\/\//i.test(downloadUrl)) return downloadUrl;
   if (/^https?:\/\//i.test(downloadUrl)) return downloadUrl;
+  // When using proxy, the download_url is already relative to the proxy
+  // When using direct API, we need to prepend the API base
+  if (USE_PROXY) {
+    return `/api/proxy${downloadUrl.startsWith("/") ? "" : "/"}${downloadUrl}`;
+  }
   return `${API_BASE}${downloadUrl.startsWith("/") ? "" : "/"}${downloadUrl}`;
 }
 
 export function getExportDownloadUrl(caseId: string, exportId: string): string {
+  if (USE_PROXY) {
+    return `/api/proxy/api/rfqs/${caseId}/exports/${exportId}`;
+  }
   return `${API_BASE}/api/rfqs/${caseId}/exports/${exportId}`;
 }
